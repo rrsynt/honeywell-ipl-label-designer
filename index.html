@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Honeywell IPL Label Designer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <script>
+      // Polyfill for Safari & older browsers that don't support structuredClone
+      if (!window.structuredClone) {
+        window.structuredClone = (val) => JSON.parse(JSON.stringify(val));
+      }
+      // Polyfill for roundRect
+      if (CanvasRenderingContext2D.prototype.roundRect === undefined) {
+        CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, radii) {
+          if (!radii) { radii = 0; }
+          let r;
+          if (typeof radii === 'number') { r = [radii, radii, radii, radii]; } 
+          else if (Array.isArray(radii)) { r = radii; } 
+          else { return; }
+          this.beginPath();
+          this.moveTo(x + r[0], y);
+          this.lineTo(x + w - r[1], y);
+          this.quadraticCurveTo(x + w, y, x + w, y + r[1]);
+          this.lineTo(x + w, y + h - r[2]);
+          this.quadraticCurveTo(x + w, y + h, x + w - r[2], y + h);
+          this.lineTo(x + r[3], y + h);
+          this.quadraticCurveTo(x, y + h, x, y + h - r[3]);
+          this.lineTo(x, y + r[0]);
+          this.quadraticCurveTo(x, y, x + r[0], y);
+          this.closePath();
+        }
+      }
+    </script>
+    <style>
+      /* Vendored label fonts (public/fonts): the designer preview and the IPL
+         viewer measure text with these exact faces, so on-screen widths match
+         the headless golden renders on any OS (audit batch 6). Liberation is
+         metric-compatible with Courier New / Arial / Times New Roman. */
+      @font-face { font-family: 'Liberation Mono'; src: url('/fonts/LiberationMono-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }
+      @font-face { font-family: 'Liberation Mono'; src: url('/fonts/LiberationMono-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; }
+      @font-face { font-family: 'Liberation Sans'; src: url('/fonts/LiberationSans-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }
+      @font-face { font-family: 'Liberation Sans'; src: url('/fonts/LiberationSans-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; }
+      @font-face { font-family: 'Liberation Serif'; src: url('/fonts/LiberationSerif-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }
+      @font-face { font-family: 'Liberation Serif'; src: url('/fonts/LiberationSerif-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; }
+
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+      /* Custom scrollbar */
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: #1f2937; }
+      ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+      
+      .workspace-bg {
+        --bg-color: #111827; /* gray-900 */
+        --grid-color: rgba(255, 255, 255, 0.05);
+        --grid-size: 25px;
+        background-color: var(--bg-color);
+        background-image:
+          linear-gradient(var(--grid-color) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+        /* The background-size will be controlled by JavaScript for zoom */
+      }
+    </style>
+</head>
+  <body class="bg-gray-900 text-gray-200 overflow-hidden">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,5 @@
+{
+  "name": "Honeywell IPL Label Designer",
+  "description": "A professional, interactive web application to visually design barcode labels and generate accurate Intermec Printer Language (IPL) code. Features a full design layout with top bar, side panels, and a zoomable/pannable workspace. Supports saving/loading designs, undo/redo, and clipboard actions.",
+  "requestFramePermissions": []
+}

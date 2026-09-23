@@ -1,0 +1,2 @@
+<STX><ESC>P;E1;F1;H1;o100,100;f0;c25;k12;d3,Hello World!;B2;o100,200;f0;c6;h80;w2;i1;d3,12345678;R<ETX>
+<STX><ESC>E1<CAN><ETB><FF><ETX>

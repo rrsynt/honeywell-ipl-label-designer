@@ -1,0 +1,234 @@
+import type { Field, Design, TextField, BarcodeField, LineField, BoxField } from '../types';
+import { FONT_MAP, FONT_FAMILIES, POINTS_TO_MM, DPI_MAP, bitmapTextWidthDots } from '../constants';
+import { measureBarcode, isBarcodeEngineReady } from './ipl/barcodes';
+import { designerBarcodeRender } from './designerBarcode';
+
+// Offscreen canvas for measurements
+let measurementCanvas: HTMLCanvasElement | null = null;
+let measurementCtx: CanvasRenderingContext2D | null = null;
+
+function getMeasurementContext(): CanvasRenderingContext2D {
+    if (!measurementCanvas) {
+        measurementCanvas = document.createElement('canvas');
+        measurementCtx = measurementCanvas.getContext('2d');
+    }
+    return measurementCtx!;
+}
+
+function getFormattedDateTime(type: 'date' | 'time', format: string): string {
+    const now = new Date();
+    const YYYY = now.getFullYear();
+    const YY = YYYY.toString().slice(-2);
+    const MM = (now.getMonth() + 1).toString().padStart(2, '0');
+    const DD = now.getDate().toString().padStart(2, '0');
+    let HH = now.getHours();
+    const M = now.getMinutes().toString().padStart(2, '0');
+    const SS = now.getSeconds().toString().padStart(2, '0');
+
+    if (type === 'date') {
+        switch (format) {
+            case 'YYYY/MM/DD': return `${YYYY}/${MM}/${DD}`;
+            case 'DD/MM/YY': return `${DD}/${MM}/${YY}`;
+            case 'DD/MM/YYYY': return `${DD}/${MM}/${YYYY}`;
+            case 'YY/MM/DD':
+            default:
+                return `${YY}/${MM}/${DD}`;
+        }
+    } else { // time
+        const is12hr = format.includes('12hr') || format.includes('am/pm');
+        const ampm = HH >= 12 ? 'pm' : 'am';
+        if (is12hr) {
+            HH = HH % 12;
+            HH = HH ? HH : 12; // the hour '0' should be '12'
+        }
+        const HH_str = HH.toString().padStart(2, '0');
+
+        switch (format) {
+            case 'HH:MM 24hr': return `${HH_str}:${M}`;
+            case 'HH:MM:SS 12hr': return `${HH_str}:${M}:${SS}`;
+            case 'HH:MM 12hr': return `${HH_str}:${M}`;
+            case 'HH:MM:SS am/pm': return `${HH_str}:${M}:${SS} ${ampm}`;
+            case 'HH:MM am/pm': return `${HH_str}:${M} ${ampm}`;
+            case 'HH:MM:SS 24hr':
+            default:
+                 return `${HH_str}:${M}:${SS}`;
+        }
+    }
+}
+
+const getFieldData = (field: TextField | BarcodeField, design: Design): string => {
+    const { dataSource } = field;
+    if (dataSource.type === 'fixed') return dataSource.data;
+    if (dataSource.type === 'variable') return dataSource.defaultData;
+    if (dataSource.type === 'date' || dataSource.type === 'time') {
+        return getFormattedDateTime(dataSource.type, dataSource.format);
+    }
+    // Linked fields measure against the source's live preview value — same
+    // resolution as canvasDrawer's getFieldData. Returning '' here zeroed the
+    // bounding box, and resize then divided by it (newWidth/0 = Infinity).
+    if (dataSource.type === 'linked') {
+        const source = design.dataSources.find(ds => ds.id === dataSource.sourceId);
+        if (!source) return '[unlinked]';
+        if (source.type === 'variable') {
+            return source.sampleData;
+        }
+        if (source.type === 'counter') {
+            return source.start.toString().padStart(source.padding, '0');
+        }
+    }
+    return '';
+};
+
+
+/**
+ * Calculates the UNROTATED bounding box of a single field in millimeters.
+ * This is the core measurement function, independent of zoom or rotation.
+ */
+export function getObjectBoundingBox(field: Field, design: Design): { width: number, height: number } {
+    const ctx = getMeasurementContext();
+    const { dpi } = design.printerSettings;
+    const mmPerDot = 25.4 / dpi;
+    let width = 0, height = 0;
+
+    switch (field.type) {
+        case 'text': {
+            const data = getFieldData(field, design);
+            const lines = data.split('\n').length > 0 ? data.split('\n') : [''];
+            const fontInfo = FONT_MAP[field.font];
+            const isBitmap = fontInfo?.type === 'bitmap';
+
+            if (isBitmap) {
+                const baseHeight = fontInfo.baseHeight || 9;
+                const lineHeightMm = (baseHeight * field.h_mag) * mmPerDot;
+                height = lines.length * lineHeightMm;
+
+                let maxChars = 0;
+                lines.forEach(line => { maxChars = Math.max(maxChars, line.length); });
+                // Same advance (cell + gap, last gap dropped) the viewer
+                // renderer paints with — cell-only width made the designer
+                // under-measure by 1-2 dots per char (audit T1).
+                width = bitmapTextWidthDots(field.font, maxChars, field.w_mag) * mmPerDot;
+
+            } else { // Outline font
+                const fontSizePx = (field.fontSize * POINTS_TO_MM) * dpi / 25.4;
+                const fontFamily = fontInfo?.family || 'sans-serif';
+                // Batch W: measure with the registered FONT_FAMILIES stack,
+                // not the raw family name. The generic 'monospace' resolves
+                // to a HOST font (narrow in node, arbitrary in browsers),
+                // silently under-measuring c25 by ~35% — which the align-bake
+                // in iplGenerator then baked into the print origin. The
+                // vendored Liberation fonts are metric-matched to the viewer
+                // table (Batch U); only via the stack do all three agree.
+                ctx.font = `normal ${fontSizePx}px ${FONT_FAMILIES[fontFamily as keyof typeof FONT_FAMILIES] ?? fontFamily}`;
+                
+                const lineHeightMm = (fontSizePx * 1.15) * mmPerDot; // Match canvasDrawer (Batch V: unified with the viewer print path)
+                height = (lines.length * lineHeightMm) - (lineHeightMm * 0.2); // Match canvasDrawer
+                
+                let maxWidth = 0;
+                lines.forEach(line => {
+                    const measuredWidth = ctx.measureText(line).width;
+                    maxWidth = Math.max(maxWidth, measuredWidth);
+                });
+                width = maxWidth * mmPerDot;
+            }
+            break;
+        }
+        case 'barcode': {
+            const data = getFieldData(field, design);
+            // Batch D: measure through the shared bwip encoder (same raster
+            // as the viewer). measureBarcode caches per (symbology, data,
+            // params) so the mousemove hot path stays cheap; the engine's
+            // lazy load degrades to the old estimate until it is ready.
+            const r = designerBarcodeRender(field, data);
+            height = r.heightDots * mmPerDot;
+            if (isBarcodeEngineReady() && r.data) {
+                const measure = measureBarcode(r.symbology, r.data, r.params);
+                if (measure) {
+                    width = measure.widthModules * Math.max(1, r.moduleDots) * mmPerDot;
+                } else {
+                    width = (field.w_mag * 50) * mmPerDot; // invalid data fallback
+                }
+            } else {
+                width = (field.w_mag * 50) * mmPerDot; // fallback
+            }
+            if (field.humanReadable !== 'none') {
+                const hriFontSizeMm = (field.hriFontSize || 10) * POINTS_TO_MM;
+                const hriOffsetMm = 2 * mmPerDot;
+                height += hriFontSizeMm + hriOffsetMm;
+            }
+            break;
+        }
+        case 'line':
+            width = field.length;
+            height = field.thickness;
+            break;
+        case 'box':
+            width = field.width;
+            height = field.height;
+            break;
+        case 'image':
+            width = field.width;
+            height = field.height;
+            break;
+    }
+    return { width, height };
+}
+
+/**
+ * Calculates the axis-aligned bounding box (AABB) of a set of fields,
+ * accounting for their individual rotations and alignments.
+ * Returns the box in millimeters: { minX, minY, maxX, maxY }.
+ */
+export function getAxisAlignedBoundingBox(fields: Field[], design: Design): { minX: number, minY: number, maxX: number, maxY: number } {
+    let allPoints: {x: number, y: number}[] = [];
+
+    fields.forEach(field => {
+        const { width, height } = getObjectBoundingBox(field, design);
+        const { x, y, rotation } = field;
+        // Batch W: CCW — the printer rotates fields counterclockwise (the
+        // designer now draws with ctx.rotate(-r)); the AABB corners must use
+        // the same frame. Screen y-down: R(−r) = [cos, sin; −sin, cos].
+        const rad = -rotation * Math.PI / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+
+        let localOriginY = 0;
+        if (field.type === 'barcode' && (field as BarcodeField).humanReadable === 'above') {
+            const { dpi } = design.printerSettings;
+            const mmPerDot = 25.4 / dpi;
+            const hriFontSizeMm = ((field as BarcodeField).hriFontSize || 10) * POINTS_TO_MM;
+            const hriOffsetMm = 2 * mmPerDot;
+            localOriginY = -(hriFontSizeMm + hriOffsetMm);
+        }
+        
+        let xOffset = 0;
+        if(field.type === 'text') {
+            const align = field.align || 'left';
+            if (align === 'center') xOffset = -width / 2;
+            else if (align === 'right') xOffset = -width;
+        }
+        
+        const cornersInLocalSpace = [
+            { x: xOffset, y: localOriginY },
+            { x: xOffset + width, y: localOriginY },
+            { x: xOffset + width, y: localOriginY + height },
+            { x: xOffset, y: localOriginY + height },
+        ];
+        
+        const rotatedAndTranslatedCorners = cornersInLocalSpace.map(corner => ({
+            x: x + (corner.x * cos - corner.y * sin),
+            y: y + (corner.x * sin + corner.y * cos),
+        }));
+
+        allPoints = allPoints.concat(rotatedAndTranslatedCorners);
+    });
+
+    if (allPoints.length === 0) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+    
+    return allPoints.reduce((acc, point) => ({
+        minX: Math.min(acc.minX, point.x),
+        minY: Math.min(acc.minY, point.y),
+        maxX: Math.max(acc.maxX, point.x),
+        maxY: Math.max(acc.maxY, point.y),
+    }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+}

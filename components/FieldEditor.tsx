@@ -1,0 +1,506 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import type { Field, TextField, BarcodeField, LineField, BoxField, ImageField, HRIPlacement, FieldDataSource, Design, DateFormat, TimeFormat } from '../types';
+import { FONT_MAP, BARCODE_MAP } from '../constants';
+import { validateBarcode } from '../services/validator';
+import { notify } from '../services/uiDialogs';
+import { loadImageFileToBitmap, invertBitmap, MAX_IMAGE_DOTS } from '../services/imageField';
+
+const usePropEditor = <T,>(
+    initialValue: T | 'multiple',
+    onCommit: (newValue: T) => void
+) => {
+    const [localValue, setLocalValue] = useState<string>(initialValue === 'multiple' ? '' : (initialValue?.toString() ?? ''));
+    const initialValueRef = useRef(initialValue);
+
+    useEffect(() => {
+        const strValue = initialValue === 'multiple' ? '' : (initialValue?.toString() ?? '');
+        setLocalValue(strValue);
+        initialValueRef.current = initialValue;
+    }, [initialValue]);
+
+    const handleBlur = (parser: (value: string) => T, validator?: (value: T, original: T | 'multiple') => T) => {
+        if (localValue === '') {
+            setLocalValue(initialValueRef.current === 'multiple' ? '' : (initialValueRef.current?.toString() ?? ''));
+            return;
+        }
+        let parsedValue = parser(localValue);
+        if (validator) {
+            parsedValue = validator(parsedValue, initialValueRef.current);
+        }
+        
+        if (initialValueRef.current === 'multiple' || JSON.stringify(parsedValue) !== JSON.stringify(initialValueRef.current)) {
+            onCommit(parsedValue);
+        }
+    };
+    
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && !(e.currentTarget.tagName === 'TEXTAREA' && e.shiftKey)) {
+             e.preventDefault();
+             e.currentTarget.blur();
+        }
+    };
+
+    return { localValue, setLocalValue, handleBlur, handleKeyDown };
+};
+
+const PropInput: React.FC<{ label: string; children: React.ReactNode; fullWidth?: boolean; }> = ({ label, children, fullWidth }) => (
+    <div className={fullWidth ? 'col-span-2' : ''}>
+        <label className="block text-xs font-medium text-gray-400 mb-1">{label}</label>
+        {children}
+    </div>
+);
+
+const inputClasses = "w-full p-1.5 text-sm border border-gray-600 bg-gray-700 rounded-md focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none";
+const pInt = (v: string) => parseInt(v, 10);
+const pFloat = (v: string) => parseFloat(v);
+const vMin1 = (v: number) => isNaN(v) ? 1 : Math.max(1, v);
+const vMinFloat = (v: number) => isNaN(v) ? 0.1 : Math.max(0.1, v);
+const pString = (v: string) => v;
+
+/**
+ * Select for an optional numeric/string symbology modifier: the empty value
+ * means "printer default" (undefined on the field, so the generator omits
+ * the parameter entirely instead of hard-coding a default).
+ */
+const ModifierSelect: React.FC<{
+    label: string;
+    value: number | string | 'multiple' | undefined;
+    options: { value: number | string; label: string }[];
+    onChange: (v: number | string | undefined) => void;
+}> = ({ label, value, options, onChange }) => (
+    <PropInput label={label} fullWidth>
+        <select
+            value={value === 'multiple' ? '__multi__' : value === undefined ? '' : String(value)}
+            onChange={e => {
+                const raw = e.target.value;
+                if (raw === '' || raw === '__multi__') { onChange(undefined); return; }
+                const n = Number(raw);
+                onChange(Number.isInteger(n) && raw !== '' && !isNaN(n) ? n : raw);
+            }}
+            className={inputClasses}
+        >
+            {value === 'multiple' && <option value="__multi__" disabled>Multiple Values</option>}
+            <option value="">Default</option>
+            {options.map(o => <option key={String(o.value)} value={String(o.value)}>{o.label}</option>)}
+        </select>
+    </PropInput>
+);
+/**
+ * Keeps the previous value when the typed string parses to NaN ("-", ".",
+ * garbage). Without this, blurring such input commits NaN into field.x/y,
+ * and ctx.translate(NaN) blanks the canvas for that frame — a silent
+ * corruption. With original 'multiple' there is nothing to keep: 0.
+ */
+const vOrKeep = (v: number, original: number | 'multiple'): number =>
+    isNaN(v) ? (typeof original === 'number' ? original : 0) : v;
+
+function getCommonValue<T, K extends keyof T>(items: T[], key: K): T[K] | 'multiple' {
+    if (!items || items.length === 0) return 'multiple';
+    const firstValue = items[0][key];
+    const firstValueStr = JSON.stringify(firstValue);
+    for (let i = 1; i < items.length; i++) {
+        if (JSON.stringify(items[i][key]) !== firstValueStr) {
+            return 'multiple';
+        }
+    }
+    return firstValue;
+}
+
+
+const DataSourceEditor: React.FC<{
+    fields: (TextField | BarcodeField)[];
+    dataSources: Design['dataSources'];
+    handleUpdate: (updates: Partial<Field>) => void;
+}> = ({ fields, dataSources, handleUpdate }) => {
+    const commonDataSource = getCommonValue(fields, 'dataSource') as FieldDataSource | 'multiple';
+    if (commonDataSource === 'multiple') return <div className="col-span-2 text-xs text-gray-400">Data sources differ.</div>;
+    
+    const dataSource = commonDataSource;
+    // FIX: The nested ternary was causing issues with type inference on the discriminated union.
+    // Using if/else if is safer for type narrowing.
+    let data = '';
+    if (dataSource.type === 'fixed') {
+        data = dataSource.data;
+    } else if (dataSource.type === 'variable') {
+        data = dataSource.defaultData;
+    }
+
+    const dataEditor = usePropEditor(data, (val: string) => {
+        if (dataSource.type === 'fixed') handleUpdate({ dataSource: { ...dataSource, data: val } } as Partial<Field>);
+        else if (dataSource.type === 'variable') handleUpdate({ dataSource: { ...dataSource, defaultData: val } } as Partial<Field>);
+    });
+
+    const handleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const newType = e.target.value as FieldDataSource['type'];
+        if (newType === 'fixed') {
+            handleUpdate({ dataSource: { type: 'fixed', data } } as Partial<Field>);
+        } else if (newType === 'variable') {
+            handleUpdate({ dataSource: { type: 'variable', defaultData: data } } as Partial<Field>);
+        } else if (newType === 'linked') {
+            const firstSourceId = dataSources[0]?.id;
+            handleUpdate({ dataSource: { type: 'linked', sourceId: firstSourceId || '' } } as Partial<Field>);
+        } else if (newType === 'date') {
+             handleUpdate({ dataSource: { type: 'date', format: 'YYYY/MM/DD' } } as Partial<Field>);
+        } else if (newType === 'time') {
+             handleUpdate({ dataSource: { type: 'time', format: 'HH:MM:SS 24hr' } } as Partial<Field>);
+        }
+    };
+    
+    const staticDataError = dataSource.type === 'fixed' && dataSource.data.includes(';') ? 'Fixed data cannot contain semicolons (;).' : null;
+    const isTextField = fields.every(f => f.type === 'text');
+
+    return (
+        <>
+            <PropInput label="Data Source" fullWidth>
+                <select value={dataSource.type} onChange={handleTypeChange} className={inputClasses}>
+                    <option value="variable">Variable Data</option>
+                    <option value="fixed">Fixed Data</option>
+                    <option value="linked">Linked to Variable</option>
+                    {isTextField && <option value="date">Current Date</option>}
+                    {isTextField && <option value="time">Current Time</option>}
+                </select>
+            </PropInput>
+
+            {dataSource.type === 'linked' ? (
+                 <PropInput label="Link to" fullWidth>
+                    <select value={dataSource.sourceId} onChange={(e) => handleUpdate({dataSource: { ...dataSource, sourceId: e.target.value }} as Partial<Field>)} className={inputClasses}>
+                        {dataSources.map(ds => (
+                            <option key={ds.id} value={ds.id}>{ds.name}</option>
+                        ))}
+                    </select>
+                    {dataSources.length === 0 && <p className="text-xs text-yellow-400 mt-1">No variables defined. Go to the 'Data' tab to create one.</p>}
+                 </PropInput>
+            ) : dataSource.type === 'date' ? (
+                <PropInput label="Date Format" fullWidth>
+                    <select value={dataSource.format} onChange={(e) => handleUpdate({dataSource: { ...dataSource, format: e.target.value as DateFormat }} as Partial<Field>)} className={inputClasses}>
+                        <option value="YY/MM/DD">YY/MM/DD</option>
+                        <option value="YYYY/MM/DD">YYYY/MM/DD</option>
+                        <option value="DD/MM/YY">DD/MM/YY</option>
+                        <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+                    </select>
+                </PropInput>
+            ) : dataSource.type === 'time' ? (
+                 <PropInput label="Time Format" fullWidth>
+                    <select value={dataSource.format} onChange={(e) => handleUpdate({dataSource: { ...dataSource, format: e.target.value as TimeFormat }} as Partial<Field>)} className={inputClasses}>
+                        <option value="HH:MM:SS 24hr">HH:MM:SS 24hr</option>
+                        <option value="HH:MM 24hr">HH:MM 24hr</option>
+                        <option value="HH:MM:SS 12hr">HH:MM:SS 12hr</option>
+                        <option value="HH:MM 12hr">HH:MM 12hr</option>
+                        <option value="HH:MM:SS am/pm">HH:MM:SS am/pm</option>
+                        <option value="HH:MM am/pm">HH:MM am/pm</option>
+                    </select>
+                </PropInput>
+            ) : (
+                <PropInput label={dataSource.type === 'fixed' ? 'Fixed Data' : 'Default Data'} fullWidth>
+                     <textarea value={dataEditor.localValue} onChange={e => dataEditor.setLocalValue(e.target.value)} onBlur={() => dataEditor.handleBlur(pString)} onKeyDown={dataEditor.handleKeyDown} className={`${inputClasses} min-h-[60px] resize-y ${staticDataError ? 'border-red-500 ring-red-500' : ''}`} />
+                    {staticDataError && <p className="text-xs text-red-400 mt-1">{staticDataError}</p>}
+                </PropInput>
+            )}
+        </>
+    );
+};
+
+
+const TextFieldEditor: React.FC<{ fields: TextField[]; design: Design; handleUpdate: (updates: Partial<Field>) => void; }> = ({ fields, design, handleUpdate }) => {
+    const commonFont = getCommonValue(fields, 'font');
+    const commonFontSize = getCommonValue(fields, 'fontSize');
+    const commonHMag = getCommonValue(fields, 'h_mag');
+    const commonWMag = getCommonValue(fields, 'w_mag');
+    const commonAlign = getCommonValue(fields, 'align') || 'left';
+
+    const fontSizeEditor = usePropEditor(commonFontSize, (val: number) => handleUpdate({ fontSize: val } as Partial<Field>));
+    const hMagEditor = usePropEditor(commonHMag, (val: number) => handleUpdate({ h_mag: val } as Partial<Field>));
+    const wMagEditor = usePropEditor(commonWMag, (val: number) => handleUpdate({ w_mag: val } as Partial<Field>));
+    
+    const isBitmapFont = commonFont !== 'multiple' && FONT_MAP[commonFont]?.type === 'bitmap';
+    
+    return <>
+        <DataSourceEditor fields={fields} dataSources={design.dataSources} handleUpdate={handleUpdate} />
+        <PropInput label="Font" fullWidth>
+            <select value={commonFont === 'multiple' ? '' : commonFont} onChange={e => handleUpdate({ font: e.target.value } as Partial<Field>)} className={inputClasses}>
+                 {commonFont === 'multiple' && <option value="" disabled>Multiple Values</option>}
+                 {Object.entries(FONT_MAP).map(([id, {name}]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+        </PropInput>
+        {isBitmapFont ? (
+            <>
+                <PropInput label="Height Mag"><input type="number" min="1" value={hMagEditor.localValue} placeholder={commonHMag === 'multiple' ? 'Multiple' : ''} onChange={e => hMagEditor.setLocalValue(e.target.value)} onBlur={() => hMagEditor.handleBlur(pInt, vMin1)} onKeyDown={hMagEditor.handleKeyDown} className={inputClasses}/></PropInput>
+                <PropInput label="Width Mag"><input type="number" min="1" value={wMagEditor.localValue} placeholder={commonWMag === 'multiple' ? 'Multiple' : ''} onChange={e => wMagEditor.setLocalValue(e.target.value)} onBlur={() => wMagEditor.handleBlur(pInt, vMin1)} onKeyDown={wMagEditor.handleKeyDown} className={inputClasses}/></PropInput>
+            </>
+        ) : (
+            <PropInput label="Font Size (pt)" fullWidth><input type="number" min="1" value={fontSizeEditor.localValue} placeholder={commonFontSize === 'multiple' ? 'Multiple' : ''} onChange={e => fontSizeEditor.setLocalValue(e.target.value)} onBlur={() => fontSizeEditor.handleBlur(pInt, vMin1)} onKeyDown={fontSizeEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        )}
+        <PropInput label="Align" fullWidth>
+            <select value={commonAlign === 'multiple' ? '' : commonAlign} onChange={e => handleUpdate({ align: e.target.value as TextField['align'] } as Partial<Field>)} className={inputClasses}>
+                {commonAlign === 'multiple' && <option value="" disabled>Multiple Values</option>}
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+            </select>
+        </PropInput>
+    </>
+};
+
+const BarcodeFieldEditor: React.FC<{ fields: BarcodeField[]; design: Design; handleUpdate: (updates: Partial<Field>) => void; }> = ({ fields, design, handleUpdate }) => {
+    const commonSymbology = getCommonValue(fields, 'symbology');
+    const commonHMag = getCommonValue(fields, 'h_mag');
+    const commonWMag = getCommonValue(fields, 'w_mag');
+    const commonHRI = getCommonValue(fields, 'humanReadable');
+    const commonCode39CheckDigit = getCommonValue(fields, 'code39_checkDigit');
+    const commonHriFont = getCommonValue(fields, 'hriFont');
+    const commonHriFontSize = getCommonValue(fields, 'hriFontSize');
+    const commonHriAlign = getCommonValue(fields, 'hriAlign') || 'center';
+
+    const hMagEditor = usePropEditor(commonHMag, (val: number) => handleUpdate({ h_mag: val } as Partial<Field>));
+    const wMagEditor = usePropEditor(commonWMag, (val: number) => handleUpdate({ w_mag: val } as Partial<Field>));
+    const hriFontSizeEditor = usePropEditor(commonHriFontSize, (val: number) => handleUpdate({ hriFontSize: val } as Partial<Field>));
+
+
+    return <>
+        <DataSourceEditor fields={fields} dataSources={design.dataSources} handleUpdate={handleUpdate} />
+
+        <PropInput label="Symbology" fullWidth>
+            <select value={commonSymbology === 'multiple' ? '' : commonSymbology} onChange={e => handleUpdate({ symbology: e.target.value } as Partial<Field>)} className={inputClasses}>
+                {commonSymbology === 'multiple' && <option value="" disabled>Multiple Values</option>}
+                {Object.entries(BARCODE_MAP).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+        </PropInput>
+        
+        {commonSymbology !== 'multiple' && commonSymbology === '0' && (
+            <PropInput label="Check Digit" fullWidth>
+                <select value={commonCode39CheckDigit === 'multiple' ? '' : commonCode39CheckDigit || 'none'} onChange={e => handleUpdate({ code39_checkDigit: e.target.value as BarcodeField['code39_checkDigit'] } as Partial<Field>)} className={inputClasses}>
+                    {commonCode39CheckDigit === 'multiple' && <option value="" disabled>Multiple Values</option>}
+                    <option value="none">None</option>
+                    <option value="printer-generated">Printer-Generated (Mod43)</option>
+                    <option value="host-verifies">Host Verifies (Mod43)</option>
+                </select>
+            </PropInput>
+        )}
+
+        {/* Symbology-specific modifiers (PRM c-syntax). 'Default' leaves the
+            parameter unset so the generator omits it and the printer's own
+            default applies. */}
+        {commonSymbology === '18' && (
+            <>
+                <ModifierSelect label="QR Model" value={getCommonValue(fields, 'qrModel')}
+                    options={[{ value: 2, label: '2 (Model 2)' }, { value: 1, label: '1 (Model 1)' }]}
+                    onChange={v => handleUpdate({ qrModel: v as number | undefined } as Partial<Field>)} />
+                <ModifierSelect label="Error Correction" value={getCommonValue(fields, 'qrEcl')}
+                    options={[{ value: 'L', label: 'L — 7%' }, { value: 'M', label: 'M — 15%' }, { value: 'Q', label: 'Q — 25%' }, { value: 'H', label: 'H — 30%' }]}
+                    onChange={v => handleUpdate({ qrEcl: v as BarcodeField['qrEcl'] } as Partial<Field>)} />
+                <ModifierSelect label="Mask" value={getCommonValue(fields, 'qrMask')}
+                    options={[0, 1, 2, 3, 4, 5, 6, 7, 8].map(m => ({ value: m, label: m === 8 ? '8 (auto)' : String(m) }))}
+                    onChange={v => handleUpdate({ qrMask: v as number | undefined } as Partial<Field>)} />
+            </>
+        )}
+        {commonSymbology === '19' && (
+            <>
+                <ModifierSelect label="Data Columns" value={getCommonValue(fields, 'microColumns')}
+                    options={[0, 1, 2, 3, 4].map(c => ({ value: c, label: c === 0 ? '0 (auto)' : String(c) }))}
+                    onChange={v => handleUpdate({ microColumns: v as number | undefined } as Partial<Field>)} />
+                <ModifierSelect label="Data Rows" value={getCommonValue(fields, 'microRows')}
+                    options={[0, 4, 6, 8, 10, 11, 12, 14, 15, 16, 17, 20, 22, 23, 24, 26, 28, 32, 38, 44].map(r => ({ value: r, label: r === 0 ? '0 (auto)' : String(r) }))}
+                    onChange={v => handleUpdate({ microRows: v as number | undefined } as Partial<Field>)} />
+            </>
+        )}
+        {commonSymbology === '20' && (
+            <>
+                <ModifierSelect label="RSS Version" value={getCommonValue(fields, 'rssVersion')}
+                    options={[
+                        { value: 0, label: '0 — RSS-14' }, { value: 1, label: '1 — RSS-14 Truncated' },
+                        { value: 2, label: '2 — RSS-14 Stacked' }, { value: 3, label: '3 — RSS-14 Stacked Omni' },
+                        { value: 4, label: '4 — RSS Limited' }, { value: 5, label: '5 — RSS Expanded' },
+                        { value: 6, label: '6 — RSS Expanded Stacked' },
+                    ]}
+                    onChange={v => handleUpdate({ rssVersion: v as number | undefined } as Partial<Field>)} />
+                <ModifierSelect label="Separator Height" value={getCommonValue(fields, 'rssSepHeight')}
+                    options={[1, 2, 3, 4].map(s => ({ value: s, label: `${s}× bar` }))}
+                    onChange={v => handleUpdate({ rssSepHeight: v as number | undefined } as Partial<Field>)} />
+                <ModifierSelect label="Segments / Row" value={getCommonValue(fields, 'rssSegments')}
+                    options={[2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22].map(s => ({ value: s, label: String(s) }))}
+                    onChange={v => handleUpdate({ rssSegments: v as number | undefined } as Partial<Field>)} />
+            </>
+        )}
+        {commonSymbology === '14' && (
+            <ModifierSelect label="MaxiCode Mode" value={getCommonValue(fields, 'maxiMode')}
+                options={[
+                    { value: 2, label: '2 — Numeric postal (SCM)' }, { value: 3, label: '3 — Alpha postal (SCM)' },
+                    { value: 4, label: '4 — Standard' }, { value: 5, label: '5 — Full EEC' }, { value: 6, label: '6 — Reader Programming' },
+                ]}
+                onChange={v => handleUpdate({ maxiMode: v as number | undefined } as Partial<Field>)} />
+        )}
+        {(commonSymbology === '8' || commonSymbology === '16') && (
+            <ModifierSelect label="HIBC Format" value={getCommonValue(fields, 'hibcMode')}
+                options={[
+                    { value: 0, label: '0 — Primary (supplier)' }, { value: 1, label: '1 — Alt. primary' },
+                    { value: 2, label: '2 — Secondary' }, { value: 3, label: '3 — Single (provider)' },
+                    { value: 4, label: '4 — First data' }, { value: 5, label: '5 — Second data' }, { value: 6, label: '6 — Multiple data' },
+                ]}
+                onChange={v => handleUpdate({ hibcMode: v as number | undefined } as Partial<Field>)} />
+        )}
+
+        <PropInput label="Bar Height (dots)"><input type="number" min="1" value={hMagEditor.localValue} placeholder={commonHMag === 'multiple' ? 'Multiple' : ''} onChange={e => hMagEditor.setLocalValue(e.target.value)} onBlur={() => hMagEditor.handleBlur(pInt, vMin1)} onKeyDown={hMagEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Narrow Bar (dots)"><input type="number" min="1" value={wMagEditor.localValue} placeholder={commonWMag === 'multiple' ? 'Multiple' : ''} onChange={e => wMagEditor.setLocalValue(e.target.value)} onBlur={() => wMagEditor.handleBlur(pInt, vMin1)} onKeyDown={wMagEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        
+        <PropInput label="Human Readable" fullWidth>
+            <select value={commonHRI === 'multiple' ? '' : commonHRI} onChange={e => handleUpdate({ humanReadable: e.target.value as HRIPlacement } as Partial<Field>)} className={inputClasses}>
+                {commonHRI === 'multiple' && <option value="" disabled>Multiple Values</option>}
+                <option value="none">None</option>
+                <option value="below">Below Barcode</option>
+                <option value="above">Above Barcode</option>
+            </select>
+        </PropInput>
+
+        {commonHRI !== 'multiple' && commonHRI !== 'none' && (
+            <>
+                <PropInput label="HRI Font" fullWidth>
+                    <select value={commonHriFont === 'multiple' ? '' : commonHriFont || '21'} onChange={e => handleUpdate({ hriFont: e.target.value } as Partial<Field>)} className={inputClasses}>
+                        {commonHriFont === 'multiple' && <option value="" disabled>Multiple Values</option>}
+                        {Object.entries(FONT_MAP).map(([id, {name}]) => <option key={id} value={id}>{name}</option>)}
+                    </select>
+                </PropInput>
+                <PropInput label="HRI Font Size (pt)" >
+                    <input type="number" min="1" value={hriFontSizeEditor.localValue} placeholder={commonHriFontSize === 'multiple' ? 'Multiple' : ''} onChange={e => hriFontSizeEditor.setLocalValue(e.target.value)} onBlur={() => hriFontSizeEditor.handleBlur(pInt, vMin1)} onKeyDown={hriFontSizeEditor.handleKeyDown} className={inputClasses}/>
+                </PropInput>
+                 <PropInput label="HRI Align">
+                    <select value={commonHriAlign === 'multiple' ? '' : commonHriAlign} onChange={e => handleUpdate({ hriAlign: e.target.value as BarcodeField['hriAlign'] } as Partial<Field>)} className={inputClasses}>
+                        {commonHriAlign === 'multiple' && <option value="" disabled>Multiple Values</option>}
+                        <option value="left">Left</option>
+                        <option value="center">Center</option>
+                        <option value="right">Right</option>
+                    </select>
+                </PropInput>
+            </>
+        )}
+    </>
+};
+
+const LineFieldEditor: React.FC<{ fields: LineField[]; handleUpdate: (updates: Partial<Field>) => void; }> = ({ fields, handleUpdate }) => {
+    const commonLength = getCommonValue(fields, 'length');
+    const commonThickness = getCommonValue(fields, 'thickness');
+    const commonLineEnding = getCommonValue(fields, 'lineEnding') || 'none';
+
+    const lengthEditor = usePropEditor(commonLength, (val: number) => handleUpdate({ length: val } as Partial<Field>));
+    const thicknessEditor = usePropEditor(commonThickness, (val: number) => handleUpdate({ thickness: val } as Partial<Field>));
+
+    return <>
+        <PropInput label="Length (mm)"><input type="number" step="0.1" min="0.1" value={lengthEditor.localValue} placeholder={commonLength === 'multiple' ? 'Multiple' : ''} onChange={e => lengthEditor.setLocalValue(e.target.value)} onBlur={() => lengthEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={lengthEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Thickness (mm)"><input type="number" step="0.1" min="0.1" value={thicknessEditor.localValue} placeholder={commonThickness === 'multiple' ? 'Multiple' : ''} onChange={e => thicknessEditor.setLocalValue(e.target.value)} onBlur={() => thicknessEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={thicknessEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Line Ending" fullWidth>
+            <select value={commonLineEnding === 'multiple' ? '' : commonLineEnding} onChange={e => handleUpdate({ lineEnding: e.target.value as LineField['lineEnding'] } as Partial<Field>)} className={inputClasses}>
+                 {commonLineEnding === 'multiple' && <option value="" disabled>Multiple Values</option>}
+                <option value="none">None</option>
+                <option value="arrow">Arrow</option>
+            </select>
+        </PropInput>
+    </>
+};
+
+const BoxFieldEditor: React.FC<{ fields: BoxField[]; handleUpdate: (updates: Partial<Field>) => void; }> = ({ fields, handleUpdate }) => {
+    const commonWidth = getCommonValue(fields, 'width');
+    const commonHeight = getCommonValue(fields, 'height');
+    const commonThickness = getCommonValue(fields, 'thickness');
+    const commonCornerRadius = getCommonValue(fields, 'cornerRadius');
+    
+    const widthEditor = usePropEditor(commonWidth, (val: number) => handleUpdate({ width: val } as Partial<Field>));
+    const heightEditor = usePropEditor(commonHeight, (val: number) => handleUpdate({ height: val } as Partial<Field>));
+    const thicknessEditor = usePropEditor(commonThickness, (val: number) => handleUpdate({ thickness: val } as Partial<Field>));
+    const cornerRadiusEditor = usePropEditor(commonCornerRadius, (val: number) => handleUpdate({ cornerRadius: val } as Partial<Field>));
+    
+    return <>
+        <PropInput label="Width (mm)"><input type="number" step="0.1" min="0.1" value={widthEditor.localValue} placeholder={commonWidth === 'multiple' ? 'Multiple' : ''} onChange={e => widthEditor.setLocalValue(e.target.value)} onBlur={() => widthEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={widthEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Height (mm)"><input type="number" step="0.1" min="0.1" value={heightEditor.localValue} placeholder={commonHeight === 'multiple' ? 'Multiple' : ''} onChange={e => heightEditor.setLocalValue(e.target.value)} onBlur={() => heightEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={heightEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Thickness (mm)"><input type="number" step="0.1" min="0.1" value={thicknessEditor.localValue} placeholder={commonThickness === 'multiple' ? 'Multiple' : ''} onChange={e => thicknessEditor.setLocalValue(e.target.value)} onBlur={() => thicknessEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={thicknessEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Corner Radius (mm)"><input type="number" step="0.1" min="0" value={cornerRadiusEditor.localValue} placeholder={commonCornerRadius === 'multiple' ? 'Multiple' : ''} onChange={e => cornerRadiusEditor.setLocalValue(e.target.value)} onBlur={() => cornerRadiusEditor.handleBlur(pFloat, (v, o) => Math.max(0, vOrKeep(v, o)))} onKeyDown={cornerRadiusEditor.handleKeyDown} className={inputClasses}/></PropInput>
+    </>
+};
+
+const ImageFieldEditor: React.FC<{ fields: ImageField[]; handleUpdate: (updates: Partial<Field>) => void; }> = ({ fields, handleUpdate }) => {
+    const commonWidth = getCommonValue(fields, 'width');
+    const commonHeight = getCommonValue(fields, 'height');
+    const commonThreshold = getCommonValue(fields, 'threshold');
+    const widthEditor = usePropEditor(commonWidth, (val: number) => handleUpdate({ width: val } as Partial<Field>));
+    const heightEditor = usePropEditor(commonHeight, (val: number) => handleUpdate({ height: val } as Partial<Field>));
+    const thresholdEditor = usePropEditor(commonThreshold, (val: number) => handleUpdate({ threshold: Math.max(1, Math.min(254, Math.round(val) || 128)) } as Partial<Field>));
+    const fileRef = useRef<HTMLInputElement>(null);
+    const [loading, setLoading] = useState(false);
+
+    const dotsW = fields[0]?.bitmap[0]?.length ?? 0;
+    const dotsH = fields[0]?.bitmap.length ?? 0;
+    const hasImage = dotsW > 0 && dotsH > 0;
+
+    const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (e.target) e.target.value = '';
+        if (!file) return;
+        setLoading(true);
+        try {
+            const bitmap = await loadImageFileToBitmap(file, MAX_IMAGE_DOTS, fields[0].threshold ?? 128, false);
+            // (maxDotsW caps the wide axis; height follows the source aspect)
+            if (!bitmap.length || !bitmap[0].length) throw new Error('empty');
+            // Reducer re-derives mm from the dot grid at the design's dpi.
+            handleUpdate({ bitmap } as Partial<Field>);
+        } catch {
+            notify('Could not read that image file — pick a PNG, JPEG, GIF, BMP or WebP image.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return <>
+        <div className="col-span-2 flex items-center gap-2">
+            <button onClick={() => fileRef.current?.click()} disabled={loading}
+                className="flex-1 px-2 py-1.5 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-md transition-colors">
+                {loading ? 'Reading…' : hasImage ? 'Replace Image…' : 'Choose Image…'}
+            </button>
+            {hasImage && fields.length === 1 && (
+                <button onClick={() => handleUpdate({ bitmap: invertBitmap(fields[0].bitmap) } as Partial<Field>)}
+                    title="Swap ink and paper (white-on-dark logos)"
+                    className="px-2 py-1.5 text-xs text-gray-200 bg-gray-600 hover:bg-gray-500 rounded-md transition-colors">Invert</button>
+            )}
+            <input ref={fileRef} type="file" accept="image/*" onChange={onFile} className="hidden"/>
+        </div>
+        <PropInput label={`Dot Grid (W×H)`}><div className="w-full text-xs p-1.5 bg-gray-900 border border-gray-600 rounded-md text-gray-400">{hasImage ? `${dotsW} × ${dotsH} dots` : 'no image loaded'}</div></PropInput>
+        <PropInput label="Threshold"><input type="number" step="1" min="1" max="254" value={thresholdEditor.localValue} placeholder={commonThreshold === 'multiple' ? 'Multiple' : ''} onChange={e => thresholdEditor.setLocalValue(e.target.value)} onBlur={() => thresholdEditor.handleBlur(pInt)} onKeyDown={thresholdEditor.handleKeyDown} className={inputClasses} title="Luminance cut-off for next import (1 dark .. 254 light)"/></PropInput>
+        <PropInput label="Width (mm)"><input type="number" step="0.1" min="0.1" value={widthEditor.localValue} placeholder={commonWidth === 'multiple' ? 'Multiple' : ''} onChange={e => widthEditor.setLocalValue(e.target.value)} onBlur={() => widthEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={widthEditor.handleKeyDown} className={inputClasses} title="Resamples the bitmap to the new dot grid"/></PropInput>
+        <PropInput label="Height (mm)"><input type="number" step="0.1" min="0.1" value={heightEditor.localValue} placeholder={commonHeight === 'multiple' ? 'Multiple' : ''} onChange={e => heightEditor.setLocalValue(e.target.value)} onBlur={() => heightEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={heightEditor.handleKeyDown} className={inputClasses} title="Resamples the bitmap to the new dot grid"/></PropInput>
+    </>
+};
+
+export const FieldEditor: React.FC<{ fields: Field[]; design: Design; dispatch: React.Dispatch<any>; }> = ({ fields, design, dispatch }) => {
+    const handleUpdate = useCallback((updates: Partial<Field>) => {
+        dispatch({ type: 'UPDATE_MULTIPLE_FIELD_PROPERTIES', payload: { fieldIds: fields.map(f => f.id), updates } });
+    }, [dispatch, fields]);
+    
+    const commonName = getCommonValue(fields, 'name');
+    const commonX = getCommonValue(fields, 'x');
+    const commonY = getCommonValue(fields, 'y');
+    const commonRotation = getCommonValue(fields, 'rotation');
+
+    const nameEditor = usePropEditor(commonName, (val: string) => handleUpdate({ name: val } as Partial<Field>));
+    const xEditor = usePropEditor(commonX, (val: number) => handleUpdate({ x: val } as Partial<Field>));
+    const yEditor = usePropEditor(commonY, (val: number) => handleUpdate({ y: val } as Partial<Field>));
+    
+    const commonType = getCommonValue(fields, 'type');
+
+    return (
+        <div className="grid grid-cols-2 gap-3">
+            <PropInput label="Name" fullWidth><input type="text" value={nameEditor.localValue} placeholder={commonName === 'multiple' ? 'Multiple Values' : ''} onChange={e => nameEditor.setLocalValue(e.target.value)} onBlur={() => nameEditor.handleBlur(pString)} onKeyDown={nameEditor.handleKeyDown} className={inputClasses}/></PropInput>
+            <PropInput label="X (mm)"><input type="number" step="0.1" value={xEditor.localValue} placeholder={commonX === 'multiple' ? 'Multiple' : ''} onChange={e => xEditor.setLocalValue(e.target.value)} onBlur={() => xEditor.handleBlur(pFloat, vOrKeep)} onKeyDown={xEditor.handleKeyDown} className={inputClasses}/></PropInput>
+            <PropInput label="Y (mm)"><input type="number" step="0.1" value={yEditor.localValue} placeholder={commonY === 'multiple' ? 'Multiple' : ''} onChange={e => yEditor.setLocalValue(e.target.value)} onBlur={() => yEditor.handleBlur(pFloat, vOrKeep)} onKeyDown={yEditor.handleKeyDown} className={inputClasses}/></PropInput>
+            <PropInput label="Rotation" fullWidth>
+                <select value={commonRotation === 'multiple' ? '' : commonRotation} onChange={e => handleUpdate({ rotation: parseInt(e.target.value) as Field['rotation'] } as Partial<Field>)} className={inputClasses}>
+                    {commonRotation === 'multiple' && <option value="" disabled>Multiple Values</option>}
+                    <option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option>
+                </select>
+            </PropInput>
+            
+            {commonType !== 'multiple' && commonType === 'text' && <TextFieldEditor fields={fields as TextField[]} design={design} handleUpdate={handleUpdate} />}
+            {commonType !== 'multiple' && commonType === 'barcode' && <BarcodeFieldEditor fields={fields as BarcodeField[]} design={design} handleUpdate={handleUpdate} />}
+            {commonType !== 'multiple' && commonType === 'line' && <LineFieldEditor fields={fields as LineField[]} handleUpdate={handleUpdate} />}
+            {commonType !== 'multiple' && commonType === 'box' && <BoxFieldEditor fields={fields as BoxField[]} handleUpdate={handleUpdate} />}
+            {commonType !== 'multiple' && commonType === 'image' && <ImageFieldEditor fields={fields as ImageField[]} handleUpdate={handleUpdate} />}
+            {commonType === 'multiple' && <div className="col-span-2 text-center text-xs text-gray-400 p-4 border-t border-gray-700 mt-2">Select items of the same type to edit more properties.</div>}
+        </div>
+    );
+};

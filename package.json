@@ -1,0 +1,35 @@
+{
+  "name": "honeywell-ipl-label-designer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:golden": "vitest run tests/golden/golden.test.ts",
+    "test:golden:update": "node tools/update-goldens.mjs",
+    "bridge": "node tools/ipl-bridge.mjs",
+    "crosscheck": "node tools/labelary-crosscheck.mjs",
+    "zpl": "node tools/ipl2zpl.mjs"
+  },
+  "dependencies": {
+    "bwip-js": "^4.11.4",
+    "jspdf": "^4.2.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^1.0.8",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^5.0.0",
+    "happy-dom": "^20.11.6",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0",
+    "vitest": "^4.1.11"
+  }
+}

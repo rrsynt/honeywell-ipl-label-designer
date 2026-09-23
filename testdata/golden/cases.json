@@ -1,0 +1,34 @@
+[
+    {
+        "name": "product",
+        "dpi": 203
+    },
+    {
+        "name": "box-date",
+        "dpi": 203
+    },
+    {
+        "name": "external",
+        "dpi": 203
+    },
+    {
+        "name": "chained",
+        "dpi": 203
+    },
+    {
+        "name": "codabar",
+        "dpi": 203
+    },
+    {
+        "name": "bartender-logo",
+        "dpi": 203
+    },
+    {
+        "name": "symbologies",
+        "dpi": 203
+    },
+    {
+        "name": "rss-maxi",
+        "dpi": 203
+    }
+]
