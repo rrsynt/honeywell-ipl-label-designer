@@ -140,6 +140,13 @@ export interface PrinterSettings {
     mediaSenseMode: 'gap' | 'reflective' | 'continuous';
     printSpeed: number; // 1-11
     darkness: number; // 0-19
+    /**
+     * Emit image fields as nibblized Direct Graphics (<ESC>g1) instead of
+     * stored-format G/U graphics. g1 is pure ASCII hex, so the stream survives
+     * clipboard paste and UTF-8 transport where binary g0 cannot. Optional and
+     * off by default: saved designs predate it and must keep generating G/U.
+     */
+    directGraphics?: boolean;
 }
 
 export interface DataSourceBase {

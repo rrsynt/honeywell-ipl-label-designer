@@ -113,7 +113,7 @@ Satu commit per fix, konventional `fix(ipl): …`, masing-masing dengan tes regr
 
 ---
 
-## 5. Workstream 3 — Designer Generate → Paste → Preview (goal #1+#2)
+## 5. Workstream 3 — Designer Generate → Paste → Preview (goal #1+#2) [DONE 2026-09-24]
 
 ### Task 3.1 — Audit generator terhadap bentuk yang BarTender hasilkan
 `services/iplGenerator.ts` hari ini meng-emits stored-format `G…;u<rows>` (ASCII). Tambah opsi (persist di settings designer, default OFF):
@@ -222,8 +222,8 @@ npm run dev → buka viewer → paste bartender-logo.ipl → render benar
 - [x] Stream mode B (g1 hex): parser + renderer support (2026-09-23, `tests/directGraphicsHex.test.ts`: rewrite g0→g1 dari tes1 & tes2 menghasilkan elemen grafis identik, termasuk setelah paste UTF-8 + line wrap). Golden PNG pair belum dibuat — menyusul di Workstream 2.
 - [x] Workstream 4 (2026-09-23): "Copy ASCII (g1)" menggantikan "Copy Safe" — `convertDirectGraphicsToHex` memakai tokenizer resmi dan meng-emit `<ESC>g1` sah (bukan escape `\xHH`); banner paste punya tombol "Convert to ASCII (g1)"; tes diag-* diganti `tests/asciiCopy.test.ts`. Sisa: golden pair PNG (W2) + opsi emit g1 di generator (W3).
 - [ ] Stream mode C (g0 biner + mojibake paste): tidak bisa diselamatkan (fakta matematis) → ditangani W4 (deteksi + ASCII fix button + doc) TANPA preview salah yang senyap.
-- [ ] Designer generate → paste kembali → preview identik (rotasi & semua field), termasuk gambar via g1.
-- [ ] Audit table W2 terisi; tiap gap → issue/fix/tes.
+- [x] Designer generate → paste kembali → preview identik (2026-09-24): `tests/bartenderRoundtrip.test.ts` membandingkan ink box designer vs `generateIPL → parseViewerIPL → renderLabel` untuk raster, QR, EAN-13 dan multiline (≤3px), plus render g1 identik sebelum/sesudah round-trip UTF-8. Generator meng-emit `<ESC>g1` di balik `PrinterSettings.directGraphics` (default OFF, toggle di panel printer).
+- [x] Audit table W2 terisi (2026-09-23, `docs/research/BARTENDER-COMMAND-AUDIT.md`); tidak ada gap yang terkonfirmasi. Sisa W2: golden PNG pair tes1/nibblized-tes1.
 - [ ] (Stretch) e2e BarTender→file→render→diff otomatis jalan tanpa intervensi manual, hasil tercatat di `BARTENDER-E2E-DIFF.md`.
 - [ ] Memory index diperbarui: 1 entri baru `ipl-bartender-g1-parity.md` merangkum keputusan + status.
 

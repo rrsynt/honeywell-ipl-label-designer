@@ -33,6 +33,102 @@ export const encodeBitmapColumns = (bitmap: Bitmap): string[] => {
     return columns;
 };
 
+/**
+ * Encodes a visual bitmap (top row first) as nibblized Direct Graphics RLE —
+ * the inverse of extractDirectGraphics(..., 1). Placement follows PRM Appendix
+ * E: columns load left-to-right from the origin's X and bit i of a column sits
+ * at bottom-up Y = originY - i, so bit 0 is the visual top row and the origin
+ * sits at the graphic's bottom edge.
+ *
+ * `originX`/`originY` are the VISUAL top-left in dots (what the designer
+ * stores); `labelHeightDots` converts originY into the bottom-up origin the
+ * printer expects. The result is uppercase ASCII hex with no delimiters.
+ */
+export const encodeColumnsToNibblizedRle = (
+    bitmap: Bitmap,
+    originX: number,
+    originY: number,
+    labelHeightDots: number,
+): string => {
+    if (bitmap.length === 0 || bitmap[0].length === 0) return '';
+    const height = bitmap.length;
+    const width = bitmap[0].length;
+    const bytes: number[] = [];
+
+    // A data value (PRM Appendix E, "Data Types in RLE Files"): >= 128 fits in
+    // one lone 7-bit byte; anything larger needs the 13-bit two-byte form.
+    const pushData = (n: number) => {
+        if (n < 128) { bytes.push(0x80 | n); return; }
+        bytes.push(0x40 | ((n >> 7) & 0x3f), 0x80 | (n & 0x7f));
+    };
+
+    // Origin Y counts from the label's bottom edge and bit 0 is the visual top
+    // row (directGraphics.ts), so the bottom-up origin equals the label height
+    // minus the visual top.
+    bytes.push(0x21);
+    pushData(originX);
+    pushData(labelHeightDots - originY);
+
+    // Encode one column top-to-bottom, preferring transition runs
+    // (0x25/0x26) over raw 7-dot bytes (0x27) — the same choice BarTender makes.
+    const encodeColumn = (col: number[]) => {
+        const runs: { black: boolean; n: number }[] = [];
+        for (const bit of col) {
+            const black = bit === 1;
+            const last = runs.at(-1);
+            if (last && last.black === black) last.n++;
+            else runs.push({ black, n: 1 });
+        }
+        const transBytes = 1 + runs.reduce((s, r) => s + (r.n < 128 ? 1 : 2), 0);
+        // Raw bitmap bytes carry 7 dots each and the decoder keeps all 7, so
+        // raw mode is only exact when the column height is a multiple of 7.
+        // Otherwise the padding dots would spill into the bitmap.
+        const rawBytes = col.length % 7 === 0 ? 1 + col.length / 7 : Infinity;
+        if (transBytes <= rawBytes) {
+            bytes.push(runs[0].black ? 0x25 : 0x26);
+            for (const r of runs) pushData(r.n);
+        } else {
+            bytes.push(0x27);
+            for (let i = 0; i < col.length; i += 7) {
+                let v = 0x80;
+                for (let b = 0; b < 7 && i + b < col.length; b++) if (col[i + b]) v |= 1 << b;
+                bytes.push(v);
+            }
+        }
+    };
+
+    for (let x = 0; x < width; x++) {
+        // Bit 0 is the visual top row (see the origin comment above).
+        const col: number[] = [];
+        for (let y = 0; y < height; y++) col.push(bitmap[y][x] ? 1 : 0);
+        encodeColumn(col);
+        // Columns identical to this one collapse into one Repeat Last Line.
+        // The repeat copies the column STILL BUFFERED, so it must come before
+        // the 0x22 that commits it, and the count is the number of ADDITIONAL
+        // copies — the decoder adds them on top of the column just encoded
+        // (directGraphics.ts).
+        let copies = 0;
+        while (x + 1 + copies < width) {
+            let still = true;
+            for (let y = 0; y < height; y++) if ((bitmap[y][x + 1 + copies] ? 1 : 0) !== (bitmap[y][x] ? 1 : 0)) { still = false; break; }
+            if (!still) break;
+            copies++;
+        }
+        if (copies > 0) {
+            // The repeat commits the buffered column plus its copies, so no
+            // end-of-line follows it — a 0x22 here would flush the now-empty
+            // buffer and insert a blank column.
+            bytes.push(0x24);
+            pushData(copies);
+        } else if (x < width - 1) {
+            bytes.push(0x22);
+        }
+        x += copies;
+    }
+    bytes.push(0x28);
+    return bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join('');
+};
+
 /** Inverse of encodeBitmapColumns. Unknown characters decode as white. */
 export const decodeGraphicColumns = (width: number, height: number, data: string[]): Bitmap => {
     const bitmap: Bitmap = Array.from({ length: height }, () => new Array(width).fill(0));

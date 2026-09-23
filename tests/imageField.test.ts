@@ -11,6 +11,7 @@ import { appReducer, isDesignDirty } from '../App';
 import { generateIPL } from '../services/iplGenerator';
 import { parseIPL } from '../services/iplParser';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
+import { extractDirectGraphics } from '../services/ipl/directGraphics';
 import {
     resampleBitmap, imageDataSourceToBitmap, rebaseImage,
     invertBitmap, placeholderImage, MAX_IMAGE_DOTS,
@@ -167,6 +168,29 @@ describe('IPL round-trip', () => {
         expect(f.rotation).toBe(90);
         expect(f.x).toBeCloseTo(logo.x, 4);
         expect(f.y).toBeCloseTo(logo.y, 4);
+    });
+    it('Direct Graphics mode emits ASCII hex that decodes back to the same bitmap', async () => {
+        const dg: Design = { ...d, printerSettings: { ...d.printerSettings, directGraphics: true } };
+        const ipl = await generateIPL(dg);
+        // No stored graphic, no binary: the payload is hex inside <ESC>g1.
+        expect(ipl).not.toMatch(/<STX>G\d/);
+        expect(ipl).toContain('<STX><ESC>g1<ETX>');
+        expect(ipl).toMatch(/^[\x00-\x7f]*$/);
+
+        // The clipboard path: UTF-8 encode then decode must not lose a byte.
+        const pasted = new TextDecoder().decode(new TextEncoder().encode(ipl));
+        expect(pasted).toBe(ipl);
+
+        const label = parseViewerIPL(pasted);
+        expect(label.issues.filter(i => i.level !== 'info')).toEqual([]);
+        // The viewer reports the INK bounding box, which drops the logo's
+        // all-white last row, so the graphic element's height cannot express the
+        // full bitmap. Compare the decoded columns instead — they keep it.
+        const payload = pasted.match(/<ESC>g1<ETX>\n<STX>([0-9A-F]+)/)![1];
+        const [decodedDg] = extractDirectGraphics([payload], 1);
+        expect(decodedDg.origin).toEqual([12, 65 * DPM203 - 8]);
+        const cols = Array.from({ length: 6 }, (_, x) => decodedDg.pixels[12 + x].join(''));
+        expect(cols).toEqual(['11110', '10010', '10010', '00010', '10010', '11000']);
     });
     it('an unresolvable U reference still yields an empty (re-pickable) image layer', () => {
         const stream = '<STX><ESC>P<ETX>\n<STX>E1;F1<ETX>\n<STX>U9;o10,10;f0;c99<ETX>\n<STX>R<ETX>';

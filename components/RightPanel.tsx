@@ -216,6 +216,12 @@ const PrinterSettingsEditor: React.FC<{ settings: Design['printerSettings']; dis
                     {[...Array(20).keys()].map(i => <option key={i} value={String(i)}>{i}</option>)}
                 </select>
             </PropInput>
+            <PropInput label="Image Graphics" fullWidth>
+                <select value={settings.directGraphics ? 'g1' : 'stored'} onChange={e => handleUpdate({ directGraphics: e.target.value === 'g1' })} className={inputClasses} title="How image fields are written into the IPL stream">
+                    <option value="stored">Stored graphic (G/U, compact)</option>
+                    <option value="g1">Direct Graphics (ASCII hex, paste-safe)</option>
+                </select>
+            </PropInput>
         </div>
     );
 };

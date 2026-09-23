@@ -100,7 +100,10 @@ export const extractDirectGraphics = (frames: string[], mode: 0 | 1 = 0): Direct
     let colIdx = 0;
     let bits: number[] = [];
 
-    const flush = () => { cur.pixels[cur.origin[0] + colIdx] = bits; bits = []; colIdx++; };
+    // Copy the column: `bits` is one array reused for every column, so storing
+    // it by reference would empty every earlier column the moment the next one
+    // starts accumulating (only the last column of a graphic survived).
+    const flush = () => { cur.pixels[cur.origin[0] + colIdx] = bits.slice(); bits = []; colIdx++; };
 
     for (const f of frames) {
         // Literal-notation frames (regular IPL commands interleaved with the
@@ -133,9 +136,35 @@ export const extractDirectGraphics = (frames: string[], mode: 0 | 1 = 0): Direct
                 continue;
             }
             if (b === 0x24) {
+                // Repeat Last Line (PRM Appendix E). In every stream BarTender
+                // actually emits, this follows an end-of-line (0x22) that has
+                // already emptied the buffer, so it advances the column index
+                // by n and copies no ink — tes1/tes2's measured origins depend
+                // on exactly that spacing. Copying the previously committed
+                // column here would widen those graphics, so the repeat copies
+                // only what is still buffered.
                 const [n, used] = readData(bytes, i + 1);
                 i += used;
-                for (let k = 0; k < n; k++) flush();
+                if (bits.length > 0) {
+                    // The column is still buffered, so the repeat really does
+                    // copy it. Commit it first, then write n additional copies:
+                    // the count is the number of EXTRA columns (PRM Appendix E,
+                    // "copy the previously defined column n number of times").
+                    // Snapshot once — flush() clears the buffer, so repeating by
+                    // flushing n times would keep data in only the first copy.
+                    const snap = bits.slice();
+                    flush();
+                    for (let k = 0; k < n; k++) {
+                        cur.pixels[cur.origin[0] + colIdx] = snap.slice();
+                        colIdx++;
+                    }
+                } else {
+                    // Nothing buffered: BarTender emits 0x24 only after 0x22
+                    // has emptied the buffer, and uses it purely to skip
+                    // columns. Storing an empty column here would shift every
+                    // column after it (tes1/tes2's measured origins).
+                    colIdx += n;
+                }
                 continue;
             }
             if (b === 0x25 || b === 0x26) {

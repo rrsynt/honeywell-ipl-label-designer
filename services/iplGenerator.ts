@@ -1,7 +1,7 @@
 import type { Design, Field, TextField, BarcodeField, LineField, BoxField, ImageField, PrinterSettings, FieldDataSource, DataSource, DateFormat, TimeFormat } from '../types';
 import { DPI_MAP, FONT_MAP } from '../constants';
 import { getObjectBoundingBox } from './geometry';
-import { encodeBitmapColumns } from './ipl/graphics';
+import { encodeBitmapColumns, encodeColumnsToNibblizedRle } from './ipl/graphics';
 import { bitmapRowsToMatrix } from './imageField';
 
 export interface BatchData {
@@ -76,7 +76,7 @@ const sanitizeFieldName = (name: string): string => {
 export const generateIPL = async (design: Design, batchData?: BatchData): Promise<string> => {
     if (!design) return "";
     const { printerSettings, labelSettings, fields, dataSources } = design;
-    const { dpi, quantity, mediaSenseMode, mediaType, printSpeed, darkness } = printerSettings;
+    const { dpi, quantity, mediaSenseMode, mediaType, printSpeed, darkness, directGraphics } = printerSettings;
     const { width, height, orientation } = labelSettings;
     const EOL = '\n';
     
@@ -118,11 +118,28 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
             processedImages.push({ fieldId: field.id, graphicId, graphicData });
         }
     }
-    // Image fields ARE rasters: pack the row-bitmap straight into the
-    // classic column-major 6-bit strips the printer downloads (PRM p.186).
+    // Image fields ARE rasters. With "Direct Graphics" on they become
+    // nibblized <ESC>g1 payloads emitted at print time (below); otherwise they
+    // pack into the classic column-major 6-bit strips the printer downloads
+    // (PRM p.186).
+    const directGraphicImages: { field: ImageField; hex: string }[] = [];
     for (const field of visibleFields) {
         if (field.type !== 'image') continue;
         if (field.bitmap.length === 0 || !field.bitmap[0]) continue;
+        if (directGraphics) {
+            const bitmap = bitmapRowsToMatrix(field.bitmap);
+            const labelHeightDots = mmToDots(isLandscape ? width : height, dpi);
+            // Landscape rotates the whole label, so the graphic's origin moves
+            // with it: new X is the distance from the portrait label's right
+            // edge, new Y the distance from its top (same rule as fields below).
+            const oxDots = mmToDots(isLandscape ? height - field.y - field.height : field.x, dpi);
+            const oyDots = mmToDots(isLandscape ? field.x : field.y, dpi);
+            directGraphicImages.push({
+                field,
+                hex: encodeColumnsToNibblizedRle(bitmap, oxDots, oyDots, labelHeightDots),
+            });
+            continue;
+        }
         const graphicData = {
             data: encodeBitmapColumns(bitmapRowsToMatrix(field.bitmap)),
             width: field.bitmap[0].length,
@@ -151,7 +168,7 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
         }
     }
 
-    if (visibleFields.length === 0 && processedImages.length === 0) {
+    if (visibleFields.length === 0 && processedImages.length === 0 && directGraphicImages.length === 0) {
         commands.push(`<STX>E1;F1<ETX>`);
         commands.push(`<STX>R<ETX>`);
         commands.push(`<STX><ESC>E1<CAN><ETB><FF><ETX>`);
@@ -336,6 +353,9 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
                 break;
             }
             case 'image': {
+                // Direct Graphics mode places the image from its own payload
+                // (emitted after the format), so it needs no format field.
+                if (directGraphics) break;
                 // U placement carries only o/f/c — the raster's own x/y header
                 // defines its size (PRM p.186/189), matching how the printer
                 // treats any downloaded graphic.
@@ -350,7 +370,16 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
     });
     
     commands.push(`<STX>R<ETX>`);
-    
+
+    // Direct Graphics image straight into the printer's image bands, so they
+    // belong to the print stream rather than the stored format. One <ESC>g1
+    // region per image: the hex is pure ASCII, which is the whole point of
+    // mode 1 — the stream survives clipboard paste and UTF-8 transport.
+    for (const { hex } of directGraphicImages) {
+        commands.push(`<STX><ESC>g1<ETX>`);
+        commands.push(`<STX>${hex}<ETX>`);
+    }
+
     // --- 3. Print Job Execution ---
     if (batchData) {
         // One print invocation per data row: the standard IPL pattern for
