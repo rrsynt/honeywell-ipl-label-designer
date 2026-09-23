@@ -103,6 +103,20 @@ describe('<ESC>g1 nibblized Direct Graphics', () => {
             .toEqual(gfx(binary).map(e => [e.ox, e.oy, (e as unknown as { data: string }).data]));
     });
 
+    it('keeps a graphic whose de-nibblized bytes start by spelling a command', () => {
+        // 3C413E decodes to "<A>", which the literal-command classifier would
+        // skip. In mode 1 the whole bitmap is one joined frame, so skipping it
+        // would drop the valid graphic that follows — not just one frame.
+        const src =
+            '<STX><ESC>g1<ETX>' +
+            '<STX>3C413E<ETX>' +
+            '<STX>21808A25832228<ETX>';
+        const label = parseViewerIPL(src);
+        const gfx = label.elements.filter(e => e.kind === 'graphic');
+        expect(gfx).toHaveLength(1);
+        expect(label.issues.filter(i => i.level === 'error')).toHaveLength(0);
+    });
+
     it('warns once on an odd nibble and on an unsupported mode, without crashing', () => {
         const odd =
             '<STX><ESC>g1<ETX><STX>218043C228F<ETX>';

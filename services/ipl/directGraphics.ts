@@ -84,9 +84,16 @@ export const extractDirectGraphics = (frames: string[], mode: 0 | 1 = 0): Direct
     if (mode === 1) {
         // One continuous hex stream: frame boundaries are an artifact of how
         // the editor split the paste, not of the bitmap, so a hex pair must be
-        // allowed to straddle them.
+        // allowed to straddle them. The literal-command classifier below must
+        // NOT see this string — decoded bytes can legitimately spell "<A>" or
+        // "<ESC>" (hex 3C..3E), and dropping the one joined frame would discard
+        // the whole bitmap instead of a single frame as it does in mode 0.
         const { bytes } = nibblizedToByteString(frames.join(''));
-        frames = bytes ? [bytes] : [];
+        // The leading sentinel keeps the classifier from matching (it requires
+        // the frame to START with "<"), while charCodeAt() & 0xff collapses it
+        // to 0x100 & 0xff = 0 — a below-0x21 byte the RLE loop ignores, so it
+        // never becomes bitmap data or glues onto a preceding data value.
+        frames = bytes ? [`Ā${bytes}`] : [];
     }
     const out: DirectGraphic[] = [];
     let cur: DirectGraphic = { origin: [0, 0], pixels: [] };

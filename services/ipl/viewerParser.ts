@@ -314,7 +314,7 @@ export class IPLViewerParser {
     private decodeDirectGraphics(): void {
         const mode = this.printer.directGraphicsMode ?? 0;
         if (mode === 1 && nibblizedToByteString(this.printer.directGraphicsFrames.join('')).oddNibble) {
-            this.printer.issue('warning', 'direct-graphics-odd-nibble', 'Nibblized Direct Graphics (<ESC>g1) ended on a single hex digit; the trailing nibble was dropped.', '<ESC>g1');
+            this.printer.issue('warning', 'direct-graphics-odd-nibble', 'Nibblized Direct Graphics (<ESC>g1) has one unpaired hex digit (a truncated pair or a non-hex character splitting a pair); that nibble was dropped.', '<ESC>g1');
         }
         const graphics = extractDirectGraphics(this.printer.directGraphicsFrames, mode);
         this.printer.pendingDirectGraphics.push(...graphics);
