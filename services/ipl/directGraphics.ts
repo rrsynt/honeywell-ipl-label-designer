@@ -1,8 +1,13 @@
 // IPL Direct Graphics Mode decoder (PRM Appendix E).
 //
-// <ESC>g0 enters Direct Graphics mode; the frames that follow carry a
-// run-length-encoded bitmap that the printer images straight into its image
-// bands (no stored format). BarTender emits this for shapes/vector art.
+// <ESC>g0 enters Direct Graphics mode with raw 8-bit payloads; <ESC>g1 enters
+// the same mode but nibblized: every byte is written as two ASCII hex digits
+// (PRM Appendix E, "m" parameter — "1,B" becomes the byte 0x1B). BarTender's
+// "Binary Downloading = OFF" driver setting emits g1, which is 100% printable
+// ASCII and therefore survives clipboard/UTF-8 paste where g0 cannot.
+// The frames that follow carry a run-length-encoded bitmap that the printer
+// images straight into its image bands (no stored format). BarTender emits
+// this for shapes/vector art.
 //
 // Encoding (all data bytes are raw binary inside literal <STX>/<ETX> frames):
 //   0x21 x y                  change origin — x, y each a data value (below)
@@ -41,14 +46,48 @@ const readData = (bytes: number[], i: number): [number, number] => {
 };
 
 /**
+ * Decodes a `<ESC>g1` nibblized payload back to the raw byte string the g0
+ * decoder expects. Only `[0-9A-Fa-f]` counts: whitespace and newlines that an
+ * editor inserts when wrapping a pasted hex stream are dropped. An odd number
+ * of hex digits (a truncated pair) is reported so the caller can warn — the
+ * trailing nibble is dropped rather than shifting every following byte.
+ */
+export const nibblizedToByteString = (hex: string): { bytes: string; oddNibble: boolean } => {
+    let out = '';
+    let hi: number | null = null;
+    for (let i = 0; i < hex.length; i++) {
+        const c = hex.charCodeAt(i);
+        const d = c >= 48 && c <= 57 ? c - 48
+            : c >= 65 && c <= 70 ? c - 55
+            : c >= 97 && c <= 102 ? c - 87
+            : -1;
+        if (d < 0) continue;
+        if (hi === null) hi = d;
+        else { out += String.fromCharCode((hi << 4) | d); hi = null; }
+    }
+    return { bytes: out, oddNibble: hi !== null };
+};
+
+/**
  * Extracts Direct Graphic bitmaps from tokenized IPL frames. Feed ALL frames
- * of the stream after `<ESC>g0` was seen; decoding continues across frames
- * until an end-of-bitmap (0x28) closes each graphic.
+ * of the stream after `<ESC>g0` (or `<ESC>g1`) was seen; decoding continues
+ * across frames until an end-of-bitmap (0x28) closes each graphic.
  *
  * @param frames frame bodies (STX/ETX stripped), in stream order
+ * @param mode 0 = raw 8-bit payloads (g0, the default); 1 = nibblized ASCII
+ *   hex payloads (g1). In mode 1 the frames are de-nibblized first and the
+ *   literal-command classifier is skipped — a hex frame can never start with
+ *   `<`, but its decoded bytes must reach the RLE decoder unfiltered.
  * @returns decoded graphics (possibly several per stream)
  */
-export const extractDirectGraphics = (frames: string[]): DirectGraphic[] => {
+export const extractDirectGraphics = (frames: string[], mode: 0 | 1 = 0): DirectGraphic[] => {
+    if (mode === 1) {
+        // One continuous hex stream: frame boundaries are an artifact of how
+        // the editor split the paste, not of the bitmap, so a hex pair must be
+        // allowed to straddle them.
+        const { bytes } = nibblizedToByteString(frames.join(''));
+        frames = bytes ? [bytes] : [];
+    }
     const out: DirectGraphic[] = [];
     let cur: DirectGraphic = { origin: [0, 0], pixels: [] };
     let colIdx = 0;

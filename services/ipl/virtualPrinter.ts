@@ -59,8 +59,10 @@ export class VirtualPrinter {
     /** Source line of the frame currently being parsed, for issue reporting. */
     currentLine: number | undefined = undefined;
 
-    /** Direct Graphics Mode state (PRM Appendix E). */
-    directGraphicsActive = false;
+    /** Direct Graphics Mode state (PRM Appendix E).
+     *  0 = `<ESC>g0` raw 8-bit payloads, 1 = `<ESC>g1` nibblized ASCII hex,
+     *  null = mode not entered. */
+    directGraphicsMode: 0 | 1 | null = null;
     directGraphicsFrames: string[] = [];
     /**
      * Decoded DG graphics awaiting placement. Their origins are measured from

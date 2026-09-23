@@ -10,7 +10,7 @@ import type {
 import { isBarcodeEngineReady, measureBarcode, applyI2of5Padding, interpretiveText } from './barcodes';
 import { VirtualPrinter, KIND_PREFIX } from './virtualPrinter';
 import { FONT_MAP } from '../../constants';
-import { extractDirectGraphics, directGraphicToBitmap } from './directGraphics';
+import { extractDirectGraphics, nibblizedToByteString, directGraphicToBitmap } from './directGraphics';
 import { encodeBitmapColumns } from './graphics';
 
 // Font ids known to the designer — derived from constants.FONT_MAP so the
@@ -155,10 +155,10 @@ export class IPLViewerParser {
         this.printer.currentLine = undefined;
         // A stream that ends inside Direct Graphics mode (no 0x28
         // end-of-bitmap) still deserves its partial decode — report it.
-        if (this.printer.directGraphicsActive && this.printer.directGraphicsFrames.length > 0) {
-            this.printer.issue('warning', 'direct-graphics-unterminated', 'Direct Graphics mode (<ESC>g0) was entered but the stream ended before the end-of-bitmap command (0x28). Decoding what arrived.');
+        if (this.printer.directGraphicsMode !== null && this.printer.directGraphicsFrames.length > 0) {
+            this.printer.issue('warning', 'direct-graphics-unterminated', `Direct Graphics mode (<ESC>g${this.printer.directGraphicsMode}) was entered but the stream ended before the end-of-bitmap command (0x28). Decoding what arrived.`);
             this.decodeDirectGraphics();
-            this.printer.directGraphicsActive = false;
+            this.printer.directGraphicsMode = null;
             this.printer.directGraphicsFrames = [];
         }
 
@@ -296,11 +296,30 @@ export class IPLViewerParser {
      * from the bottom edge), which may be declared after the graphics — or
      * not at all — so elements are placed at end of parse().
      */
+    /**
+     * True when the buffered Direct Graphics payload contains the end-of-bitmap
+     * marker (0x28). g0 carries raw bytes, so the marker is a byte inside the
+     * newest frame; g1 carries ASCII hex, so it is the hex pair "28" — which an
+     * editor's line wrap may split across frames, hence the join.
+     */
+    private dgBitmapComplete(): boolean {
+        if (this.printer.directGraphicsMode === 1) {
+            return nibblizedToByteString(this.printer.directGraphicsFrames.join('')).bytes.includes('\x28');
+        }
+        const last = this.printer.directGraphicsFrames.at(-1) ?? '';
+        for (let i = 0; i < last.length; i++) if ((last.charCodeAt(i) & 0xff) === 0x28) return true;
+        return false;
+    }
+
     private decodeDirectGraphics(): void {
-        const graphics = extractDirectGraphics(this.printer.directGraphicsFrames);
+        const mode = this.printer.directGraphicsMode ?? 0;
+        if (mode === 1 && nibblizedToByteString(this.printer.directGraphicsFrames.join('')).oddNibble) {
+            this.printer.issue('warning', 'direct-graphics-odd-nibble', 'Nibblized Direct Graphics (<ESC>g1) ended on a single hex digit; the trailing nibble was dropped.', '<ESC>g1');
+        }
+        const graphics = extractDirectGraphics(this.printer.directGraphicsFrames, mode);
         this.printer.pendingDirectGraphics.push(...graphics);
         if (graphics.length > 0) {
-            this.printer.issue('info', 'direct-graphics', `${graphics.length} direct graphic(s) decoded from RLE data.`, '<ESC>g0');
+            this.printer.issue('info', 'direct-graphics', `${graphics.length} direct graphic(s) decoded from RLE data.`, `<ESC>g${mode}`);
         }
     }
 
@@ -439,24 +458,24 @@ export class IPLViewerParser {
             this.printer.closeFormat();
             return;
         }
-        // Direct Graphics payload frames are binary (start with bytes like
-        // 0x21/0x26/0x27) — they must bypass the ESC dispatch below.
-        if (this.printer.directGraphicsActive) {
+        // Direct Graphics payload frames are binary (g0: bytes like
+        // 0x21/0x26/0x27) or ASCII hex pairs (g1) — either way they must
+        // bypass the ESC dispatch below.
+        if (this.printer.directGraphicsMode !== null) {
             if (this.printer.directGraphicsFrames.length >= MAX_DG_FRAMES) {
                 // Unterminated DG mode with an endless payload: stop buffering
                 // (decode what arrived) and leave the mode so later frames
                 // parse as commands again instead of filling memory forever.
-                this.printer.issue('warning', 'direct-graphics-limit', `Direct Graphics mode received more than ${MAX_DG_FRAMES} payload frames without an end-of-bitmap (0x28); the remainder was ignored.`, '<ESC>g0');
+                this.printer.issue('warning', 'direct-graphics-limit', `Direct Graphics mode received more than ${MAX_DG_FRAMES} payload frames without an end-of-bitmap (0x28); the remainder was ignored.`, `<ESC>g${this.printer.directGraphicsMode}`);
                 this.decodeDirectGraphics();
-                this.printer.directGraphicsActive = false;
+                this.printer.directGraphicsMode = null;
                 this.printer.directGraphicsFrames = [];
                 return;
             }
             this.printer.directGraphicsFrames.push(frame);
-            const last = frame.charCodeAt(frame.length - 1) & 0xff;
-            if (last === 0x28) {
+            if (this.dgBitmapComplete()) {
                 this.decodeDirectGraphics();
-                this.printer.directGraphicsActive = false;
+                this.printer.directGraphicsMode = null;
                 this.printer.directGraphicsFrames = [];
             }
             return;
@@ -637,9 +656,13 @@ export class IPLViewerParser {
             case 'I': // handled at field level when standalone
                 break;
             case 'g': // Direct Graphics Mode, Select (PRM p.96 / Appendix E)
-                if (rest.startsWith('0')) {
-                    this.printer.directGraphicsActive = true;
+                // m=0: raw 8-bit payloads. m=1: nibblized ASCII hex — every byte
+                // is two hex digits, so the stream survives clipboard paste.
+                if (rest.startsWith('0') || rest.startsWith('1')) {
+                    this.printer.directGraphicsMode = rest.startsWith('1') ? 1 : 0;
                     this.printer.directGraphicsFrames = [];
+                } else if (rest.length > 0) {
+                    this.printer.issue('warning', 'direct-graphics-unknown-mode', `Direct Graphics mode <ESC>g${rest.charAt(0)} is not supported; only g0 (binary) and g1 (nibblized hex) are decoded.`, frame.slice(0, 24));
                 }
                 break;
             default:
