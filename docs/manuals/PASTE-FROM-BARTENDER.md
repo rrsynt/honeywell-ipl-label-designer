@@ -64,6 +64,40 @@ If you see corrupted output after pasting:
 1. Use the **"Open File"** button instead
 2. Or drag-drop the `.ipl` file onto the canvas
 
+A paste that already replaced the high bytes cannot be repaired — the original
+values are gone. The banner's **Convert to ASCII (g1)** only helps when the
+bytes are still intact, which means the stream was opened from a file first.
+
+---
+
+## Recommended BarTender driver settings
+
+Verified against the Seagull IPL driver help (`Options.html`, `PrinterOptions.html`,
+driver 2023.4). Path: **Devices & Printers → Intermec PD43 (203 dpi) - IPL →
+Printer Properties → Device Settings**.
+
+| Setting | Page | Value | Why |
+|---|---|---|---|
+| Readable Control Characters | Printer Options | **ON** | Sends `<STX>` instead of byte 0x02, so the stream can be read, edited and pasted |
+| Use Direct Graphics | Options | **OFF** | Graphics go out as stored-format `G`/`u` rows, pure ASCII. Most compatible; the `bartender-logo` golden proves this path |
+| | | **ON** | Graphics go out as compressed Direct Graphics. Smaller and faster, but see the next row |
+| Binary Downloading | Options | **OFF** whenever Direct Graphics is ON | Sends each byte as two ASCII hex digits (`<ESC>g1`) instead of raw 8-bit (`<ESC>g0`). The driver's own words: disable it "if you need to edit the IPL manually in a text editor". g1 pastes losslessly and renders identically |
+| Use Temporary Format | Options | **OFF** | Prints to a numbered format instead of the temporary `*` format, which the printer deletes after the job |
+
+The two combinations worth using:
+
+- **Mode A** — Direct Graphics OFF. Plain ASCII throughout, works everywhere, including this viewer.
+- **Mode B** — Direct Graphics ON, Binary Downloading OFF. Hex graphics (`<ESC>g1`), still plain ASCII, more compact. This viewer renders it identically to the binary form.
+
+Direct Graphics ON with Binary Downloading left ON is the combination that breaks
+paste: the file is fine, but copying it through a browser destroys it. If you
+already have such a file, open it with **Open File** and use **Copy ASCII (g1)**
+to get the paste-safe equivalent.
+
+**Fix Direct Graphics Positioning** (Printer Options) compensates for the offset
+early IPL3 firmware applied to direct graphics. Leave it at the driver default
+unless graphics print shifted relative to the other fields on the target printer.
+
 ---
 
 ## Technical Details

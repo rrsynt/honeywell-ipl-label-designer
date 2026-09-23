@@ -173,7 +173,7 @@ BarTender Starter/Standalone mungkin menolak COM automation penuh atau menampilk
 
 ---
 
-## 8. Workstream 6 — Dokumentasi Driver Guide (user-facing)
+## 8. Workstream 6 — Dokumentasi Driver Guide (user-facing) [DONE 2026-09-24]
 
 Perbarui `docs/manuals/PASTE-FROM-BARTENDER.md` dengan seksi **Setting Driver Rekomendasi** (dari CHM yang sudah diekstrak, terverifikasi):
 ```
@@ -185,6 +185,8 @@ Devices & Printers → Intermec PD43 - IPL → Printer Properties → Device Set
   (Opsional) Fix Direct Graphics Positioning: sesuai firmware printer target
 ```
 Plus catatan: hasil mode B baru render sempurna setelah Workstream 1 masuk; mode A sudah bekerja sekarang (golden logo membuktikan).
+
+**Selesai 2026-09-24.** Seksi "Recommended BarTender driver settings" ada di `docs/manuals/PASTE-FROM-BARTENDER.md`. Keempat nama setting diverifikasi kata-per-kata terhadap CHM driver Seagull 2023.4 (`C:\Temp_bt_chm\ipl\Options.html` + `PrinterOptions.html`), termasuk kalimat driver sendiri bahwa Binary Downloading dimatikan "if you need to edit the IPL manually in a text editor". Catatan plan bahwa mode B "baru render sempurna setelah Workstream 1" sudah terlewati — W1 masuk 2026-09-23, jadi mode B sekarang juga didukung.
 
 ---
 
