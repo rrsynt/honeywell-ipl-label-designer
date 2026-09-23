@@ -220,6 +220,7 @@ npm run dev → buka viewer → paste bartender-logo.ipl → render benar
 
 - [ ] Stream BarTender mode A (G/u ASCII): paste → preview identik — **sudah terbukti (logo golden)**, pin sebagai test eksplisit `bartender ASCII paste roundtrip`.
 - [x] Stream mode B (g1 hex): parser + renderer support (2026-09-23, `tests/directGraphicsHex.test.ts`: rewrite g0→g1 dari tes1 & tes2 menghasilkan elemen grafis identik, termasuk setelah paste UTF-8 + line wrap). Golden PNG pair belum dibuat — menyusul di Workstream 2.
+- [x] Workstream 4 (2026-09-23): "Copy ASCII (g1)" menggantikan "Copy Safe" — `convertDirectGraphicsToHex` memakai tokenizer resmi dan meng-emit `<ESC>g1` sah (bukan escape `\xHH`); banner paste punya tombol "Convert to ASCII (g1)"; tes diag-* diganti `tests/asciiCopy.test.ts`. Sisa: golden pair PNG (W2) + opsi emit g1 di generator (W3).
 - [ ] Stream mode C (g0 biner + mojibake paste): tidak bisa diselamatkan (fakta matematis) → ditangani W4 (deteksi + ASCII fix button + doc) TANPA preview salah yang senyap.
 - [ ] Designer generate → paste kembali → preview identik (rotasi & semua field), termasuk gambar via g1.
 - [ ] Audit table W2 terisi; tiap gap → issue/fix/tes.

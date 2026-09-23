@@ -9,7 +9,7 @@ import { frameAtCaret, lookupHelpForFrame, type CommandHelp } from '../services/
 import { resolveLabelAtBatch, totalLabelCount } from '../services/ipl/odometer';
 import { streamBatchPages, batchPageCount, MAX_BATCH_EXPORT } from '../services/batchExport';
 import { createZipBlob, zipEntryBytes, numberedPngName, sanitizeBaseName, type ZipEntry } from '../services/zipStore';
-import { bytesToByteString } from '../services/ipl/fileBytes';
+import { bytesToByteString, detectMojibake, convertDirectGraphicsToHex } from '../services/ipl/fileBytes';
 import { notify, requestConfirm } from '../services/uiDialogs';
 import { sendIplViaBridge, pingBridge } from '../services/bridgeSend';
 import { getPrinterTarget, setPrinterTarget } from '../services/printerTarget';
@@ -101,6 +101,7 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
     const [zoomFactor, setZoomFactor] = useState(1);
     const [basePxPerDot, setBasePxPerDot] = useState(0.5);
     const [copied, setCopied] = useState(false);
+    const [safeCopied, setSafeCopied] = useState(false);
     const [exporting, setExporting] = useState(false);
     // Batch K: host/port hydrate from the persisted printer target (shared
     // with the designer's Send Job) and save back on Test/Send.
@@ -118,6 +119,8 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
     const [bwipReady, setBwipReady] = useState(false);
     const [caretHelp, setCaretHelp] = useState<CommandHelp | null>(null);
     const [previewBatch, setPreviewBatch] = useState(0);
+    /** Warn about potential mojibake when user pastes cp1252/ANSI-encoded IPL into the textarea. */
+    const [pasteWarning, setPasteWarning] = useState<string | null>(null);
     /** Manual paper size (mm). When set, overrides SI W/L and content bounds —
      * BarTender exports omit <SI>L so the real label height is otherwise lost.
      * Persisted in localStorage: real stock size rarely changes between sessions. */
@@ -347,6 +350,26 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
         e.target.value = '';
     }, [loadFile]);
 
+    /** Handle textarea changes with mojibake detection for pasted BarTender IPL. */
+    const handleTextareaChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const val = e.target.value;
+        const { hasCorruption, highCharCount } = detectMojibake(val);
+
+        if (highCharCount > 50) {
+            // Show friendly warning when significant non-ASCII content detected
+            setPasteWarning(
+                `⚠️ Detected ${highCharCount} non-ASCII character(s). Your source may use Windows ANSI (cp1252) encoding. Pasting can corrupt raw binary data.`
+            );
+        } else if (hasCorruption) {
+            // Low count but still present — show info message
+            setPasteWarning(`ℹ️ Non-ASCII characters found (${highCharCount}). Graphics MAY be corrupted.`);
+        } else {
+            setPasteWarning(null);
+        }
+
+        setIplCode(val);
+    }, []);
+
     const onDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
         setDropActive(false);
@@ -363,6 +386,33 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
         } catch {
             window.location.hash = `ipl=${encodeIPLToHash(debouncedCode)}`;
         }
+    };
+
+    /** Copy a clipboard-safe form of the IPL: binary Direct Graphics (<ESC>g0)
+     * become nibblized hex (<ESC>g1), which is pure ASCII, prints identically,
+     * and survives any UTF-8 paste. Streams without g0 copy unchanged. */
+    const handleCopySafe = async () => {
+        const { ipl } = convertDirectGraphicsToHex(debouncedCode);
+        try {
+            await navigator.clipboard.writeText(ipl);
+            setSafeCopied(true);
+            setTimeout(() => setSafeCopied(false), 1800);
+        } catch {
+            notify('Clipboard unavailable — copy blocked by the browser.');
+        }
+    };
+
+    /** Replace the editor contents with the g1 rewrite, in place. Used by the
+     * paste-warning banner: a binary g0 paste cannot render (its bytes were
+     * already lost to UTF-8), but a still-intact g0 stream converts losslessly. */
+    const handleConvertToHex = () => {
+        const { ipl, converted } = convertDirectGraphicsToHex(iplCode);
+        if (!converted) {
+            notify('No binary Direct Graphics (<ESC>g0) found — nothing to convert. If this came from a paste, the bytes are already lost; open the file instead.');
+            return;
+        }
+        setIplCode(ipl);
+        setPasteWarning(null);
     };
 
     const getPngDataUrl = (): string | null => {
@@ -511,6 +561,10 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                             className="text-xs px-2 py-1.5 rounded bg-gray-700 hover:bg-gray-600 flex items-center gap-1">
                             <span className="material-icons text-sm">{copied ? 'check' : 'link'}</span>{copied ? 'Copied' : 'Share'}
                         </button>
+                        <button onClick={handleCopySafe} title="Copy with binary Direct Graphics rewritten as printer-supported hex (<ESC>g1): paste-safe and prints identically"
+                            className="text-xs px-2 py-1.5 rounded bg-indigo-700 hover:bg-indigo-600 flex items-center gap-1">
+                            <span className="material-icons text-sm">{safeCopied ? 'check' : 'content_copy'}</span>{safeCopied ? 'Copied' : 'Copy ASCII (g1)'}
+                        </button>
                         <button onClick={() => { window.location.hash = ''; onClose(); }}
                             className="p-1 rounded-full hover:bg-gray-700"><span className="material-icons">close</span></button>
                     </div>
@@ -550,10 +604,38 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                                 </select>
                             </div>
                         </div>
+                        {pasteWarning && (
+                            <div className="mb-3 rounded-md border-l-4 border-amber-500 bg-amber-900/20 p-3">
+                                <div className="flex items-start gap-2">
+                                    <span className="text-lg">⚠️</span>
+                                    <div>
+                                        <p className="text-sm font-semibold text-amber-400">{pasteWarning}</p>
+                                        <p className="text-xs text-amber-300 mt-1">
+                                            This stream carries binary Direct Graphics. A UTF-8 paste loses those bytes
+                                            permanently — use{" "}
+                                            <button
+                                                onClick={() => fileInputRef.current?.click()}
+                                                className="underline hover:text-blue-300"
+                                            >
+                                                Open File
+                                            </button>{" "}
+                                            or drag-drop for a byte-exact import. If the bytes are still intact,{" "}
+                                            <button
+                                                onClick={handleConvertToHex}
+                                                className="underline hover:text-blue-300 font-semibold"
+                                            >
+                                                Convert to ASCII (g1)
+                                            </button>{" "}
+                                            rewrites them as printer-supported hex that pastes safely.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                         <textarea
                             ref={textareaRef}
                             value={iplCode}
-                            onChange={(e) => setIplCode(e.target.value)}
+                            onChange={handleTextareaChange}
                             onSelect={updateCaretHelp}
                             onKeyUp={updateCaretHelp}
                             onClick={updateCaretHelp}
