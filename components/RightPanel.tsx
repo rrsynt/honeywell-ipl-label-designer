@@ -38,18 +38,25 @@ const convertToMm = (value: number, unit: 'mm' | 'cm' | 'in'): number => {
 
 
 const LabelSettingsEditor: React.FC<{ settings: Design['labelSettings']; dispatch: React.Dispatch<any>; }> = ({ settings, dispatch }) => {
-    
+
     const [width, setWidth] = useState(convertFromMm(settings.width, settings.unit).toFixed(2));
     const [height, setHeight] = useState(convertFromMm(settings.height, settings.unit).toFixed(2));
     const [cols, setCols] = useState((settings.columns || 1).toString());
     const [rows, setRows] = useState((settings.rows || 1).toString());
+    // A panel switch unmounts these inputs, and React fires no blur on
+    // unmount — so a blur-only commit loses whatever was typed. Track which
+    // field has focus so the sync effect below cannot clobber a live edit.
+    const focusedRef = useRef<string | null>(null);
 
     useEffect(() => {
-        setWidth(convertFromMm(settings.width, settings.unit).toFixed(2));
-        setHeight(convertFromMm(settings.height, settings.unit).toFixed(2));
-        setCols((settings.columns || 1).toString());
-        setRows((settings.rows || 1).toString());
+        if (focusedRef.current !== 'width') setWidth(convertFromMm(settings.width, settings.unit).toFixed(2));
+        if (focusedRef.current !== 'height') setHeight(convertFromMm(settings.height, settings.unit).toFixed(2));
+        if (focusedRef.current !== 'columns') setCols((settings.columns || 1).toString());
+        if (focusedRef.current !== 'rows') setRows((settings.rows || 1).toString());
     }, [settings]);
+
+    const markFocused = (id: string) => () => { focusedRef.current = id; };
+    const markBlurred = () => { focusedRef.current = null; };
 
     const handleUpdate = (updates: Partial<Design['labelSettings']>) => {
         dispatch({ type: 'UPDATE_SETTING', payload: { settingType: 'labelSettings', updates } });
@@ -68,7 +75,7 @@ const LabelSettingsEditor: React.FC<{ settings: Design['labelSettings']; dispatc
         if (isNaN(numValue) || numValue < 0.1) {
             numValue = convertFromMm(fallback, settings.unit);
         }
-        
+
         const valueInMm = convertToMm(numValue, settings.unit);
 
         if (valueInMm !== settings[propName]) {
@@ -78,7 +85,20 @@ const LabelSettingsEditor: React.FC<{ settings: Design['labelSettings']; dispatc
             if (propName === 'height') setHeight(numValue.toFixed(2));
         }
     };
-    
+
+    // Commit while typing, not on blur: switching tabs unmounts these inputs
+    // and React fires no blur then, so a blur-only commit loses the edit. An
+    // incomplete entry (empty, or the "1" of "150") is left to blur to
+    // normalize, never written to the design mid-keystroke.
+    const handleDimensionChange = (e: React.ChangeEvent<HTMLInputElement>, propName: 'width' | 'height') => {
+        const raw = e.target.value;
+        if (propName === 'width') setWidth(raw); else setHeight(raw);
+        const n = parseFloat(raw);
+        if (raw.trim() === '' || isNaN(n) || n < 0.1) return;
+        const valueInMm = convertToMm(n, settings.unit);
+        if (valueInMm !== settings[propName]) handleUpdate({ [propName]: valueInMm });
+    };
+
     const handleOrientationChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         handleUpdate({ orientation: e.target.value as 'portrait' | 'landscape' });
     };
@@ -100,6 +120,13 @@ const LabelSettingsEditor: React.FC<{ settings: Design['labelSettings']; dispatc
          }
     };
 
+    const handleGridChange = (e: React.ChangeEvent<HTMLInputElement>, propName: 'columns' | 'rows') => {
+        const raw = e.target.value;
+        if (propName === 'columns') setCols(raw); else setRows(raw);
+        const n = parseInt(raw);
+        if (raw.trim() === '' || isNaN(n) || n < 1) return;
+        if (n !== (settings[propName] || 1)) handleUpdate({ [propName]: n });
+    };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') e.currentTarget.blur();
@@ -107,8 +134,8 @@ const LabelSettingsEditor: React.FC<{ settings: Design['labelSettings']; dispatc
 
     return (
         <div className="grid grid-cols-2 gap-3">
-            <PropInput label={`Width (${settings.unit})`}><input type="number" min="1" step="0.1" value={width} onChange={e => setWidth(e.target.value)} onBlur={() => handleDimensionBlur(width, 'width')} onKeyDown={handleKeyDown} className={inputClasses} title="Total width of the label stock"/></PropInput>
-            <PropInput label={`Height (${settings.unit})`}><input type="number" min="1" step="0.1" value={height} onChange={e => setHeight(e.target.value)} onBlur={() => handleDimensionBlur(height, 'height')} onKeyDown={handleKeyDown} className={inputClasses} title="Total height of the label stock"/></PropInput>
+            <PropInput label={`Width (${settings.unit})`}><input type="number" min="1" step="0.1" value={width} onChange={e => handleDimensionChange(e, 'width')} onFocus={markFocused('width')} onBlur={() => { markBlurred(); handleDimensionBlur(width, 'width'); }} onKeyDown={handleKeyDown} className={inputClasses} title="Total width of the label stock"/></PropInput>
+            <PropInput label={`Height (${settings.unit})`}><input type="number" min="1" step="0.1" value={height} onChange={e => handleDimensionChange(e, 'height')} onFocus={markFocused('height')} onBlur={() => { markBlurred(); handleDimensionBlur(height, 'height'); }} onKeyDown={handleKeyDown} className={inputClasses} title="Total height of the label stock"/></PropInput>
             <PropInput label="Unit" fullWidth>
                 <select value={settings.unit} onChange={handleUnitChange} className={inputClasses}>
                     <option value="mm">mm</option>
@@ -122,8 +149,8 @@ const LabelSettingsEditor: React.FC<{ settings: Design['labelSettings']; dispatc
                     <option value="landscape">Landscape</option>
                 </select>
             </PropInput>
-            <PropInput label="Grid Columns"><input type="number" min="1" value={cols} onChange={e => setCols(e.target.value)} onBlur={() => handleGridBlur(cols, 'columns')} onKeyDown={handleKeyDown} className={inputClasses} title="Number of labels horizontally across the stock"/></PropInput>
-            <PropInput label="Grid Rows"><input type="number" min="1" value={rows} onChange={e => setRows(e.target.value)} onBlur={() => handleGridBlur(rows, 'rows')} onKeyDown={handleKeyDown} className={inputClasses} title="Number of labels vertically down the stock"/></PropInput>
+            <PropInput label="Grid Columns"><input type="number" min="1" value={cols} onChange={e => handleGridChange(e, 'columns')} onFocus={markFocused('columns')} onBlur={() => { markBlurred(); handleGridBlur(cols, 'columns'); }} onKeyDown={handleKeyDown} className={inputClasses} title="Number of labels horizontally across the stock"/></PropInput>
+            <PropInput label="Grid Rows"><input type="number" min="1" value={rows} onChange={e => handleGridChange(e, 'rows')} onFocus={markFocused('rows')} onBlur={() => { markBlurred(); handleGridBlur(rows, 'rows'); }} onKeyDown={handleKeyDown} className={inputClasses} title="Number of labels vertically down the stock"/></PropInput>
         </div>
     );
 };
@@ -131,9 +158,12 @@ const LabelSettingsEditor: React.FC<{ settings: Design['labelSettings']; dispatc
 const PrinterSettingsEditor: React.FC<{ settings: Design['printerSettings']; dispatch: React.Dispatch<any>; }> = ({ settings, dispatch }) => {
     
     const [quantity, setQuantity] = useState(settings.quantity.toString());
+    // See LabelSettingsEditor: this panel unmounts on a tab switch and React
+    // fires no blur then, so quantity has to be committed as it is typed.
+    const quantityFocusedRef = useRef(false);
 
     useEffect(() => {
-        setQuantity(settings.quantity.toString());
+        if (!quantityFocusedRef.current) setQuantity(settings.quantity.toString());
     }, [settings.quantity]);
 
     useEffect(() => {
@@ -162,7 +192,16 @@ const PrinterSettingsEditor: React.FC<{ settings: Design['printerSettings']; dis
         handleUpdate({ model, dpi });
     };
 
+    const handleQuantityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const raw = e.target.value;
+        setQuantity(raw);
+        const n = parseInt(raw);
+        if (raw.trim() === '' || isNaN(n) || n < 1) return;
+        if (n !== settings.quantity) handleUpdate({ quantity: n });
+    };
+
     const handleQuantityBlur = () => {
+        quantityFocusedRef.current = false;
         let numValue = parseInt(quantity);
         if (isNaN(numValue) || numValue < 1) {
             numValue = settings.quantity || 1;
@@ -191,7 +230,7 @@ const PrinterSettingsEditor: React.FC<{ settings: Design['printerSettings']; dis
                 </select>
             </PropInput>
             <PropInput label="Quantity">
-                <input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} onKeyDown={handleKeyDown} onBlur={handleQuantityBlur} className={inputClasses} title="Number of copies to print"/>
+                <input type="number" min="1" value={quantity} onChange={handleQuantityChange} onFocus={() => { quantityFocusedRef.current = true; }} onKeyDown={handleKeyDown} onBlur={handleQuantityBlur} className={inputClasses} title="Number of copies to print"/>
             </PropInput>
             <PropInput label="Media Type" fullWidth>
                 <select value={settings.mediaType} onChange={e => handleUpdate({ mediaType: e.target.value as Design['printerSettings']['mediaType'] })} className={inputClasses} title="Type of label media being used">
