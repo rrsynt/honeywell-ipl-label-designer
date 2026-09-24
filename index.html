@@ -34,6 +34,11 @@
       }
     </script>
     <style>
+      /* @import must precede every other rule or the whole block is dropped
+         (postcss: "@import must precede all other statements"). It has to be
+         first in the <style>, not just above the rule that uses it. */
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
       /* Vendored label fonts (public/fonts): the designer preview and the IPL
          viewer measure text with these exact faces, so on-screen widths match
          the headless golden renders on any OS (audit batch 6). Liberation is
@@ -48,7 +53,6 @@
       body {
         font-family: 'Inter', sans-serif;
       }
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
       /* Custom scrollbar */
       ::-webkit-scrollbar { width: 8px; height: 8px; }
