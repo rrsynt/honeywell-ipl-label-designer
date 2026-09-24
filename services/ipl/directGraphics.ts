@@ -136,22 +136,25 @@ export const extractDirectGraphics = (frames: string[], mode: 0 | 1 = 0): Direct
                 continue;
             }
             if (b === 0x24) {
-                // Repeat Last Line (PRM Appendix E). In every stream BarTender
-                // actually emits, this follows an end-of-line (0x22) that has
-                // already emptied the buffer, so it advances the column index
-                // by n and copies no ink — tes1/tes2's measured origins depend
-                // on exactly that spacing. Copying the previously committed
-                // column here would widen those graphics, so the repeat copies
-                // only what is still buffered.
+                // Repeat Last Line (PRM Appendix E, p.262): "Causes the printer
+                // to copy the PREVIOUSLY DEFINED column n number of times", and
+                // it "is only valid when preceded by a column of encoded, raw
+                // data or an end of line command" — i.e. the column to copy is
+                // the one just COMMITTED, which an end-of-line (0x22) has
+                // already moved out of the buffer.
+                //
+                // The old code only repeated the still-buffered column and
+                // treated the post-0x22 case as pure blank spacing. That is
+                // wrong for every stream whose repeated column carries ink, and
+                // BarTender's own object output is exactly that: a 0.5in solid
+                // box at 203dpi is 40 columns, emitted as one inked column plus
+                // 0x24 repeats, and discarding the repeats rendered a hollow
+                // 1-dot rule instead of a filled square. See
+                // tests/directGraphicsRepeat.test.ts.
                 const [n, used] = readData(bytes, i + 1);
                 i += used;
                 if (bits.length > 0) {
-                    // The column is still buffered, so the repeat really does
-                    // copy it. Commit it first, then write n additional copies:
-                    // the count is the number of EXTRA columns (PRM Appendix E,
-                    // "copy the previously defined column n number of times").
-                    // Snapshot once — flush() clears the buffer, so repeating by
-                    // flushing n times would keep data in only the first copy.
+                    // Still buffered: commit it, then write n extra copies.
                     const snap = bits.slice();
                     flush();
                     for (let k = 0; k < n; k++) {
@@ -159,11 +162,23 @@ export const extractDirectGraphics = (frames: string[], mode: 0 | 1 = 0): Direct
                         colIdx++;
                     }
                 } else {
-                    // Nothing buffered: BarTender emits 0x24 only after 0x22
-                    // has emptied the buffer, and uses it purely to skip
-                    // columns. Storing an empty column here would shift every
-                    // column after it (tes1/tes2's measured origins).
-                    colIdx += n;
+                    // The buffer was emptied by an end-of-line, so the column
+                    // to repeat is the one already committed. A repeat that
+                    // follows a blank column repeats that blank -- which is how
+                    // a run of empty columns is encoded, and why skipping the
+                    // space without copying loses the run's width.
+                    const prevIdx = cur.origin[0] + colIdx - 1;
+                    const prev = cur.pixels[prevIdx];
+                    if (prev) {
+                        for (let k = 0; k < n; k++) {
+                            cur.pixels[cur.origin[0] + colIdx] = prev.slice();
+                            colIdx++;
+                        }
+                    } else {
+                        // No committed column to copy (the repeat is the first
+                        // thing in this graphic): advance the spacing only.
+                        colIdx += n;
+                    }
                 }
                 continue;
             }

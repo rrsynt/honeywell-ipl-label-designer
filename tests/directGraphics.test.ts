@@ -112,9 +112,17 @@ describe('Direct Graphics Mode (BarTender shapes)', () => {
         // origin-691 graphic lands at y=0.
         expect(gfx.map(g => g.ox)).toEqual([66, 197, 245, 474]);
         expect(gfx.map(g => g.oy)).toEqual([12, 254, 6, 369]);
-        // The two single-column line graphics stay 1 dot wide, 220 tall.
-        expect(gfx[2].widthDots).toBe(1);
+        // The two rule graphics are 220 dots TALL. Their WIDTH is whatever the
+        // 0x24 (Repeat Last Line) runs produce: 1 column used to be expected
+        // here, which was the decoder discarding every repeat of the committed
+        // column. The manual is explicit -- "causes the printer to copy the
+        // PREVIOUSLY DEFINED column n number of times" (PRM2.70 p.262) -- and
+        // BarTender's own object output depends on it: a solid 40-dot box is
+        // emitted as one inked column plus repeats, so dropping them drew a
+        // hollow 1-dot rule instead of a filled square. See
+        // tests/directGraphicsRepeat.test.ts and docs/research/DG-REPEAT-2026.md.
         expect(gfx[2].heightDots).toBe(220);
+        expect(gfx[2].widthDots).toBeGreaterThan(1);
     });
 
     it('directGraphicToBitmap: manual worked example places bits downward from origin', () => {
