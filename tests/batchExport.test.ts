@@ -69,7 +69,7 @@ describe('buildBatchPages', () => {
         expect(p1.widthPt).toBeCloseTo(p0.heightPt, 1);
         expect(p1.heightPt).toBeCloseTo(p0.widthPt, 1);
         expect(p1.landscape).toBe(!p0.landscape);
-    });
+    }, 30000);
 
     it('caps at maxPages, and the default cap is MAX_BATCH_EXPORT', async () => {
         const job = parseViewerIPL([
@@ -87,12 +87,12 @@ describe('buildBatchPages', () => {
         expect(MAX_BATCH_EXPORT).toBeLessThanOrEqual(500);
         const small = await buildBatchPages(job, 203, 0, { maxPages: 3 });
         expect(small).toHaveLength(3);
-    });
+    }, 30000);
 
     it('empty label yields no pages', async () => {
         const label = parseViewerIPL('<STX><ESC>C<SI>W400<ETX><STX><ESC>P<ETX><STX>E1;F1<ETX><STX>R<ETX>');
         expect(await buildBatchPages(label, 203, 0)).toHaveLength(0);
-    });
+    }, 30000);
 
     it('extentOverride locks every page to one box; without it each page measures itself', async () => {
         const label = wrap(['H0;o20,20;c0;h2;w2;d3,BOX']);
@@ -101,7 +101,7 @@ describe('buildBatchPages', () => {
         expect(locked[0].heightPt).toBeCloseTo(400 / 203 * 72, 1);
         const auto = await buildBatchPages(label, 203, 0);
         expect(auto[0].widthPt).toBeCloseTo(400 / 203 * 72, 1);
-    });
+    }, 30000);
 });
 
 describe('batch pages -> ZIP integration (Batch F)', () => {

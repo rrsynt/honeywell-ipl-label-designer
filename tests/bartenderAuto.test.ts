@@ -99,6 +99,42 @@ for (const c of CASES) {
             expect(ink, 'rendered label has no ink').toBeGreaterThan(1000);
         }, 60000);
 
+        // Completeness guard. The per-element check below is one-sided — a box
+        // that landed on other ink still passes — so a stream carrying only a
+        // fraction of the format's content could pass it while the preview is
+        // visibly missing most of the label. The bogus tes2 pairing scored 21%
+        // and passed anyway. This asserts we paint a comparable share of the
+        // ink BarTender painted for the same format.
+        it('renders a comparable share of the export ink (completeness)', async () => {
+            const extent = computeLabelExtent(label, 203);
+            const rotated = c.rotation % 2 === 1;
+            const ours = newRealCanvas(
+                rotated ? extent.heightDots : extent.widthDots,
+                rotated ? extent.widthDots : extent.heightDots);
+            renderLabel(ours as unknown as HTMLCanvasElement, label, extent,
+                { dpi: 203, pxPerDot: 1, quality: 1, rotation: c.rotation });
+
+            const img = await loadImage(c.png);
+            const cellW = Math.floor(img.width / c.grid[0]), cellH = Math.floor(img.height / c.grid[1]);
+            const exp = newRealCanvas(cellW, cellH);
+            exp.getContext('2d').drawImage(img, 0, 0, cellW, cellH, 0, 0, cellW, cellH);
+
+            const count = (cv: { width: number; height: number; getContext(k: '2d'): any }) => {
+                const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+                let n = 0;
+                for (let o = 0; o < d.length; o += 4) {
+                    if (d[o + 3] > 0 && d[o] < 100 && d[o + 1] < 100 && d[o + 2] < 100) n++;
+                }
+                return n;
+            };
+            const ourInk = count(ours as never), btInk = count(exp as never);
+            const ratio = ourInk / btInk;
+            expect(ratio, `our ink ${ourInk} vs BarTender ${btInk} (${(ratio * 100).toFixed(0)}%)`)
+                .toBeGreaterThan(0.6);
+            expect(ratio, `our ink ${ourInk} vs BarTender ${btInk} (${(ratio * 100).toFixed(0)}%)`)
+                .toBeLessThan(1.6);
+        }, 60000);
+
         it('reproduces the content BarTender drew for the same format', async () => {
             // The preview PNG is BarTender's own rendering of the same .btw. Its
             // canvas is a 2x5 label grid at 203 dpi in which only the top-left

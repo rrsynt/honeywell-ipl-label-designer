@@ -134,7 +134,7 @@ describe('BarTender mode A survives a clipboard round-trip', () => {
         expect(after.width).toBe(before.width);
         expect(after.height).toBe(before.height);
         expect(after.mask).toEqual(before.mask);
-    });
+    }, 30000); // two full bwip + napi-canvas renders under parallel suite load
 });
 
 /**

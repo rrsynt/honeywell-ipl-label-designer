@@ -39,6 +39,30 @@ ini dari ekspor image bartender"*). They are now saved:
 
 **Diff against the `*-export.png` files. Never against `*-render.png` / `tes1-portrait.png`.**
 
+### ⚠️ `bartender-tes2.ipl` and `bartender-tes2-export.png` are NOT a pair (found 2026-09-24)
+
+Both are genuine BarTender output, but from **different formats** — so any parity
+claim about tes2 is meaningless:
+
+| | Stream `bartender-tes2.ipl` | Export `bartender-tes2-export.png` |
+|---|---|---|
+| Content | **4 Direct Graphics only** (112×644, 33×402, 1×220, 1×220) | 625px rule, 3 text bands, black boxes |
+| Text / barcode | **0 / 0** (0 unknown, 0 issues) | "Sample Text" ×3 + 2 vertical |
+| Rendered ink | 11,171 px | 54,322 px (**we are at 21%**) |
+
+The widest graphic is 112 dot, so a 625px feature cannot have come from this
+stream. `bartenderGeometry.test.ts` nevertheless passed it, because the check was
+one-sided (every box landed on *some* export ink; nothing asked whether the rest
+of the content was there). tes2 was removed from the geometry suite and an
+ink-completeness band (0.6–1.6) was added to both parity suites — see
+`tests/bartenderPairing.test.ts` and `tests/bartenderGeometry.test.ts`.
+
+`bartender-parity-base` **is** a verified pair: fresh `PrintToFile.exe` output
+from `C:\Temp\bt-author\parity-base.btw` is byte-identical to
+`samples/bartender-parity-base.ipl` (md5 `4f1a092b…`), and `PreviewExport.exe`
+reproduces `testdata/bartender/parity-base.png` at 4525 bytes. To restore a real
+tes2 pair the source `.btw` is needed; it is not on this machine.
+
 ## 2. The real problem: the whole label is rotated 90° (RESOLVED 2026-09-19, then REVISED same day)
 
 `testdata/bartender-tes1-export.png` is 798×518 px for an 801-dot label
@@ -85,6 +109,30 @@ source: no `q` (Format Direction in a Page), no `S` (Page Create), no `M`/`m`/`O
 ⇒ The 90° is **BarTender's page-setup rotation for the stock** (label defined
 801 dots wide × ~784 long; printed on 100×65 mm landscape), applied outside the IPL
 stream. A real printer fed this exact stream would produce our portrait render.
+
+### This applies to EVERY BarTender preview, not just tes1 (confirmed 2026-09-24)
+
+The 2026-09-24 automation sweep produced 16 more formats whose previews appeared
+rotated, and it cost a full investigation to rule out a decoder bug. A controlled
+pair settles it — the same box, same size, same position, differing only in the
+orientation the script asked for:
+
+| Format | Requested | Preview | Our render matches at |
+|---|---|---|---|
+| `one-box` | `btPortrait` | 593×593 | rotation 1 or 3 (96%) |
+| `one-box-landscape` | `btLandscape` | 796×390 | rotation 0 (94%) |
+
+Neither stream contains `q`, `S`, `M/m/O` or `T`. **If a preview does not match,
+sweep the four rotations before touching the decoder** — a high score at exactly
+1 or 3 is the page turn, not a bug. Pinned by `tests/bartenderPageTurn.test.ts`.
+
+Two scoring traps that faked a "mirror" here, both avoided in the suite now:
+align on the **ink origin**, not the centroid (one displaced object group drags a
+shared centroid), and never pick a winning transform from a **whole-image** score
+when the label holds several objects (a rotated group landing on a control group
+scored 94%, and the same transform scored 89% on a fixture with no rotated
+objects at all). Single-object fixtures are in `tools/bartender/BuildParityLabels.cs`
+for exactly this.
 
 ### Options (decision pending with user)
 

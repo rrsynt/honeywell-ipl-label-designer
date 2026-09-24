@@ -1,5 +1,13 @@
 # BarTender Command Audit — tes1 / tes2 / logo streams
 
+> **Correction 2026-09-24:** everything below about **tes2** is withdrawn. The
+> audit assumed `bartender-tes2.ipl` and `bartender-tes2-export.png` were the same
+> format; they are not — the stream is 4 Direct Graphics (widest 112 dot) and the
+> export needs a 625px rule. No conclusion drawn from the export for tes2 holds.
+> The per-frame findings themselves (which commands the parser handles) are still
+> accurate, since they were read off the stream, not measured against the image.
+> See `docs/HANDOFF-IPL-RENDER.md` §1 and `tests/bartenderPairing.test.ts`.
+
 Audited 2026-09-23 against `samples/bartender-tes1.ipl` (50 frames),
 `samples/bartender-tes2.ipl` (36 frames) and `samples/bartender-logo.ipl`
 (333 frames), compared with the real BarTender image export
