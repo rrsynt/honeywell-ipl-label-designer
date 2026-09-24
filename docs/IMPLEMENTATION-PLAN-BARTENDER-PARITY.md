@@ -227,8 +227,8 @@ npm run dev → buka viewer → paste bartender-logo.ipl → render benar
 - [x] Designer generate → paste kembali → preview identik (2026-09-24): `tests/bartenderRoundtrip.test.ts` membandingkan ink box designer vs `generateIPL → parseViewerIPL → renderLabel` untuk raster, QR, EAN-13 dan multiline (≤3px), plus render g1 identik sebelum/sesudah round-trip UTF-8. Generator meng-emit `<ESC>g1` di balik `PrinterSettings.directGraphics` (default OFF, toggle di panel printer).
 - [x] Audit table W2 terisi (2026-09-23, `docs/research/BARTENDER-COMMAND-AUDIT.md`); tidak ada gap yang terkonfirmasi. Golden pair (2026-09-24): `tests/bartenderGoldenPair.test.ts` merender tes1 & tes2 biner dan rewrite g1-nya, lalu menuntut diff 0% antar keduanya DAN terhadap PNG yang di-pin (`testdata/golden/bartender-tes{1,2}.png`). Stream biner tidak bisa jadi case golden biasa — harness membaca `.ipl` sebagai UTF-8.
 - [x] Geometry parity vs export PNG BarTender (2026-09-24, `tests/bartenderGeometry.test.ts`): rotasi page-setup yang cocok adalah **90° CCW** (`rotation: 1`; 90° CW mencerminkan label). Setiap bounding box elemen, setelah digeser agar origin tinta bertemu, harus menutupi tinta export minimal 1 dot per 20 dot luas. Pixel-diff tidak dipakai — encoder barcode BarTender dan bwip-js beda pola modul. **Workstream 2 selesai.**
-- [ ] (Stretch) e2e BarTender→file→render→diff otomatis jalan tanpa intervensi manual, hasil tercatat di `BARTENDER-E2E-DIFF.md`.
-- [ ] Memory index diperbarui: 1 entri baru `ipl-bartender-g1-parity.md` merangkum keputusan + status.
+- [x] (Stretch) e2e BarTender→file→render→diff otomatis jalan tanpa intervensi manual (2026-09-24): `tools/bartender/PrintToFile.exe` mencetak `.btw` ke file lewat port berpath, dan `PreviewExport.exe` menghasilkan PNG preview BarTender — keduanya tanpa lisensi. `tests/bartenderAuto.test.ts` membandingkan render kita vs PNG itu per-element (box, 2 barcode, text, 4 graphic semuanya cover tinta BarTender). Detail di `tools/bartender/README.md`.
+- [x] Memory index diperbarui: entri `ipl-bartender-g1-parity.md`.
 
 ## 12. Jebakan yang Sudah Diketahui (WAJIB dibaca sesi baru)
 
