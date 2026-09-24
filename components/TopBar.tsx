@@ -96,7 +96,12 @@ export const TopBar: React.FC<{
     };
 
   return (
-    <header className="bg-gray-800 border-b border-gray-700 shadow-md p-2 flex items-center justify-between z-10 flex-shrink-0 h-14">
+    // The three groups need ~1640px together. Without the x-scroll the header's
+    // overflow was clipped by the page's `overflow-hidden`, so on a 1440px
+    // laptop the PDF/ZIP/View IPL/Help buttons could not be reached at all.
+    // Flex items keep their min-content width, so the bar scrolls rather than
+    // crushing the buttons; at wide widths nothing changes.
+    <header className="bg-gray-800 border-b border-gray-700 shadow-md p-2 flex items-center justify-between z-10 flex-shrink-0 h-14 overflow-x-auto overflow-y-hidden">
       <div className="flex items-center gap-2">
         <h1 className="text-lg font-bold text-blue-400 pl-2">IPL Designer</h1>
         <button onClick={props.onNew} className={`${btnClasses} bg-blue-600 hover:bg-blue-700`} title="Start a new label design">New</button>

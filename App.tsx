@@ -983,9 +983,14 @@ export default function App() {
               snapSettings={snapSettings}
               onSnapSettingsChange={setSnapSettings}
             />
-            <main className="flex-1 flex overflow-hidden">
+            {/* LeftPanel (240px) + RightPanel (288px) are flex-shrink-0 and the
+                canvas is flex-1, so below 528px the canvas was squeezed to 0
+                wide and the right panel was clipped off-screen with no way to
+                reach it. The min-width floor plus x-scroll keeps the canvas
+                renderable and every panel reachable on a narrow window. */}
+            <main className="flex-1 flex overflow-x-auto overflow-y-hidden">
                 <LeftPanel activeDesign={activeDesign} selectedFieldIds={selectedFieldIds} dispatch={dispatch} />
-                <div ref={workspaceContainerRef} className="flex-1 flex flex-col bg-gray-900 items-center justify-center workspace-bg min-w-0" style={{'--grid-size': `${25 * workspaceState.zoom}px`} as React.CSSProperties}>
+                <div ref={workspaceContainerRef} className="flex-1 flex flex-col bg-gray-900 items-center justify-center workspace-bg min-w-[240px]" style={{'--grid-size': `${25 * workspaceState.zoom}px`} as React.CSSProperties}>
                    <Workspace 
                      design={activeDesign} 
                      selectedFieldIds={selectedFieldIds} 
