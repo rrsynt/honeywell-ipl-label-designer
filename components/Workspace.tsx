@@ -53,6 +53,26 @@ export const Workspace: React.FC<{
     // forceUpdate-triggered repaint would never re-run this effect.
     useLayoutEffect(() => { redrawCanvas() }, [redrawCanvas, tick]);
 
+    // redrawCanvas only runs on design/state changes, so without this the
+    // canvas keeps the size it had at mount and clips the design after a
+    // window resize. The ref keeps the observer stable across re-renders, and
+    // the size guard stops it from oscillating with the scrollbar it creates.
+    const redrawCanvasRef = useRef(redrawCanvas);
+    useEffect(() => { redrawCanvasRef.current = redrawCanvas; }, [redrawCanvas]);
+    useEffect(() => {
+        const parent = canvasRef.current?.parentElement;
+        if (!parent) return;
+        const observer = new ResizeObserver(() => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            if (canvas.width !== parent.clientWidth || canvas.height !== parent.clientHeight) {
+                redrawCanvasRef.current();
+            }
+        });
+        observer.observe(parent);
+        return () => observer.disconnect();
+    }, []);
+
     // Batch D: barcodes paint through the lazily-loaded bwip engine. Once it
     // resolves, force one redraw so placeholder boxes become real rasters
     // without waiting for the next interaction.

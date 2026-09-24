@@ -119,7 +119,7 @@ describe('BarTender mode A survives a clipboard round-trip', () => {
         expect(after.width).toBe(before.width);
         expect(after.height).toBe(before.height);
         expect(after.mask).toEqual(before.mask);
-    });
+    }, 30000); // two full bwip + napi-canvas renders under parallel suite load
 
     it('survives an editor that rewrites line endings', async () => {
         // BarTender frames are delimited by \r\n, and a browser textarea
@@ -183,7 +183,7 @@ describe('BarTender mode C: corrupt paste is detected, never silently rendered',
         expect(after.width).toBe(before.width);
         expect(after.height).toBe(before.height);
         expect(after.mask).toEqual(before.mask);
-    });
+    }, 30000); // two full bwip + napi-canvas renders under parallel suite load
 
     it('every binary sample is detected, and the ASCII one is not', async () => {
         // A regression guard on the detector itself: it must fire on all four

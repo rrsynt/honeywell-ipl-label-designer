@@ -1,5 +1,17 @@
 # Phase 1 Implementation: Warning Banner for BarTender Paste Corruption
 
+> **SUPERSEDED 2026-09-24 — jangan ikuti detail di bawah.**
+> Dua bagian sudah berubah di kode:
+> 1. `detectMojibake` sekarang mengembalikan `hasCorruption: count > 0` (bukan ambang
+>    50). Ambang 50 hanya jadi batas **pesan** di `IPLViewerModal.handleTextareaChange`:
+>    >50 = banner peringatan, 1–50 = banner info, 0 = bersih.
+> 2. Banner bukan lagi sekadar saran. Ia menyebut akar masalahnya (Direct Graphics
+>    biner) dan menawarkan **Open File** plus **Convert to ASCII (g1)** yang
+>    menulis ulang stream di tempat — lihat Workstream 4 di
+>    `docs/IMPLEMENTATION-PLAN-BARTENDER-PARITY.md`.
+>
+> Status quo sekarang: `docs/manuals/PASTE-FROM-BARTENDER.md`.
+
 ## Summary
 
 Successfully implemented real-time mojibake detection with user-facing warning banner when users paste BarTender-generated IPL code into the viewer textarea.

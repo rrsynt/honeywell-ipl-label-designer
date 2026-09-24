@@ -1,5 +1,17 @@
 # Phase 3 Implementation: Safe Export Button with Hex Escape Encoding
 
+> **SUPERSEDED 2026-09-24 — jangan ikuti detail di bawah.**
+> Pendekatan `\xHH` yang ditulis di sini **tidak pernah dipakai** dan sudah
+> dibuang: format itu tidak dikenal printer maupun parser kita sendiri.
+> Yang benar adalah mode `<ESC>g1` Direct Graphics (PRM Appendix E, m=1) —
+> satu karakter hex per nibble, didukung printer, dan Rundtrip-nya identik
+> dengan bentuk biner. Implementasi sekarang: `convertDirectGraphicsToHex`
+> di `services/ipl/fileBytes.ts`, tombolnya **Copy ASCII (g1)**, dan banner
+> paste punya **Convert to ASCII (g1)** yang bekerja di tempat.
+> Detail + tes: `docs/IMPLEMENTATION-PLAN-BARTENDER-PARITY.md` Workstream 4,
+> `tests/asciiCopy.test.ts`. Status quo sekarang:
+> `docs/manuals/PASTE-FROM-BARTENDER.md`.
+
 ## Summary
 
 Successfully implemented "Copy Safe" button that encodes Direct Graphics RLE payloads as hex escape sequences, enabling clipboard-safe sharing even when BarTender-generated IPL contains binary bitmap data.
