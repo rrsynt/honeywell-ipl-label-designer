@@ -11,28 +11,53 @@ const usePropEditor = <T,>(
 ) => {
     const [localValue, setLocalValue] = useState<string>(initialValue === 'multiple' ? '' : (initialValue?.toString() ?? ''));
     const initialValueRef = useRef(initialValue);
+    // The editor unmounts when the right panel switches tabs, and React fires
+    // no blur on unmount — so a blur-only commit silently drops the edit. A
+    // focus flag stops the sync effect from overwriting a live edit instead.
+    const focusedRef = useRef(false);
 
     useEffect(() => {
+        if (focusedRef.current) return;
         const strValue = initialValue === 'multiple' ? '' : (initialValue?.toString() ?? '');
         setLocalValue(strValue);
         initialValueRef.current = initialValue;
     }, [initialValue]);
 
-    const handleBlur = (parser: (value: string) => T, validator?: (value: T, original: T | 'multiple') => T) => {
-        if (localValue === '') {
-            setLocalValue(initialValueRef.current === 'multiple' ? '' : (initialValueRef.current?.toString() ?? ''));
-            return;
-        }
-        let parsedValue = parser(localValue);
+    const commitValue = (raw: string, parser: (value: string) => T, validator?: (value: T, original: T | 'multiple') => T) => {
+        if (raw === '') return false;
+        let parsedValue = parser(raw);
         if (validator) {
             parsedValue = validator(parsedValue, initialValueRef.current);
         }
-        
         if (initialValueRef.current === 'multiple' || JSON.stringify(parsedValue) !== JSON.stringify(initialValueRef.current)) {
             onCommit(parsedValue);
+            return true;
+        }
+        return false;
+    };
+
+    // Commit as the user types. An entry that is not yet a finished value (an
+    // empty box, or the lone "1" of "150") is skipped here and left to blur,
+    // so the model never receives a parse of an unfinished edit.
+    const handleChange = (raw: string, parser: (value: string) => T, validator?: (value: T, original: T | 'multiple') => T) => {
+        setLocalValue(raw);
+        commitValue(raw, parser, validator);
+    };
+
+    const handleBlur = (parser: (value: string) => T, validator?: (value: T, original: T | 'multiple') => T) => {
+        focusedRef.current = false;
+        if (!commitValue(localValue, parser, validator)) {
+            // Nothing was written (empty or unchanged): snap the box back to
+            // the value the model actually holds.
+            setLocalValue(initialValueRef.current === 'multiple' ? '' : (initialValueRef.current?.toString() ?? ''));
+        } else {
+            const parsedValue = parser(localValue);
+            setLocalValue(validator ? String(validator(parsedValue, initialValueRef.current)) : localValue);
         }
     };
-    
+
+    const handleFocus = () => { focusedRef.current = true; };
+
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !(e.currentTarget.tagName === 'TEXTAREA' && e.shiftKey)) {
              e.preventDefault();
@@ -40,7 +65,7 @@ const usePropEditor = <T,>(
         }
     };
 
-    return { localValue, setLocalValue, handleBlur, handleKeyDown };
+    return { localValue, setLocalValue, handleChange, handleBlur, handleFocus, handleKeyDown };
 };
 
 const PropInput: React.FC<{ label: string; children: React.ReactNode; fullWidth?: boolean; }> = ({ label, children, fullWidth }) => (
@@ -192,7 +217,7 @@ const DataSourceEditor: React.FC<{
                 </PropInput>
             ) : (
                 <PropInput label={dataSource.type === 'fixed' ? 'Fixed Data' : 'Default Data'} fullWidth>
-                     <textarea value={dataEditor.localValue} onChange={e => dataEditor.setLocalValue(e.target.value)} onBlur={() => dataEditor.handleBlur(pString)} onKeyDown={dataEditor.handleKeyDown} className={`${inputClasses} min-h-[60px] resize-y ${staticDataError ? 'border-red-500 ring-red-500' : ''}`} />
+                     <textarea value={dataEditor.localValue} onChange={e => dataEditor.handleChange(e.target.value, pString)} onFocus={dataEditor.handleFocus} onBlur={() => dataEditor.handleBlur(pString)} onKeyDown={dataEditor.handleKeyDown} className={`${inputClasses} min-h-[60px] resize-y ${staticDataError ? 'border-red-500 ring-red-500' : ''}`} />
                     {staticDataError && <p className="text-xs text-red-400 mt-1">{staticDataError}</p>}
                 </PropInput>
             )}
@@ -224,11 +249,11 @@ const TextFieldEditor: React.FC<{ fields: TextField[]; design: Design; handleUpd
         </PropInput>
         {isBitmapFont ? (
             <>
-                <PropInput label="Height Mag"><input type="number" min="1" value={hMagEditor.localValue} placeholder={commonHMag === 'multiple' ? 'Multiple' : ''} onChange={e => hMagEditor.setLocalValue(e.target.value)} onBlur={() => hMagEditor.handleBlur(pInt, vMin1)} onKeyDown={hMagEditor.handleKeyDown} className={inputClasses}/></PropInput>
-                <PropInput label="Width Mag"><input type="number" min="1" value={wMagEditor.localValue} placeholder={commonWMag === 'multiple' ? 'Multiple' : ''} onChange={e => wMagEditor.setLocalValue(e.target.value)} onBlur={() => wMagEditor.handleBlur(pInt, vMin1)} onKeyDown={wMagEditor.handleKeyDown} className={inputClasses}/></PropInput>
+                <PropInput label="Height Mag"><input type="number" min="1" value={hMagEditor.localValue} placeholder={commonHMag === 'multiple' ? 'Multiple' : ''} onChange={e => hMagEditor.handleChange(e.target.value, pInt, vMin1)} onFocus={hMagEditor.handleFocus} onBlur={() => hMagEditor.handleBlur(pInt, vMin1)} onKeyDown={hMagEditor.handleKeyDown} className={inputClasses}/></PropInput>
+                <PropInput label="Width Mag"><input type="number" min="1" value={wMagEditor.localValue} placeholder={commonWMag === 'multiple' ? 'Multiple' : ''} onChange={e => wMagEditor.handleChange(e.target.value, pInt, vMin1)} onFocus={wMagEditor.handleFocus} onBlur={() => wMagEditor.handleBlur(pInt, vMin1)} onKeyDown={wMagEditor.handleKeyDown} className={inputClasses}/></PropInput>
             </>
         ) : (
-            <PropInput label="Font Size (pt)" fullWidth><input type="number" min="1" value={fontSizeEditor.localValue} placeholder={commonFontSize === 'multiple' ? 'Multiple' : ''} onChange={e => fontSizeEditor.setLocalValue(e.target.value)} onBlur={() => fontSizeEditor.handleBlur(pInt, vMin1)} onKeyDown={fontSizeEditor.handleKeyDown} className={inputClasses}/></PropInput>
+            <PropInput label="Font Size (pt)" fullWidth><input type="number" min="1" value={fontSizeEditor.localValue} placeholder={commonFontSize === 'multiple' ? 'Multiple' : ''} onChange={e => fontSizeEditor.handleChange(e.target.value, pInt, vMin1)} onFocus={fontSizeEditor.handleFocus} onBlur={() => fontSizeEditor.handleBlur(pInt, vMin1)} onKeyDown={fontSizeEditor.handleKeyDown} className={inputClasses}/></PropInput>
         )}
         <PropInput label="Align" fullWidth>
             <select value={commonAlign === 'multiple' ? '' : commonAlign} onChange={e => handleUpdate({ align: e.target.value as TextField['align'] } as Partial<Field>)} className={inputClasses}>
@@ -339,8 +364,8 @@ const BarcodeFieldEditor: React.FC<{ fields: BarcodeField[]; design: Design; han
                 onChange={v => handleUpdate({ hibcMode: v as number | undefined } as Partial<Field>)} />
         )}
 
-        <PropInput label="Bar Height (dots)"><input type="number" min="1" value={hMagEditor.localValue} placeholder={commonHMag === 'multiple' ? 'Multiple' : ''} onChange={e => hMagEditor.setLocalValue(e.target.value)} onBlur={() => hMagEditor.handleBlur(pInt, vMin1)} onKeyDown={hMagEditor.handleKeyDown} className={inputClasses}/></PropInput>
-        <PropInput label="Narrow Bar (dots)"><input type="number" min="1" value={wMagEditor.localValue} placeholder={commonWMag === 'multiple' ? 'Multiple' : ''} onChange={e => wMagEditor.setLocalValue(e.target.value)} onBlur={() => wMagEditor.handleBlur(pInt, vMin1)} onKeyDown={wMagEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Bar Height (dots)"><input type="number" min="1" value={hMagEditor.localValue} placeholder={commonHMag === 'multiple' ? 'Multiple' : ''} onChange={e => hMagEditor.handleChange(e.target.value, pInt, vMin1)} onFocus={hMagEditor.handleFocus} onBlur={() => hMagEditor.handleBlur(pInt, vMin1)} onKeyDown={hMagEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Narrow Bar (dots)"><input type="number" min="1" value={wMagEditor.localValue} placeholder={commonWMag === 'multiple' ? 'Multiple' : ''} onChange={e => wMagEditor.handleChange(e.target.value, pInt, vMin1)} onFocus={wMagEditor.handleFocus} onBlur={() => wMagEditor.handleBlur(pInt, vMin1)} onKeyDown={wMagEditor.handleKeyDown} className={inputClasses}/></PropInput>
         
         <PropInput label="Human Readable" fullWidth>
             <select value={commonHRI === 'multiple' ? '' : commonHRI} onChange={e => handleUpdate({ humanReadable: e.target.value as HRIPlacement } as Partial<Field>)} className={inputClasses}>
@@ -360,7 +385,7 @@ const BarcodeFieldEditor: React.FC<{ fields: BarcodeField[]; design: Design; han
                     </select>
                 </PropInput>
                 <PropInput label="HRI Font Size (pt)" >
-                    <input type="number" min="1" value={hriFontSizeEditor.localValue} placeholder={commonHriFontSize === 'multiple' ? 'Multiple' : ''} onChange={e => hriFontSizeEditor.setLocalValue(e.target.value)} onBlur={() => hriFontSizeEditor.handleBlur(pInt, vMin1)} onKeyDown={hriFontSizeEditor.handleKeyDown} className={inputClasses}/>
+                    <input type="number" min="1" value={hriFontSizeEditor.localValue} placeholder={commonHriFontSize === 'multiple' ? 'Multiple' : ''} onChange={e => hriFontSizeEditor.handleChange(e.target.value, pInt, vMin1)} onFocus={hriFontSizeEditor.handleFocus} onBlur={() => hriFontSizeEditor.handleBlur(pInt, vMin1)} onKeyDown={hriFontSizeEditor.handleKeyDown} className={inputClasses}/>
                 </PropInput>
                  <PropInput label="HRI Align">
                     <select value={commonHriAlign === 'multiple' ? '' : commonHriAlign} onChange={e => handleUpdate({ hriAlign: e.target.value as BarcodeField['hriAlign'] } as Partial<Field>)} className={inputClasses}>
@@ -384,8 +409,8 @@ const LineFieldEditor: React.FC<{ fields: LineField[]; handleUpdate: (updates: P
     const thicknessEditor = usePropEditor(commonThickness, (val: number) => handleUpdate({ thickness: val } as Partial<Field>));
 
     return <>
-        <PropInput label="Length (mm)"><input type="number" step="0.1" min="0.1" value={lengthEditor.localValue} placeholder={commonLength === 'multiple' ? 'Multiple' : ''} onChange={e => lengthEditor.setLocalValue(e.target.value)} onBlur={() => lengthEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={lengthEditor.handleKeyDown} className={inputClasses}/></PropInput>
-        <PropInput label="Thickness (mm)"><input type="number" step="0.1" min="0.1" value={thicknessEditor.localValue} placeholder={commonThickness === 'multiple' ? 'Multiple' : ''} onChange={e => thicknessEditor.setLocalValue(e.target.value)} onBlur={() => thicknessEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={thicknessEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Length (mm)"><input type="number" step="0.1" min="0.1" value={lengthEditor.localValue} placeholder={commonLength === 'multiple' ? 'Multiple' : ''} onChange={e => lengthEditor.handleChange(e.target.value, pFloat, vMinFloat)} onFocus={lengthEditor.handleFocus} onBlur={() => lengthEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={lengthEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Thickness (mm)"><input type="number" step="0.1" min="0.1" value={thicknessEditor.localValue} placeholder={commonThickness === 'multiple' ? 'Multiple' : ''} onChange={e => thicknessEditor.handleChange(e.target.value, pFloat, vMinFloat)} onFocus={thicknessEditor.handleFocus} onBlur={() => thicknessEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={thicknessEditor.handleKeyDown} className={inputClasses}/></PropInput>
         <PropInput label="Line Ending" fullWidth>
             <select value={commonLineEnding === 'multiple' ? '' : commonLineEnding} onChange={e => handleUpdate({ lineEnding: e.target.value as LineField['lineEnding'] } as Partial<Field>)} className={inputClasses}>
                  {commonLineEnding === 'multiple' && <option value="" disabled>Multiple Values</option>}
@@ -408,10 +433,10 @@ const BoxFieldEditor: React.FC<{ fields: BoxField[]; handleUpdate: (updates: Par
     const cornerRadiusEditor = usePropEditor(commonCornerRadius, (val: number) => handleUpdate({ cornerRadius: val } as Partial<Field>));
     
     return <>
-        <PropInput label="Width (mm)"><input type="number" step="0.1" min="0.1" value={widthEditor.localValue} placeholder={commonWidth === 'multiple' ? 'Multiple' : ''} onChange={e => widthEditor.setLocalValue(e.target.value)} onBlur={() => widthEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={widthEditor.handleKeyDown} className={inputClasses}/></PropInput>
-        <PropInput label="Height (mm)"><input type="number" step="0.1" min="0.1" value={heightEditor.localValue} placeholder={commonHeight === 'multiple' ? 'Multiple' : ''} onChange={e => heightEditor.setLocalValue(e.target.value)} onBlur={() => heightEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={heightEditor.handleKeyDown} className={inputClasses}/></PropInput>
-        <PropInput label="Thickness (mm)"><input type="number" step="0.1" min="0.1" value={thicknessEditor.localValue} placeholder={commonThickness === 'multiple' ? 'Multiple' : ''} onChange={e => thicknessEditor.setLocalValue(e.target.value)} onBlur={() => thicknessEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={thicknessEditor.handleKeyDown} className={inputClasses}/></PropInput>
-        <PropInput label="Corner Radius (mm)"><input type="number" step="0.1" min="0" value={cornerRadiusEditor.localValue} placeholder={commonCornerRadius === 'multiple' ? 'Multiple' : ''} onChange={e => cornerRadiusEditor.setLocalValue(e.target.value)} onBlur={() => cornerRadiusEditor.handleBlur(pFloat, (v, o) => Math.max(0, vOrKeep(v, o)))} onKeyDown={cornerRadiusEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Width (mm)"><input type="number" step="0.1" min="0.1" value={widthEditor.localValue} placeholder={commonWidth === 'multiple' ? 'Multiple' : ''} onChange={e => widthEditor.handleChange(e.target.value, pFloat, vMinFloat)} onFocus={widthEditor.handleFocus} onBlur={() => widthEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={widthEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Height (mm)"><input type="number" step="0.1" min="0.1" value={heightEditor.localValue} placeholder={commonHeight === 'multiple' ? 'Multiple' : ''} onChange={e => heightEditor.handleChange(e.target.value, pFloat, vMinFloat)} onFocus={heightEditor.handleFocus} onBlur={() => heightEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={heightEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Thickness (mm)"><input type="number" step="0.1" min="0.1" value={thicknessEditor.localValue} placeholder={commonThickness === 'multiple' ? 'Multiple' : ''} onChange={e => thicknessEditor.handleChange(e.target.value, pFloat, vMinFloat)} onFocus={thicknessEditor.handleFocus} onBlur={() => thicknessEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={thicknessEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Corner Radius (mm)"><input type="number" step="0.1" min="0" value={cornerRadiusEditor.localValue} placeholder={commonCornerRadius === 'multiple' ? 'Multiple' : ''} onChange={e => cornerRadiusEditor.handleChange(e.target.value, pFloat, (v, o) => Math.max(0, vOrKeep(v, o)))} onFocus={cornerRadiusEditor.handleFocus} onBlur={() => cornerRadiusEditor.handleBlur(pFloat, (v, o) => Math.max(0, vOrKeep(v, o)))} onKeyDown={cornerRadiusEditor.handleKeyDown} className={inputClasses}/></PropInput>
     </>
 };
 
@@ -461,9 +486,9 @@ const ImageFieldEditor: React.FC<{ fields: ImageField[]; handleUpdate: (updates:
             <input ref={fileRef} type="file" accept="image/*" onChange={onFile} className="hidden"/>
         </div>
         <PropInput label={`Dot Grid (W×H)`}><div className="w-full text-xs p-1.5 bg-gray-900 border border-gray-600 rounded-md text-gray-400">{hasImage ? `${dotsW} × ${dotsH} dots` : 'no image loaded'}</div></PropInput>
-        <PropInput label="Threshold"><input type="number" step="1" min="1" max="254" value={thresholdEditor.localValue} placeholder={commonThreshold === 'multiple' ? 'Multiple' : ''} onChange={e => thresholdEditor.setLocalValue(e.target.value)} onBlur={() => thresholdEditor.handleBlur(pInt)} onKeyDown={thresholdEditor.handleKeyDown} className={inputClasses} title="Luminance cut-off for next import (1 dark .. 254 light)"/></PropInput>
-        <PropInput label="Width (mm)"><input type="number" step="0.1" min="0.1" value={widthEditor.localValue} placeholder={commonWidth === 'multiple' ? 'Multiple' : ''} onChange={e => widthEditor.setLocalValue(e.target.value)} onBlur={() => widthEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={widthEditor.handleKeyDown} className={inputClasses} title="Resamples the bitmap to the new dot grid"/></PropInput>
-        <PropInput label="Height (mm)"><input type="number" step="0.1" min="0.1" value={heightEditor.localValue} placeholder={commonHeight === 'multiple' ? 'Multiple' : ''} onChange={e => heightEditor.setLocalValue(e.target.value)} onBlur={() => heightEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={heightEditor.handleKeyDown} className={inputClasses} title="Resamples the bitmap to the new dot grid"/></PropInput>
+        <PropInput label="Threshold"><input type="number" step="1" min="1" max="254" value={thresholdEditor.localValue} placeholder={commonThreshold === 'multiple' ? 'Multiple' : ''} onChange={e => thresholdEditor.handleChange(e.target.value, pInt)} onFocus={thresholdEditor.handleFocus} onBlur={() => thresholdEditor.handleBlur(pInt)} onKeyDown={thresholdEditor.handleKeyDown} className={inputClasses} title="Luminance cut-off for next import (1 dark .. 254 light)"/></PropInput>
+        <PropInput label="Width (mm)"><input type="number" step="0.1" min="0.1" value={widthEditor.localValue} placeholder={commonWidth === 'multiple' ? 'Multiple' : ''} onChange={e => widthEditor.handleChange(e.target.value, pFloat, vMinFloat)} onFocus={widthEditor.handleFocus} onBlur={() => widthEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={widthEditor.handleKeyDown} className={inputClasses} title="Resamples the bitmap to the new dot grid"/></PropInput>
+        <PropInput label="Height (mm)"><input type="number" step="0.1" min="0.1" value={heightEditor.localValue} placeholder={commonHeight === 'multiple' ? 'Multiple' : ''} onChange={e => heightEditor.handleChange(e.target.value, pFloat, vMinFloat)} onFocus={heightEditor.handleFocus} onBlur={() => heightEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={heightEditor.handleKeyDown} className={inputClasses} title="Resamples the bitmap to the new dot grid"/></PropInput>
     </>
 };
 
@@ -485,9 +510,9 @@ export const FieldEditor: React.FC<{ fields: Field[]; design: Design; dispatch: 
 
     return (
         <div className="grid grid-cols-2 gap-3">
-            <PropInput label="Name" fullWidth><input type="text" value={nameEditor.localValue} placeholder={commonName === 'multiple' ? 'Multiple Values' : ''} onChange={e => nameEditor.setLocalValue(e.target.value)} onBlur={() => nameEditor.handleBlur(pString)} onKeyDown={nameEditor.handleKeyDown} className={inputClasses}/></PropInput>
-            <PropInput label="X (mm)"><input type="number" step="0.1" value={xEditor.localValue} placeholder={commonX === 'multiple' ? 'Multiple' : ''} onChange={e => xEditor.setLocalValue(e.target.value)} onBlur={() => xEditor.handleBlur(pFloat, vOrKeep)} onKeyDown={xEditor.handleKeyDown} className={inputClasses}/></PropInput>
-            <PropInput label="Y (mm)"><input type="number" step="0.1" value={yEditor.localValue} placeholder={commonY === 'multiple' ? 'Multiple' : ''} onChange={e => yEditor.setLocalValue(e.target.value)} onBlur={() => yEditor.handleBlur(pFloat, vOrKeep)} onKeyDown={yEditor.handleKeyDown} className={inputClasses}/></PropInput>
+            <PropInput label="Name" fullWidth><input type="text" value={nameEditor.localValue} placeholder={commonName === 'multiple' ? 'Multiple Values' : ''} onChange={e => nameEditor.handleChange(e.target.value, pString)} onFocus={nameEditor.handleFocus} onBlur={() => nameEditor.handleBlur(pString)} onKeyDown={nameEditor.handleKeyDown} className={inputClasses}/></PropInput>
+            <PropInput label="X (mm)"><input type="number" step="0.1" value={xEditor.localValue} placeholder={commonX === 'multiple' ? 'Multiple' : ''} onChange={e => xEditor.handleChange(e.target.value, pFloat, vOrKeep)} onFocus={xEditor.handleFocus} onBlur={() => xEditor.handleBlur(pFloat, vOrKeep)} onKeyDown={xEditor.handleKeyDown} className={inputClasses}/></PropInput>
+            <PropInput label="Y (mm)"><input type="number" step="0.1" value={yEditor.localValue} placeholder={commonY === 'multiple' ? 'Multiple' : ''} onChange={e => yEditor.handleChange(e.target.value, pFloat, vOrKeep)} onFocus={yEditor.handleFocus} onBlur={() => yEditor.handleBlur(pFloat, vOrKeep)} onKeyDown={yEditor.handleKeyDown} className={inputClasses}/></PropInput>
             <PropInput label="Rotation" fullWidth>
                 <select value={commonRotation === 'multiple' ? '' : commonRotation} onChange={e => handleUpdate({ rotation: parseInt(e.target.value) as Field['rotation'] } as Partial<Field>)} className={inputClasses}>
                     {commonRotation === 'multiple' && <option value="" disabled>Multiple Values</option>}
