@@ -1,0 +1,91 @@
+<driver version='6.6'>
+
+<stock>
+Name=2 x 4
+Data=WkxJQhwAAAAaAAAAeJwrOMbA8KCHkeEbCwMYwwALAwsjAGYhBKE=
+Type=Die Cut
+</stock>
+
+<stock>
+Name=4 x 4
+Data=WkxJQhwAAAAZAAAAeJx70MPI8ACIv7EwgDEMsDCwMgIAbF8E2Q==
+Type=Die Cut
+</stock>
+
+<stock>
+Name=4 x 6
+Data=WkxJQhwAAAAaAAAAeJx70MPIEBDMxPCNhQGMYYCFgY0RAFnYBBI=
+Type=Die Cut
+</stock>
+
+<preset default='true'>
+Data=WkxJQtAFAADsAAAAeJxz8TU2OsHKwODJkMdQwpDKUMSQCySTGRQYAhhcGEwYjIEsDQYjBgMwK4WhgCGTQRPI0gViT6AaHwYIYGRhYr/D8IaFX5WRgRHI/cIqyJICZp1mAImASAaGUIZgBleGIAbqAiYgZga5gQFGoIIlQEFflxA/kDqgV4FuAQJJBoYnPBD5HdwMDAXiEPYdoIIIJlT9//7jttscaMYtIBZQR8ULuBgYDrEBzQZiHRYGBgeguy4B1UuAdQmogyBE5SgYBaNgpAMHFkYWEH1OAlKewQATmCcELH8hAEvxxiAHxMXFxZkFOR4sAAn1I1A=
+</preset>
+
+<font type='Bar Code'>
+Name=Sample Bar Code Font
+Data=WkxJQqgAAABAAAAAeJybwMgABgoaZgbBibkFOakKTolFCs75KakKbvl5JQxIAKT0NFgxQwoDGkhAF0AC7GCSBUOcEY8edAAAgSgJ5Q==
+</font>
+
+<options model='Intermec PD43 (203 dpi) - IPL'>
+[DATA:\Settings]
+"Cache Size"=dword:0004c000
+"Caching Location"=dword:00000000
+"Disable Shared PaperSize"=hex:00
+"Disable User Defined PaperSize"=hex:00
+"Expansion Fonts"=hex(7):00,00
+"Fix Direct Graphics"=hex:00
+"Font Engine Fonts"=hex(7):6f,00,75,00,74,00,6c,00,69,00,6e,00,65,00,5f,00,63,\
+  00,32,00,38,00,2e,00,70,00,66,00,67,00,00,00,6f,00,75,00,74,00,6c,00,69,00,\
+  6e,00,65,00,5f,00,69,00,64,00,70,00,5f,00,42,00,69,00,74,00,53,00,74,00,72,\
+  00,65,00,61,00,6d,00,54,00,72,00,75,00,65,00,44,00,6f,00,63,00,2e,00,70,00,\
+  66,00,67,00,00,00,00,00
+"Format Cache: ID Max"=dword:00000063
+"Format Cache: ID Min"=dword:00000001
+"Graphic Cache: ID Max"=dword:00000063
+"Graphic Cache: ID Min"=dword:00000000
+"Non-Caching Location"=dword:00000000
+"Readable Control Characters"=hex:01
+"TCP Port Delayed Close Period"=dword:000003e8
+"User Form: Data"=hex:e0,8c,01,00,50,53,02,00,f6,04,00,00,f6,04,00,00,00,00,00,\
+  00,00,00,00,00,01,00,00,01
+"User Form: Label Stock Type"=dword:00000000
+"User Form: Name"="USER"
+"User Form: PrintAreaData"=""
+"User Form: Region"=""
+"User Form: Variable Bottom Margin"=dword:0000319c
+"User Form: Variable Top Margin"=dword:0000319c
+[DATA:\Settings\Cleaning]
+"Block Enabled"=hex:00
+"Reminder Count"=dword:00000000
+"Reminder Frequency"=dword:000004b0
+"Reminders Enabled"=hex:00
+"Usage Data Source"=dword:00000000
+[DATA:\Settings\Status]
+"Advanced Status Comment"=hex:01
+"Show Icon"=hex:01
+"Show On Error"=hex:01
+"Status Monitoring Mode"=dword:00000000
+"Verify Job Complete"=hex:00
+"Verify Page Complete"=hex:00
+</options>
+
+<network>
+[NETWORK:]
+"Connection Retries"=dword:00000002
+"Connection Timeout"=dword:000003e8
+"Network Bidirectional"=hex:01
+"Network Communication"=hex:01
+"Server Address Override"=hex:00
+"TCP Enabled"=hex:01
+"XPML Server Port"=dword:0000140a
+</network>
+
+<security>
+[SECURITY:]
+"Configuration Sharing"=hex:01
+"EnabledTLS"=hex:00
+"Local Access Level"=dword:00000001
+"Network Access Level"=dword:00000001
+</security>
+

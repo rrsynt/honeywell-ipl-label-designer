@@ -41,10 +41,14 @@ Tujuan akhir user — **segitiga akurasi**:
 - Dokumen: `docs/manuals/PASTE-FROM-BARTENDER.md`, plan di `~/.claude/plans/bartender-*.md`.
 - Working tree belum di-commit: `M components/IPLViewerModal.tsx`, `M services/ipl/fileBytes.ts`, untracked `docs/IMPLEMENTATION-PHASE-{1,3}.md`, `docs/manuals/PASTE-FROM-BARTENDER.md`, `tests/diag-*.test.ts`, `tools/bartender/`.
 
-**Pekerjaan agen otomasi BarTender (sesi ini, background `ab1c568ea97365fe7`):** probe COM sudah dibuat di
-`tools/bartender/*.ps1` (export-driver-settings, probe-api, probe-driver-automation, probe-print-options, probe-setup).
-Fact environment yang sudah dikonfirmasi: COM `BarTender.Application` registered; printer `Intermec PD43 (203 dpi) - IPL` dan `Honeywell PD45 (203 dpi)` ter-install, dua-duanya port `FILE:`; templates bawaan di `C:\Program Files\Seagull\BarTender 2022\Templates\...`.
-→ **Sesi baru: cek dulu apakah agen selesai & ada output `samples/bartender-auto-test.ipl`; baca report-nya sebelum mulai Workstream 5.**
+**Riwayat — probe COM (background `ab1c568ea97365fe7`, tidak pernah selesai):** script probe
+dibuat di `tools/bartender/probes/` (archive; semua sudah terbukti jalan buntu — baca
+`tools/bartender/probes/README.md`). Fact environment yang sudah dikonfirmasi: COM
+`BarTender.Application` registered; printer `Intermec PD43 (203 dpi) - IPL` dan
+`Honeywell PD45 (203 dpi)` ter-install; templates bawaan di
+`C:\Program Files\Seagull\BarTender 2022\Templates\...`.
+→ **Workstream 5 selesai 2026-09-24**; tooling yang berfungsi ada di `tools/bartender/`
+(`bt-port.ps1`, `build-base-label.ps1`, `PrintToFile.exe`, `PreviewExport.exe`).
 
 ---
 
