@@ -170,6 +170,11 @@ export interface LabelSettingsInfo {
      * is carried per placement instead.
      */
     formatDirection?: number;
+    /**
+     * Printer Language, Select `<SI>ln` (PRM p.133): the code page the printer
+     * applies to print data. Absent when the stream never selects one.
+     */
+    codePage?: number;
 }
 
 /**

@@ -12,6 +12,7 @@ import { VirtualPrinter, KIND_PREFIX } from './virtualPrinter';
 import { FONT_MAP } from '../../constants';
 import { extractDirectGraphics, nibblizedToByteString, directGraphicToBitmap } from './directGraphics';
 import { encodeBitmapColumns } from './graphics';
+import { decodePrintData } from './residentCharset';
 
 // Font ids known to the designer — derived from constants.FONT_MAP so the
 // table cannot drift (audit T1; it used to be a hand-copied literal here).
@@ -100,14 +101,24 @@ const applyPlacement = (el: ViewerElement, p: PagePlacement): ViewerElement => {
  * its <ESC>E<id> invocation names (blocks without one key to 0). Scoping by
  * format matters: a page composing formats 1 and 2 (each with its own field 1)
  * would otherwise feed format 1's data to both.
+ *
+ * `codePageAt(offset) -> number | undefined` gives the printer language in
+ * effect AT each block, not the stream's final value: a job that switches
+ * language between labels must decode each block with the page it was sent
+ * under. A single page number would render the first label with the second
+ * label's characters.
  */
-export const extractPrintBlockData = (code: string): Map<number, Map<number, string>> => {
+export const extractPrintBlockData = (
+    code: string,
+    codePageAt: (offset: number) => number | undefined = () => undefined,
+): Map<number, Map<number, string>> => {
     const byFormat = new Map<number, Map<number, string>>();
     // Optional <ESC>E<id> prefix (both notations); terminator <ETB>/<RS>/<FF>.
     const blockRe = /(?:<ESC>E(\d*)|\x1bE(\d*))?(?:<CAN>|\x18)([\s\S]*?)(?:<(?:ETB|RS|FF)>|[\x17\x1e\x0c])/gi;
     let bm: RegExpExecArray | null;
     while ((bm = blockRe.exec(code)) !== null) {
         const formatId = parseInt(bm[1] ?? bm[2] ?? '0', 10) || 0;
+        const codePage = codePageAt(bm.index);
         const block = bm[3]
             .replace(new RegExp(LITERAL_ESC, 'g'), '\x1b')
             .replace(/<NUL>/g, '\x00');
@@ -124,11 +135,24 @@ export const extractPrintBlockData = (code: string): Map<number, Map<number, str
                 .replace(/<(US|RS)>\d*/g, '')
                 .replace(/[\x1f\x1e]\d*/g, '')
                 .replace(/<SUB><CR>/g, '\n');
-            fields.set(parseInt(m[1], 10), cleaned);
+            fields.set(parseInt(m[1], 10), decodePrintData(cleaned, codePage));
         }
         if (fields.size > 0) byFormat.set(formatId, fields);
     }
     return byFormat;
+};
+
+/**
+ * Maps each byte offset to the printer language in effect there, by replaying
+ * every `<SI>l` in stream order. A multi-language job switches page between
+ * labels, so a single final value would decode earlier blocks wrongly.
+ */
+const buildCodePageTimeline = (code: string): Array<{ at: number; page: number }> => {
+    const marks: Array<{ at: number; page: number }> = [];
+    const re = /<SI>l(\d+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(code)) !== null) marks.push({ at: m.index, page: parseInt(m[1], 10) });
+    return marks;
 };
 
 export class IPLViewerParser {
@@ -196,7 +220,15 @@ export class IPLViewerParser {
         // the format the data was sent for (a page may compose several formats
         // that reuse the same field ids). A 0-keyed block (no <ESC>E id) or a
         // field whose format has no dedicated block falls back to the 0 map.
-        const varData = extractPrintBlockData(code);
+        const codePageMarks = buildCodePageTimeline(code);
+        const varData = extractPrintBlockData(code, offset => {
+            let page: number | undefined;
+            for (const mark of codePageMarks) {
+                if (mark.at > offset) break;
+                page = mark.page;
+            }
+            return page;
+        });
         if (varData.size > 0) {
             const fallback = varData.get(0);
             for (const el of this.printer.label.elements) {
@@ -690,6 +722,12 @@ export class IPLViewerParser {
         if (speed) this.printer.label.settings.printSpeed = parseInt(speed[1], 10) / 10;
         const dark = frame.match(/<SI>d(-?\d+)/);
         if (dark) this.printer.label.settings.darknessAdjust = parseInt(dark[1], 10);
+
+        // Printer Language, Select (PRM p.133). Selects the character set the
+        // printer applies to print data; decode is applied when the data is
+        // bound to fields (see parse / resolveSource).
+        const lang = frame.match(/<SI>l(\d+)/);
+        if (lang) this.printer.setCodePage(parseInt(lang[1], 10));
     }
 
     private parseFieldFrame(frame: string): void {
@@ -742,7 +780,15 @@ export class IPLViewerParser {
     private resolveSource(params: FieldParam[]): FieldSource {
         for (const p of params) {
             if (p.key !== 'd') continue;
-            if (p.value.startsWith('3,')) return { type: 'fixed', data: p.value.slice(2).replace(/<SUB><CR>/g, '\n') };
+            if (p.value.startsWith('3,')) {
+                return {
+                    type: 'fixed',
+                    data: decodePrintData(
+                        p.value.slice(2).replace(/<SUB><CR>/g, '\n'),
+                        this.printer.label.settings.codePage,
+                    ),
+                };
+            }
             // d4[,n]/d5[,n] only — anchored so a hypothetical d40-like value
             // can't masquerade as a date format index.
             if (/^4(,|$)/.test(p.value)) return { type: 'date', formatIndex: parseInt(p.value.split(',')[1] || '0', 10) };
@@ -887,6 +933,15 @@ export class IPLViewerParser {
         if (!KNOWN_FONTS.has(font)) {
             this.printer.issue('warning', 'unknown-font', `Text field uses unknown font "${font}"; rendered with a fallback face.`, `H${id ?? ''}`);
         }
+        // "Code pages 11 through 33 do not work with resident fonts" (PRM
+        // p.134). Resident bitmap fonts ignore the printer language, so bytes
+        // above 0x7F print as whatever the font's own table holds.
+        const codePage = this.printer.label.settings.codePage;
+        if (codePage !== undefined && codePage >= 11 && codePage <= 33 && FONT_MAP[font]?.type === 'bitmap') {
+            this.printer.issue('warning', 'code-page-resident-font',
+                `Font "${font}" is a resident bitmap font, which does not use code page ${codePage}; non-ASCII characters in this field may not print.`,
+                `H${id ?? ''}`);
+        }
         const kParam = params.find(p => p.key === 'k');
         let pointSize = kParam ? parseInt(kParam.value.split(',')[0], 10) || undefined : undefined;
         // Border: n>0 = white letters on an n-dot black surround (PRM p.167).
@@ -908,6 +963,12 @@ export class IPLViewerParser {
                 hMag = 1;
                 wMag = 1;
             }
+            // No k and no h/w either: the fixed-size families name their size
+            // in the font itself (c20 is "8 point monospace", c41 "36 point
+            // monospace bold" — PRM 2.70 p.206). Without this every member of
+            // that family would paint at one identical size, so the id would
+            // carry no meaning at all.
+            if (pointSize === undefined) pointSize = FONT_MAP[font]?.defaultPointSize;
         } else {
             if (hMag < 1 || wMag < 1 || hMag > 99 || wMag > 99) {
                 this.printer.issue('warning', 'magnification-invalid', `Bitmap font magnification h${hMag}/w${wMag} is outside 1-99.`, `H${id ?? ''}`);

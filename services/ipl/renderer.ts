@@ -2,7 +2,7 @@ import type { ViewerLabel, ViewerElement, TextElement, BarcodeElement } from './
 import { measureBarcode, paintBarcode, buildBwipSpec, applyI2of5Padding, interpretiveText, type BarcodeParams } from './barcodes';
 import { decodeGraphicColumns, paintBitmap } from './graphics';
 import { OUTLINE_FONTS } from './viewerParser';
-import { FONT_MAP, FONT_FAMILIES, fontAdvanceDots } from '../../constants';
+import { FONT_MAP, FONT_FAMILIES, fontAdvanceDots, fontStack } from '../../constants';
 // Tables shared with the crosscheck converter's contract (see
 // fontPlaceholders.ts; tests/ipl2zpl.test.ts pins both sides).
 import { DATE_FORMATS, TIME_FORMATS } from './fontPlaceholders';
@@ -248,7 +248,7 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
                 lineH = hPx * 1.15;
                 const family = meta.family ?? 'monospace';
                 outlineW = (line: string) => outlineTextBlockWidthDots([line], hPx, family);
-                ctx.font = `${hPx}px ${FONT_FAMILIES[family]}`;
+                ctx.font = `${hPx}px ${fontStack(family)}`;
             } else {
                 const cellH = (meta.baseHeight ?? 9) * el.hMag * s;
                 // Advance = cell width + intercharacter gap (c0: +1, others +2).

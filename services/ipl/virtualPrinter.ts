@@ -12,6 +12,7 @@
 
 import type { ViewerElement, ViewerIssue, ViewerLabel } from './types';
 import type { DirectGraphic } from './directGraphics';
+import { CODE_PAGES } from './codePages';
 
 export interface DownloadedGraphic {
     name?: string;
@@ -88,6 +89,25 @@ export class VirtualPrinter {
 
     hasIssue(code: string): boolean {
         return this.label.issues.some(i => i.code === code);
+    }
+
+    /**
+     * Printer Language, Select `<SI>ln` (PRM p.133). Records the language so
+     * print data can be decoded from bytes, and reports the families we do not
+     * decode rather than rendering mojibake without explanation.
+     */
+    setCodePage(n: number): void {
+        this.label.settings.codePage = n;
+        const info = CODE_PAGES[n];
+        if (!info) {
+            this.issue('warning', 'code-page-unknown',
+                `Printer language <SI>l${n} is not a documented code page; print data is left as raw bytes.`,
+                `<SI>l${n}`);
+        } else if (info.cjk) {
+            this.issue('warning', 'code-page-cjk',
+                `Printer language <SI>l${n} (${info.label}) is a CJK code page and is not decoded; non-ASCII print data may render incorrectly.`,
+                `<SI>l${n}`);
+        }
     }
 
     // -- format / element capture ------------------------------------------

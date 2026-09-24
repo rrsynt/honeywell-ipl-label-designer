@@ -10,6 +10,7 @@ import { resolveLabelAtBatch, totalLabelCount } from '../services/ipl/odometer';
 import { streamBatchPages, batchPageCount, MAX_BATCH_EXPORT } from '../services/batchExport';
 import { createZipBlob, zipEntryBytes, numberedPngName, sanitizeBaseName, type ZipEntry } from '../services/zipStore';
 import { bytesToByteString, detectMojibake, convertDirectGraphicsToHex } from '../services/ipl/fileBytes';
+import { describeCodePage } from '../services/ipl/codePages';
 import { notify, requestConfirm } from '../services/uiDialogs';
 import { sendIplViaBridge, pingBridge } from '../services/bridgeSend';
 import { getPrinterTarget, setPrinterTarget } from '../services/printerTarget';
@@ -821,6 +822,11 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                             {label.page && (
                                 <span title={label.page.placements.map(p => `${p.position}→F${p.formatId}${p.offsetX || p.offsetY ? ` @${p.offsetX},${p.offsetY}` : ''}`).join(', ')}>
                                     page {label.page.id}: {label.page.placements.length} formats
+                                </span>
+                            )}
+                            {label.settings.codePage !== undefined && (
+                                <span title="Printer Language, Select <SI>ln — the character set the printer applies to print data">
+                                    Code page: {describeCodePage(label.settings.codePage)}
                                 </span>
                             )}
                             {(label.settings.batchCount ?? 1) * (label.settings.quantity ?? 1) > 1 && (
