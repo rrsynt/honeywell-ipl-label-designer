@@ -1,4 +1,5 @@
 import type { Design, Field, TextField, BarcodeField, LineField, BoxField, ImageField, PrinterSettings, FieldDataSource, DataSource, DateFormat, TimeFormat } from '../types';
+import { getFormattedDateTime } from './dateTimeFormat';
 import { DPI_MAP, FONT_MAP } from '../constants';
 import { getObjectBoundingBox } from './geometry';
 import { encodeBitmapColumns, encodeColumnsToNibblizedRle } from './ipl/graphics';
@@ -180,8 +181,6 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
     
     const variableFieldsForPrint: { field: TextField | BarcodeField, source?: DataSource }[] = [];
 
-    const DATE_FORMAT_MAP: { [key in DateFormat]: number } = { 'YY/MM/DD': 0, 'YYYY/MM/DD': 1, 'DD/MM/YY': 2, 'DD/MM/YYYY': 3 };
-    const TIME_FORMAT_MAP: { [key in TimeFormat]: number } = { 'HH:MM:SS 24hr': 0, 'HH:MM 24hr': 1, 'HH:MM:SS 12hr': 2, 'HH:MM 12hr': 3, 'HH:MM:SS am/pm': 4, 'HH:MM am/pm': 5 };
 
     visibleFields.forEach(field => {
         let { x: x_mm, y: y_mm, rotation } = field;
@@ -238,8 +237,15 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
         const processDataSource = (field: TextField | BarcodeField) => {
             const dataSource = field.dataSource;
             if (dataSource.type === 'fixed') return `d3,${dataSource.data.replace(/\n/g, '<SUB><CR>')}`;
-            if (dataSource.type === 'date') return `d4,${DATE_FORMAT_MAP[dataSource.format]}`;
-            if (dataSource.type === 'time') return `d5,${TIME_FORMAT_MAP[dataSource.format]}`;
+            // Date/time have no IPL command: `dn` documents only n=0..3
+            // (PRM p.184 "Field Data, Define Source"), so the old d4/d5 output
+            // was undefined data on a real printer, and our own viewer answered
+            // it with a placeholder. Bake the current value as fixed text:
+            // every printer prints that correctly, and re-generating refreshes
+            // it. The designer keeps its live preview either way.
+            if (dataSource.type === 'date' || dataSource.type === 'time') {
+                return `d3,${getFormattedDateTime(dataSource.type, dataSource.format)}`;
+            }
             
             if (dataSource.type === 'linked') {
                 const source = dataSources.find(ds => ds.id === dataSource.sourceId);

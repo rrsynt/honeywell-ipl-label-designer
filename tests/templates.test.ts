@@ -131,9 +131,13 @@ describe('templates generate parseable IPL (viewer contract)', () => {
         expect(barcodes.map(b => b.symbology).sort(), 'Code128 + QR symbologies').toEqual(['18', '6']);
         expect(kinds).toContain('line');
         expect(kinds).toContain('box');
-        // the [DATE]-backed text field parses as a date source
-        const dateEl = label.elements.find(e => e.kind === 'text' && (e as { source: { type: string } }).source.type === 'date');
-        expect(dateEl, 'date-sourced text element').toBeTruthy();
+        // The template's date field is BAKED at generate time (IPL has no
+        // clock; d4/d5 are not commands), so it parses back as fixed text
+        // carrying a real formatted date rather than a placeholder.
+        const dateEl = label.elements.find(
+            (e) => e.kind === 'text' && /^\d{4}\/\d{2}\/\d{2}$/.test((e as { source: { data?: string } }).source.data ?? ''),
+        );
+        expect(dateEl, 'baked date text element (YYYY/MM/DD)').toBeTruthy();
     });
 
     it('lot sticker counter source feeds the linked field in generated output', async () => {

@@ -1,4 +1,5 @@
 import type { Field, Design, TextField, BarcodeField, LineField, BoxField } from '../types';
+import { getFormattedDateTime } from './dateTimeFormat';
 import { FONT_MAP, FONT_FAMILIES, POINTS_TO_MM, DPI_MAP, bitmapTextWidthDots } from '../constants';
 import { measureBarcode, isBarcodeEngineReady } from './ipl/barcodes';
 import { designerBarcodeRender } from './designerBarcode';
@@ -15,46 +16,6 @@ function getMeasurementContext(): CanvasRenderingContext2D {
     return measurementCtx!;
 }
 
-function getFormattedDateTime(type: 'date' | 'time', format: string): string {
-    const now = new Date();
-    const YYYY = now.getFullYear();
-    const YY = YYYY.toString().slice(-2);
-    const MM = (now.getMonth() + 1).toString().padStart(2, '0');
-    const DD = now.getDate().toString().padStart(2, '0');
-    let HH = now.getHours();
-    const M = now.getMinutes().toString().padStart(2, '0');
-    const SS = now.getSeconds().toString().padStart(2, '0');
-
-    if (type === 'date') {
-        switch (format) {
-            case 'YYYY/MM/DD': return `${YYYY}/${MM}/${DD}`;
-            case 'DD/MM/YY': return `${DD}/${MM}/${YY}`;
-            case 'DD/MM/YYYY': return `${DD}/${MM}/${YYYY}`;
-            case 'YY/MM/DD':
-            default:
-                return `${YY}/${MM}/${DD}`;
-        }
-    } else { // time
-        const is12hr = format.includes('12hr') || format.includes('am/pm');
-        const ampm = HH >= 12 ? 'pm' : 'am';
-        if (is12hr) {
-            HH = HH % 12;
-            HH = HH ? HH : 12; // the hour '0' should be '12'
-        }
-        const HH_str = HH.toString().padStart(2, '0');
-
-        switch (format) {
-            case 'HH:MM 24hr': return `${HH_str}:${M}`;
-            case 'HH:MM:SS 12hr': return `${HH_str}:${M}:${SS}`;
-            case 'HH:MM 12hr': return `${HH_str}:${M}`;
-            case 'HH:MM:SS am/pm': return `${HH_str}:${M}:${SS} ${ampm}`;
-            case 'HH:MM am/pm': return `${HH_str}:${M} ${ampm}`;
-            case 'HH:MM:SS 24hr':
-            default:
-                 return `${HH_str}:${M}:${SS}`;
-        }
-    }
-}
 
 const getFieldData = (field: TextField | BarcodeField, design: Design): string => {
     const { dataSource } = field;

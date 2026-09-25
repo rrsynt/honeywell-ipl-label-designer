@@ -3,9 +3,6 @@ import { measureBarcode, paintBarcode, buildBwipSpec, applyI2of5Padding, interpr
 import { decodeGraphicColumns, paintBitmap } from './graphics';
 import { OUTLINE_FONTS } from './viewerParser';
 import { FONT_MAP, FONT_FAMILIES, fontAdvanceDots, fontStack } from '../../constants';
-// Tables shared with the crosscheck converter's contract (see
-// fontPlaceholders.ts; tests/ipl2zpl.test.ts pins both sides).
-import { DATE_FORMATS, TIME_FORMATS } from './fontPlaceholders';
 import { outlineTextBlockWidthDots } from './fontMetrics';
 
 export interface RenderOptions {
@@ -156,11 +153,9 @@ export const estimateElementSize = (
 
 const resolveDisplayData = (source: TextElement['source']): string => {
     if (source.type === 'fixed' || source.type === 'variable') return source.data ?? '';
-    if (source.type === 'date') return `[${DATE_FORMATS[source.formatIndex] ?? 'DATE'}]`;
-    if (source.type === 'time') return `[${TIME_FORMATS[source.formatIndex] ?? 'TIME'}]`;
     // 'master' is resolved to the master's data by the parser before painting
     // (viewerParser.resolveMasterSources); reaching here means an unresolved
-    // slave — draw it empty rather than mislabel it as [TIME].
+    // slave — draw it empty rather than invent a value.
     return '';
 };
 
@@ -272,7 +267,37 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
                 ctx.fillRect(-el.borderDots * s, -el.borderDots * s, textW + 2 * el.borderDots * s, textH + 2 * el.borderDots * s);
                 ctx.fillStyle = '#ffffff';
             }
-            lines.forEach((line, i) => ctx.fillText(line, 0, i * lineH));
+            if (el.charRot === 1) {
+                // r1 (PRM p.170): each character turns 90° CCW in place while
+                // the advance still runs along the field's own axis. That is
+                // why the manual pairs it with f3 (its own example, p.40):
+                // f3 turns the field, r1 un-turns the glyphs, and the result
+                // is a column of upright letters. Advance and line pitch are
+                // untouched, so the field box — and every anchor derived from
+                // it — is unchanged.
+                //
+                // The advance is measured from the canvas, exactly as the flat
+                // path lets fillText advance, so spacing is identical between
+                // r0 and r1. Using the printer's cell pitch here instead would
+                // space the turned text differently from the upright text of
+                // the same font.
+                lines.forEach((line, li) => {
+                    let cx = 0;
+                    for (const ch of line) {
+                        const adv = ctx.measureText(ch).width;
+                        ctx.save();
+                        ctx.translate(cx + adv / 2, li * lineH + lineH / 2);
+                        ctx.rotate(-Math.PI / 2);
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(ch, 0, 0);
+                        ctx.restore();
+                        cx += adv;
+                    }
+                });
+            } else {
+                lines.forEach((line, i) => ctx.fillText(line, 0, i * lineH));
+            }
             break;
         }
         case 'barcode': {

@@ -789,10 +789,19 @@ export class IPLViewerParser {
                     ),
                 };
             }
-            // d4[,n]/d5[,n] only — anchored so a hypothetical d40-like value
-            // can't masquerade as a date format index.
-            if (/^4(,|$)/.test(p.value)) return { type: 'date', formatIndex: parseInt(p.value.split(',')[1] || '0', 10) };
-            if (/^5(,|$)/.test(p.value)) return { type: 'time', formatIndex: parseInt(p.value.split(',')[1] || '0', 10) };
+            // d4/d5 are NOT IPL commands: "Field Data, Define Source" documents
+            // only n=0..3 (PRM p.184), and no manual in docs/manuals/ mentions a
+            // date or clock source. This app's generator used to emit them.
+            // Report the field honestly instead of painting a plausible-looking
+            // [YY/MM/DD] box for data the printer cannot produce. (A d40-like
+            // value must not masquerade either, hence the anchoring.)
+            if (/^[45](,|$)/.test(p.value)) {
+                const isDate = p.value.startsWith('4');
+                this.printer.issue('warning', 'unknown-data-source',
+                    `Data source d${p.value.charAt(0)} is not an IPL command (PRM p.184 defines only d0-d3); the field prints nothing. ${isDate ? 'Date' : 'Time'} values must be baked into the format as fixed data (d3) at generate time.`,
+                    `d${p.value}`);
+                return { type: 'fixed', data: '' };
+            }
             // d2,m1[,m2] — master/slave copy (PRM p.175): this field receives
             // its data from field m1; m2 selects the FS/GS-delimited element
             // (0-9999, default 0). Anchored so d20+ cannot masquerade.
@@ -849,11 +858,6 @@ export class IPLViewerParser {
             const cmd = `${KIND_PREFIX[slave.kind]}${slave.id ?? ''} d2,${src.masterId}`;
             if (!master) {
                 this.printer.issue('warning', 'master-field-missing', `Slave field references undefined master field ${src.masterId}; renders empty.`, cmd);
-                slave.source = { type: 'variable', data: '' };
-                continue;
-            }
-            if (master.source.type === 'date' || master.source.type === 'time') {
-                this.printer.issue('warning', 'master-field-dynamic', `Master field ${src.masterId} holds [${master.source.type === 'date' ? 'DATE' : 'TIME'}] data; the copy is resolved at print time and shows empty here.`, cmd);
                 slave.source = { type: 'variable', data: '' };
                 continue;
             }
@@ -924,6 +928,24 @@ export class IPLViewerParser {
         return Math.max(0, Math.min(3, f));
     }
 
+    /**
+     * Character rotation `rn` for human-readable fields (PRM p.170): 0
+     * horizontal, 1 = 90° CCW. Values above 1 are undocumented — the manual
+     * prints only "rotates the characters ... by 90 degrees counterclockwise"
+     * and nothing for 2/3 — so they clamp to horizontal and say so, rather
+     * than inventing a 180/270 reading the printer may not share.
+     */
+    private charRotationOf(params: FieldParam[], command: string): 0 | 1 {
+        const raw = params.find(p => p.key === 'r');
+        if (!raw) return 0;
+        const n = parseInt(raw.value, 10);
+        if (n === 1) return 1;
+        if (!isNaN(n) && n !== 0) {
+            this.printer.issue('warning', 'char-rotation-invalid', `Character rotation r${n} is outside the documented range for text fields (0 horizontal, 1 = 90° CCW); rendered horizontal.`, command);
+        }
+        return 0;
+    }
+
     private parseTextField(id: number | undefined, params: FieldParam[]): void {
         this.beginField('H', id);
         const origin = this.originOf(params, 'H');
@@ -986,6 +1008,7 @@ export class IPLViewerParser {
             wMag,
             pointSize,
             borderDots,
+            charRot: this.charRotationOf(params, `H${id ?? ''}`),
             source: this.resolveSource(params),
         };
         this.printer.commitElement(element);
@@ -1041,6 +1064,7 @@ export class IPLViewerParser {
                 return k ? parseInt(k.value.split(',')[0], 10) || undefined : undefined;
             })(),
             borderDots: undefined,
+            charRot: this.charRotationOf(params, cmd),
             interpretiveOf: host ? barcodeId : undefined,
             source: this.resolveSource(params),
         };

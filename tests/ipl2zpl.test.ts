@@ -42,27 +42,30 @@ describe('ipl2zpl paper-size extraction (crosscheck bug 1)', () => {
     });
 });
 
-describe('ipl2zpl placeholders match the renderer (crosscheck bug 2)', () => {
-    it('d4 expands via the same DATE_FORMATS table as services/ipl/renderer', async () => {
-        const { DATE_FORMATS, TIME_FORMATS } = await import('../services/ipl/fontPlaceholders');
+describe('ipl2zpl agrees with the viewer on d4/d5', () => {
+    // d4/d5 are not IPL commands (PRM p.184 defines only d0-d3). Both sides
+    // used to expand them into a [DD/MM/YYYY] placeholder, so the crosscheck
+    // compared text no printer would ever produce and agreed with itself.
+    it('emits no invented text for a d4/d5 field', () => {
         const zpl = iplToZpl([
             '<STX><ESC>P<ETX>', '<STX>E1;F1;<ETX>',
             '<STX>H0;o20,20;c25;k12;d4,3<ETX>',
             '<STX>H1;o20,50;c25;k14;d5,5<ETX>',
             '<STX>R<ETX>',
         ].join('\n'), 203);
-        expect(zpl).toContain(`^FD[${DATE_FORMATS[3]}]^FS`);   // [DD/MM/YYYY]
-        expect(zpl).toContain(`^FD[${TIME_FORMATS[5]}]^FS`);   // [HH:MM am/pm]
+        expect(zpl).not.toContain('[DD/MM/YYYY]');
+        expect(zpl).not.toContain('[HH:MM am/pm]');
         expect(zpl).not.toContain('[DATE]');
         expect(zpl).not.toContain('[TIME]');
     });
 
-    it('index-less d4/d5 falls back to format 0 like the renderer', () => {
+    it('leaves a real fixed field alone', () => {
         const zpl = iplToZpl([
             '<STX><ESC>P<ETX>', '<STX>E1;F1;<ETX>',
-            '<STX>H0;o20,20;c25;k12;d4<ETX>', '<STX>R<ETX>',
+            '<STX>H0;o20,20;c25;k12;d3,2026/09/25<ETX>',
+            '<STX>R<ETX>',
         ].join('\n'), 203);
-        expect(zpl).toContain('^FD[YY/MM/DD]^FS');
+        expect(zpl).toContain('^FD2026/09/25^FS');
     });
 });
 

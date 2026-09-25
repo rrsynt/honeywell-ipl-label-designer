@@ -35,8 +35,11 @@ describe('d3 fixed-data is greedy over ";" (audit chain-parse defect)', () => {
         expect(dataOf(2)).toBe('Trailing');
         expect(dataOf(3)).toBe('A;B');
     });
-    it('leaves d4 date sources unaffected', () => {
-        expect(texts.find(t => t.id === 4)!.source.type).toBe('date');
+    it('reports d4 as unsupported rather than inventing a date', () => {
+        // d4/d5 are not IPL commands (PRM p.184 defines only d0-d3). The field
+        // must not silently become a fabricated [YY/MM/DD] placeholder.
+        expect(texts.find(t => t.id === 4)!.source).toEqual({ type: 'fixed', data: '' });
+        expect(label.issues.some(i => i.code === 'unknown-data-source')).toBe(true);
     });
 });
 

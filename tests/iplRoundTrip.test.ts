@@ -140,15 +140,23 @@ describe('IPL generator -> parser round trip', () => {
         expect(b2.dataSource).toMatchObject({ type: 'variable', defaultData: '99887766' });
     });
 
-    it('round-trips date and time data sources', async () => {
+    it('bakes date and time data sources into fixed text', async () => {
+        // IPL has no clock: `dn` documents only d0-d3 (PRM p.184), so there is
+        // no command a date source could round-trip THROUGH. The generator
+        // writes the formatted value as fixed data, which the parser reads
+        // back as text in the requested shape.
         const design = makeDesign([
             text(1, 5, 5, '', { dataSource: { type: 'date', format: 'DD/MM/YYYY' } }),
             text(2, 5, 15, '', { dataSource: { type: 'time', format: 'HH:MM am/pm' } }),
         ]);
         const parsed = parseIPL(await generateIPL(design), DPI);
 
-        expect((parsed.fields[0] as TextField).dataSource).toEqual({ type: 'date', format: 'DD/MM/YYYY' });
-        expect((parsed.fields[1] as TextField).dataSource).toEqual({ type: 'time', format: 'HH:MM am/pm' });
+        const dateSrc = (parsed.fields[0] as TextField).dataSource as { type: string; data: string };
+        const timeSrc = (parsed.fields[1] as TextField).dataSource as { type: string; data: string };
+        expect(dateSrc.type).toBe('fixed');
+        expect(dateSrc.data, 'DD/MM/YYYY shape').toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
+        expect(timeSrc.type).toBe('fixed');
+        expect(timeSrc.data, 'HH:MM am/pm shape').toMatch(/^\d{2}:\d{2} (am|pm)$/);
     });
 
     it('round-trips code128 subset, code39 check digit and multi-line text', async () => {

@@ -27,8 +27,6 @@ interface ElementBase {
 export type FieldSource =
     | { type: 'fixed'; data: string }
     | { type: 'variable'; data: string }
-    | { type: 'date'; formatIndex: number }
-    | { type: 'time'; formatIndex: number }
     /**
      * d2,m1[,m2] — master/slave (PRM p.175 "Field Data, Define Source"): this
      * field copies its data from field m1 of the same format. m2 is an optional
@@ -47,6 +45,13 @@ export interface TextElement extends ElementBase {
     /** Border thickness in dots (b parameter). >0 renders white letters on a
      * black n-dot surround (PRM p.167). */
     borderDots?: number;
+    /**
+     * Character rotation (r parameter, PRM p.170): 0 horizontal, 1 = 90° CCW.
+     * Distinct from `f` (field direction, which rotates the whole field box):
+     * this turns each GLYPH in place while the advance still runs along the
+     * field's own axis, so `f3;r1` prints a column of upright characters.
+     */
+    charRot?: 0 | 1;
     /** Set when this is an interpretive field (I<n>) bound to barcode <n>;
      * its default anchor was derived from that barcode's rendered box. */
     interpretiveOf?: number;

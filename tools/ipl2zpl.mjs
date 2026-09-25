@@ -95,18 +95,16 @@ export function iplToZpl(iplCode, dpi = 203) {
         }
     }
 
-    // Placeholders must match the viewer renderer (services/ipl/renderer.ts
-    // DATE_FORMATS/TIME_FORMATS) — "[DATE]" vs "[DD/MM/YYYY]" changes the
-    // text width and made the box-date cross-check diverge for the wrong
-    // reason (converter drift, not a render bug).
-    const DATE_FORMATS = ['YY/MM/DD', 'YYYY/MM/DD', 'DD/MM/YY', 'DD/MM/YYYY'];
-    const TIME_FORMATS = ['HH:MM:SS 24hr', 'HH:MM 24hr', 'HH:MM:SS 12hr', 'HH:MM 12hr', 'HH:MM:SS am/pm', 'HH:MM am/pm'];
+    // d4/d5 are not IPL commands (PRM p.184 defines only d0-d3), so a stream
+    // carrying them prints nothing there. The viewer says so with an issue and
+    // draws an empty field; this converter mirrors that rather than inventing
+    // a [DD/MM/YYYY] placeholder, which used to make both sides agree on text
+    // no printer would ever produce.
     const resolveData = (params, id) => {
         const d = params.find(([k]) => k === 'd');
         if (!d) return varData.get(id ?? -1) ?? '';
         if (d[1].startsWith('3,')) return d[1].slice(2);
-        if (d[1][0] === '4') return `[${DATE_FORMATS[parseInt(d[1].split(',')[1] || '0', 10)] ?? 'DATE'}]`;
-        if (d[1][0] === '5') return `[${TIME_FORMATS[parseInt(d[1].split(',')[1] || '0', 10)] ?? 'TIME'}]`;
+        if (d[1][0] === '4' || d[1][0] === '5') return '';
         return varData.get(id ?? -1) ?? '';
     };
 
