@@ -1110,7 +1110,8 @@ export class IPLViewerParser {
 
         const heightDots0 = this.int(params, 'h', 50);
         // Manual default: w1 narrow-element width (PRM270 p.171). Older parser
-        // default of 2 was wrong; printers clamp w1 to 2 only in picket mode.
+        // default of 2 was wrong: the printer keeps w1 in drag mode and only
+        // raises it to 2 in picket mode (handled below).
         const moduleDots0 = this.int(params, 'w', 1);
         // POSTNET (c11): h/w magnify a base cell 13 dots tall × 22 wide, the
         // default 2×2 yielding USPS-spec size (PRM p.156). bwip's scale-1
@@ -1121,6 +1122,29 @@ export class IPLViewerParser {
         // width commands are ignored" (PRM p.171) — pinned to that natural size.
         let heightDots = heightDots0;
         let moduleDots = moduleDots0;
+        // Picket vs drag (PRM p.53, same note in the 2.70 and 4400 manuals and
+        // the Developer's Guide): "You can only print a bar width of 1 if you
+        // are printing in drag mode (bars perpendicular to the print head). If
+        // you select a width of 1 in picket mode (bars parallel to the print
+        // head), the printer defaults to 2."
+        //
+        // Which mode applies is decidable from the stream after all: the print
+        // head is a single line across the web, so bars lying ACROSS the web
+        // (the field's own axis perpendicular to the feed) are picket, and the
+        // media step quantises their width — 1 dot is not reachable. Bars ALONG
+        // the feed are drag and keep w1. Field direction f sets that axis:
+        // measured on our renderer, f0/f2 draw bars vertically (along the feed
+        // = drag) and f1/f3 horizontally (across the web = picket).
+        //
+        // The spec called this undecidable (§15 item 3, "expose a toggle");
+        // it is decidable, and a toggle would make the same stream render two
+        // ways depending on a switch no printer has.
+        const picket = this.rotationOf(params, cmd) % 2 === 1;
+        let picketWidened = false;
+        if (picket && moduleDots === 1) {
+            moduleDots = 2;
+            picketWidened = true;
+        }
         if (parts[0] === '11') {
             // Clamp the magnification to the printable 1-10 band. The designer
             // always emits h/w in DOTS (e.g. h50), which read literally as a
@@ -1152,6 +1176,9 @@ export class IPLViewerParser {
         }
         if (moduleDots0 < 1 || moduleDots0 > 30) {
             this.printer.issue('warning', 'module-width-out-of-range', `Barcode module width w${moduleDots0} is outside the printable range (1-30 dots).`, cmd);
+        }
+        if (picketWidened) {
+            this.printer.issue('info', 'picket-width-widened', `Bar width w1 in picket mode (bars across the web, f${this.rotationOf(params, cmd)}) prints as 2 dots — the printer cannot place a 1-dot bar across the head (PRM p.53).`, cmd);
         }
         const code39Mode = parts[0] === '0' ? parts[1] : undefined;
         // c6[,m1][,m2][,m3] (PRM p.144): m1=1 selects UCC-128 SSCC, m2=1
