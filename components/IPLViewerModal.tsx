@@ -58,8 +58,8 @@ const SAMPLES: { name: string; code: string }[] = [
 <STX><SI>L400<ETX>
 <STX><ESC>P<ETX>
 <STX>E2;F2;<ETX>
-<STX>H0;o20,20;c21;k10;d4,3<ETX>
-<STX>H1;o20,50;c25;k14;d5,5<ETX>
+<STX>H0;o20,20;c21;k10;d3,2026/09/25<ETX>
+<STX>H1;o20,50;c25;k14;d3,14:30:00<ETX>
 <STX>W2;o20,90;l600;h200;w4;r16<ETX>
 <STX>B3;o40,120;c12;h140;w2;i0;d3,IPL VIEWER DEMO<ETX>
 <STX>R<ETX>
@@ -443,6 +443,10 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                 orientation: wPx >= hPx ? 'landscape' : 'portrait',
                 unit: 'pt',
                 format: [Math.max(28, wPx), Math.max(28, hPx)],
+                // jsPDF embeds addImage rasters as uncompressed RGB without
+                // this: no-compression rasters make a PDF ~2 orders of
+                // magnitude larger for the same picture.
+                compress: true,
             });
             pdf.addImage(dataUrl, 'PNG', 0, 0, wPx, hPx);
             pdf.save(`ipl-label-${dpi}dpi.pdf`);
@@ -485,6 +489,9 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                             orientation: page.landscape ? 'landscape' : 'portrait',
                             unit: 'pt',
                             format: [Math.max(28, page.widthPt), Math.max(28, page.heightPt)],
+                            // Same reason as the single-label export above:
+                            // an uncompressed raster is ~330x the size here.
+                            compress: true,
                         });
                     } else {
                         pdf.addPage([Math.max(28, page.widthPt), Math.max(28, page.heightPt)],

@@ -80,6 +80,14 @@ export const downloadDesignPdf = async (design: Design, maxPages?: number): Prom
                 orientation: page.landscape ? 'landscape' : 'portrait',
                 unit: 'pt',
                 format: [Math.max(28, page.widthPt), Math.max(28, page.heightPt)],
+                // Without this jsPDF embeds addImage's raster as UNCOMPRESSED
+                // RGB. A label rasterizes at 4 px per printer dot, so the
+                // shipping template (816x1216 dots) produces a 3264x4864 image
+                // = 47.6 MB of raw pixels, and the exported PDF measured
+                // exactly that while the identical PNG inside a ZIP was
+                // 584 KB. Measured at the same size: 45.4 MB -> 0.06 MB with
+                // compression. Nothing else about the page changes.
+                compress: true,
             });
         } else {
             pdf.addPage([Math.max(28, page.widthPt), Math.max(28, page.heightPt)],
