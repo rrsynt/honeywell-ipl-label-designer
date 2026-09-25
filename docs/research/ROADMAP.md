@@ -14,8 +14,10 @@
 | State machine printer virtual | `VirtualPrinter` dua fase (pending→commit) | `services/ipl/virtualPrinter.ts` — semua state parse di satu objek, invariant commit di satu tempat | ✅ selesai 2026-09-20 (Fase 1) |
 | Renderer stateless | ya, opsi per panggilan | `renderLabel(canvas,label,extent,opts)` murni (dipakai headless vitest); `canvasDrawer` khusus UI designer | ✅ terpisah |
 | Semua koordinat dalam dots | ya, sejak parse time | ya (pt→dots hanya outline `k`, butuh dpi renderer — disengaja) | ✅ diaudit |
-| Golden-file testing | ~109 tes, threshold per-pixel, diff overlay, toleransi didokumentasikan | harness golden 6 kasus + parity suite + codeword decode | ✅ Fase 3 |
+| Golden-file testing | ~109 tes, threshold per-pixel, diff overlay, toleransi didokumentasikan | harness golden 8 kasus + parity suite BarTender (geometry, sweep, auto, golden-pair) + codeword decode | ✅ Fase 3 |
 | Kalibrasi font | tabel tuning per-karakter vs referensi | tabel advance per-glyph Liberation (fontMetrics.ts, ASCII 32–126, per-mille em) dipakai estimateElementSize + border b + import designer | ✅ Batch U 2026-09-24 (mono byte-stable, proporsional ≤0.3% vs measureText) |
+| Semantik command yang tak terdokumentasi | — | seluruh 10 pertanyaan terbuka IPL-RENDER-SPEC §15 tertutup 2026-09-25 (jawaban dari manual, export BarTender, atau invarian terukur) | ✅ §15 kosong |
+| Print data non-ASCII | — | code page `<SI>l` (cp850/1250-1258/874/UTF-8) + substitusi resident n=0-9, satu entry point `decodePrintData` | ✅ 2026-09-24 |
 
 ## Fase 0 — Fondasi pengetahuan (SELESAI)
 - [x] Manual resmi terunduh: docs/manuals/ (4 PDF + CHM + ekstraksi .txt)
@@ -92,12 +94,22 @@ Dokumentasi lengkap: [GOLDEN-TESTING.md](GOLDEN-TESTING.md).
 - [x] 6 kasus (product, box-date, external, chained, codabar, bartender-logo —
       ekspor asli BarTender dengan graphic print-head orientation; mengunci semua
       perbaikan parser BarTender: framing split E/G/u, basis u 0/1-based, transposisi).
-- [ ] Ground truth dari printer asli — referensi sekarang masih self-baseline
-      (mengunci regresi, belum membuktikan fidelity). CATATAN: Honeywell resmi
-      menyatakan TIDAK ADA simulator (artikel 000075988, lihat
-      docs/HONEYWELL-SIMULATOR.md) — jalur: cross-check Labelary
-      (`npm run crosscheck`), akses printer fisik (vendor demo/pinjam), kurasi
-      contoh Developer's Guide.
+- [ ] Ground truth dari printer asli — **satu-satunya item roadmap yang masih
+      terbuka, dan terblokir hardware, bukan pengetahuan.** Referensi golden
+      sekarang masih self-baseline untuk sebagian besar kasus (mengunci
+      regresi); yang SUDAH punya rujukan eksternal adalah kasus BarTender
+      (export PNG asli + stream asli, `tests/bartenderAuto/Geometry/Sweep`)
+      dan metrik font (tabel advance hasil ukur).
+      STATUS 2026-09-25: seluruh §15 IPL-RENDER-SPEC sudah tertutup, dan
+      checklist kalibrasi di docs/HONEYWELL-SIMULATOR.md sudah diaudit — tiap
+      itemnya kini menyebut apa yang memutuskan nilainya, jadi satu sesi dengan
+      printer cukup untuk MENGKONFIRMASI kedelapannya, bukan menyelidiki dari
+      nol. Dua pertanyaan yang benar-benar tersisa: (a) apakah face outline
+      printer selebar Liberation, (b) apakah firmware memakai tabel substitusi
+      resident yang sama dengan Appendix B.
+      CATATAN: Honeywell resmi menyatakan TIDAK ADA simulator (artikel
+      000075988) — jalur: cross-check Labelary (`npm run crosscheck`), akses
+      printer fisik (vendor demo/pinjam), kurasi contoh Developer's Guide.
       STATUS 2026-09-20: jalur Labelary TERBUKTI BEKERJA — product/box-date/
       chained/external lolos konversi+render; render product.ipl cocok layout
       dengan viewer kita (teks, Code128+HRI, garis, posisi). BATASAN: sampel

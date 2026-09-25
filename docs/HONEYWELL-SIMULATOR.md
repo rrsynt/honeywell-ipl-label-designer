@@ -64,17 +64,40 @@ perilaku firmware). Opsi realistis:
 
 ### Checklist kalibrasi visual saat dapat akses printer
 
-Bandingkan output printer vs preview aplikasi, catat deviasi, perbaiki metrik
-di `services/ipl/renderer.ts`:
+> **Diaudit 2026-09-25.** Kedelapan item di bawah kini punya dasar yang bisa
+> ditelusuri (manual, export BarTender, atau kontrak test) — bukan lagi
+> aproksimasi tanpa rujukan. Yang tersisa untuk printer fisik adalah
+> **konfirmasi**, bukan penemuan: setiap baris di bawah menyebut apa yang
+> sudah memutuskan nilainya, sehingga satu sesi dengan printer cukup untuk
+> memverifikasi kedelapannya sekaligus.
 
-- [ ] Tinggi huruf font bitmap (c0/c2/c7) pada magnifikasi 1× dan 2×
-- [ ] Lebar karakter outline (c20–c28) — aproksimasi 0.6 em perlu kalibrasi
-- [ ] Titik jangkar rotasi f1/f2/f3
-- [ ] Tinggi barcode linear vs parameter `h`, lebar modul vs `w`
-- [ ] PDF417: proporsi baris (viewer memakai modul persegi; printer row height ≈ 3×)
-- [ ] HRI teks atas/bawah barcode
-- [ ] Sudut bulat box via `r`
-- [ ] Interpretive gap 2 dot di bawah barcode
+- [x] Tinggi huruf font bitmap (c0/c2/c7) — sel dari PRM270 §7.3 (c0 7×9,
+  c2 10×14, c7 5×7), magnifikasi h/w mengalikan; `constants.ts` FONT_MAP.
+- [x] Lebar karakter outline (c20–c28) — aproksimasi 0.6 em sudah DIGANTI tabel
+  advance per-glyph hasil ukur font Liberation (Batch U,
+  `services/ipl/fontMetrics.ts`); monospace eksak, proporsional ≤0.3%.
+  **Perlu konfirmasi printer:** apakah face outline printer selebar Liberation.
+- [x] Titik jangkar rotasi f1/f2/f3 — dikunci kontrak `tests/rotationWysiwyg.test.ts`
+  (12 kasus) dan disepakati DevGuide p.27; sudah diverifikasi terhadap export
+  BarTender (90° CCW).
+- [x] Tinggi barcode linear vs `h`, lebar modul vs `w` — `h`/`w` dalam dot,
+  default h50/w1 (PRM p.53/p.171); lebar narrow = `w` dot, dan aturan picket
+  w1→2 kini diterapkan dari `f` (lihat `tests/strokeAndPicket.test.ts`).
+- [x] PDF417 proporsi baris — manual menyatakannya: mode auto memakai tinggi
+  3× lebar ("as close to a square as possible", PRM p.149), dan encoder memang
+  default `rowmult` 3. Parameter eksplisit `c12,m1/m2/m3` kini dipatuhi.
+- [x] HRI teks atas/bawah — `i1` di bawah / `i2` di atas, font 0 h2/w2 dengan
+  gap 2 dot (PRM p.191); `services/ipl/renderer.ts`.
+- [x] Sudut bulat box via `r` — `radiusDots` digambar dengan clamp
+  `min(r, w/2, h/2)` seperti printer.
+- [x] Interpretive gap 2 dot — diukur dari **kotak field** barcode, bukan baris
+  bar terakhir (PRM p.191 "2 dots below bar code"); dipin
+  `tests/originAndHri.test.ts`.
+
+Yang **belum** bisa diputuskan tanpa printer: apakah metrik face outline printer
+persis menyamai Liberation, dan apakah firmware memakai tabel substitusi
+resident yang sama dengan Appendix B. Keduanya adalah pertanyaan akurasi, bukan
+pertanyaan struktur — struktur sudah teruji.
 
 Setelah golden reference dari printer terkumpul:
 `testdata/golden/<nama>.png` diganti dengan hasil scan/foto printer, lalu
