@@ -4,6 +4,7 @@ import {
     deleteLibraryRecord, migrateLegacyLibrary, isLibraryName,
     serializeLabelFile, parseLabelFile, designChecksum,
     saveSharedSource, listSharedSources, importSharedSource, deleteSharedSource,
+    writeRecovery, readRecovery, clearRecovery,
 } from '../services/libraryStore';
 import type { Design } from '../types';
 
@@ -202,5 +203,45 @@ describe('migrateLegacyLibrary', () => {
         localStorage.setItem('ipl_designer_saved_designs', '{not json');
         expect(await migrateLegacyLibrary()).toBe(0);
         expect(await listLibrary()).toEqual([]);
+    });
+});
+
+describe('autosave drafts (Fase 1)', () => {
+    it('round-trips a draft with the name it was edited under', async () => {
+        await writeRecovery(design('Invoice', { nextId: 7 }), 1234);
+        const draft = await readRecovery();
+        expect(draft?.designName).toBe('Invoice');
+        expect(draft?.design.nextId).toBe(7);
+        expect(draft?.updatedAt).toBe(1234);
+    });
+
+    it('replaces the previous draft rather than accumulating them', async () => {
+        await writeRecovery(design('A', { nextId: 2 }), 1);
+        await writeRecovery(design('A', { nextId: 3 }), 2);
+        expect((await readRecovery())?.design.nextId).toBe(3);
+    });
+
+    it('CANNOT overwrite a design the user saved — that is the point of the slot', async () => {
+        // The whole reason drafts live in their own store: a user who saves a
+        // good version and then experiments must still find the good version.
+        await saveLibraryRecord(design('A', { nextId: 99 }), { now: 1 });
+        await writeRecovery(design('A', { nextId: 4 }), 2);
+        expect((await getLibraryRecord('A'))?.design.nextId).toBe(99);
+        expect((await readRecovery())?.design.nextId).toBe(4);
+        // And the draft never shows up as a saved design.
+        expect((await listLibrary()).map(m => m.name)).toEqual(['A']);
+    });
+
+    it('clearing the draft leaves the saved design untouched', async () => {
+        await saveLibraryRecord(design('A', { nextId: 99 }), { now: 1 });
+        await writeRecovery(design('A', { nextId: 4 }), 2);
+        await clearRecovery();
+        expect(await readRecovery()).toBeNull();
+        expect((await getLibraryRecord('A'))?.design.nextId).toBe(99);
+    });
+
+    it('returns false for an unstorable name instead of storing a nameless draft', async () => {
+        expect(await writeRecovery(design('   '), 1)).toBe(false);
+        expect(await readRecovery()).toBeNull();
     });
 });

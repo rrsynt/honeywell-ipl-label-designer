@@ -13,7 +13,7 @@ import { requestConfirm, notify } from './services/uiDialogs';
 import { ContextMenu } from './components/ContextMenu';
 import type { ContextMenuOption } from './components/ContextMenu';
 import { getSavedDesigns, saveDesign, loadDesign, deleteDesign } from './services/designManager';
-import { getLibraryRecord, saveLibraryRecord, deleteLibraryRecord, migrateLegacyLibrary, serializeLabelFile, parseLabelFile } from './services/libraryStore';
+import { getLibraryRecord, saveLibraryRecord, deleteLibraryRecord, migrateLegacyLibrary, serializeLabelFile, parseLabelFile, writeRecovery, clearRecovery } from './services/libraryStore';
 import { loadInstalledFonts } from './services/fontStore';
 import { getAxisAlignedBoundingBox } from './services/geometry';
 import { expandIdsWithGroups } from './services/dragMath';
@@ -150,6 +150,11 @@ const pruneOrphanGroups = (fields: Field[]): Field[] => {
  *  AppState.history.baseline. Exported for tests (tests/sessionSafety.test.ts). */
 export const isDesignDirty = (state: AppState): boolean =>
     state.history.present !== state.history.baseline;
+
+/** How long the canvas must sit still before the draft is written. Long enough
+ *  that a burst of typing or a drag produces one write, short enough that a
+ *  crash costs at most this much work. Exported so tests need not sleep. */
+export const AUTOSAVE_DELAY_MS = 1500;
 
 export function appReducer(state: AppState, action: any): AppState {
     const { history, clipboard, selectedFieldIds } = state;
@@ -651,6 +656,27 @@ export default function App() {
         // the user re-uploads the file.
         loadInstalledFonts().catch(e => console.error('Installed fonts failed to load:', e));
     }, []);
+
+    // Fase 1 autosave. Writes the work-in-progress draft to a slot of its own
+    // so a crash or a closed tab does not take unsaved edits with it, and so
+    // the draft can never be mistaken for — or overwrite — a version the user
+    // deliberately saved. `baseline` stays the one source of truth for dirty:
+    // this effect never dispatches, so autosaving cannot make a dirty design
+    // look saved.
+    //
+    // Debounced because every keystroke in a text field dispatches, and a
+    // design with an image field is far too big to write on each one. The
+    // cleanup cancels the pending write on the next edit, which is what makes
+    // the delay a debounce rather than a throttle. Depending on the design
+    // itself rather than on `state` keeps a mere selection change from
+    // restarting the timer.
+    useEffect(() => {
+        if (activeDesign === history.baseline) return;
+        const timer = setTimeout(() => {
+            writeRecovery(activeDesign).catch(e => console.error('Autosave failed:', e));
+        }, AUTOSAVE_DELAY_MS);
+        return () => clearTimeout(timer);
+    }, [activeDesign, history.baseline]);
     // Batch P: which image export is running (null = none). The ref guards
     // re-entry synchronously (two clicks in one paint frame); the state only
     // drives the button's "…" label.
@@ -866,6 +892,9 @@ export default function App() {
             dispatch({ type: 'COMMIT_INTERMEDIATE' });
             dispatch({ type: 'SET_SAVED_DESIGNS', payload: getSavedDesigns() });
             dispatch({ type: 'DESIGN_SAVED' });
+            // The named save is now the newest copy, so the draft would only be
+            // an older document offered under the same name. Drop it.
+            void clearRecovery().catch(e => console.error('Could not clear the autosave draft:', e));
             // The IndexedDB library is the one the start screen reads. It is
             // async, so the screen refreshes off libraryRevision rather than
             // off the synchronous savedDesigns list above.

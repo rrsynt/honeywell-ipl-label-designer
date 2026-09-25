@@ -31,10 +31,11 @@ export interface FontBackend {
 }
 
 const DB_NAME = 'ipl-designer';
-// Version 3 adds the `fonts` store. The upgrade handler in libraryStore.ts is
-// bumped in lockstep — both open the same database, so a lower version here
-// would throw on a browser that already ran the other.
-const DB_VERSION = 3;
+// Version 3 added the `fonts` store, version 4 the `recovery` one. The upgrade
+// handler in libraryStore.ts is bumped in lockstep — both open the same
+// database, so a lower version here would throw on a browser that already ran
+// the other.
+const DB_VERSION = 4;
 const FONT_STORE = 'fonts';
 
 const requestToPromise = <T>(req: IDBRequest<T>): Promise<T> =>
@@ -57,6 +58,7 @@ export const indexedDbFontBackend = (): FontBackend => {
                 if (!db.objectStoreNames.contains('designs')) db.createObjectStore('designs', { keyPath: 'name' });
                 if (!db.objectStoreNames.contains('sources')) db.createObjectStore('sources', { keyPath: 'name' });
                 if (!db.objectStoreNames.contains(FONT_STORE)) db.createObjectStore(FONT_STORE, { keyPath: 'name' });
+                if (!db.objectStoreNames.contains('recovery')) db.createObjectStore('recovery', { keyPath: 'slot' });
             };
             req.onsuccess = () => {
                 const db = req.result;
