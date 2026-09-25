@@ -31,12 +31,37 @@ export const IPL_SYMBOLOGY_TO_BCID: { [id: string]: string } = {
 
 // pixs-shaped rasters: keep modules square, do not stretch vertically by h.
 // The stacked databar variants and maxicode rasterize as pixs in bwip (probed).
+// The composite encoders are included: each renders a linear row PLUS a 2D
+// stack, so treating one as linear (and passing the linear `height` option)
+// makes the encoder refuse the symbol outright.
 const MATRIX_BCIDS = new Set(['pdf417', 'datamatrix', 'qrcode', 'micropdf417', 'code16k', 'code49',
-    'maxicode', 'databarstacked', 'databarstackedomni', 'databarexpandedstacked']);
+    'maxicode', 'databarstacked', 'databarstackedomni', 'databarexpandedstacked',
+    'gs1-128composite', 'ean13composite', 'ean8composite', 'upcacomposite', 'upcecomposite',
+    'databaromnicomposite', 'databartruncatedcomposite', 'databarstackedcomposite',
+    'databarstackedomnicomposite', 'databarlimitedcomposite', 'databarexpandedcomposite',
+    'databarexpandedstackedcomposite']);
 
 // QR Code model/EC/mask and MicroPDF417 size modifiers (PRM pp.158-159).
 const QR_EC_LEVELS = new Set(['L', 'M', 'Q', 'H']);
 const MICRO_COLS = new Set([0, 1, 2, 3, 4]);
+
+/** c21,m1 -> bwip composite encoder (PRM p.162). Versions 1-12 differ only in
+ *  the LINEAR component; all pair it with CC-A/CC-B chosen from the data. */
+const COMPOSITE_BCID: { [m1: string]: string } = {
+    '0': 'gs1-128composite',   // UCC/EAN-128 with CC-C
+    '1': 'gs1-128composite',   // UCC/EAN-128 with CC-A/CC-B
+    '2': 'ean13composite',
+    '3': 'ean8composite',
+    '4': 'upcacomposite',
+    '5': 'upcecomposite',
+    '6': 'databaromnicomposite',        // RSS-14
+    '7': 'databartruncatedcomposite',
+    '8': 'databarstackedcomposite',
+    '9': 'databarstackedomnicomposite',
+    '10': 'databarlimitedcomposite',
+    '11': 'databarexpandedcomposite',
+    '12': 'databarexpandedstackedcomposite',
+};
 
 // RSS/GS1 DataBar c20,m1 -> bwip bcid (PRM p.166; default m1=2 Stacked).
 const RSS_VERSION_TO_BCID: { [m1: string]: string } = {
@@ -199,6 +224,20 @@ export interface BarcodeParams {
     microColumns?: string;
     /** c19,m2 — MicroPDF417 data rows (valid combos are fixed by the spec). */
     microRows?: string;
+    /** c12,m1 — PDF417 data columns 0-30; 0 (the printer's default) picks a
+     * near-square symbol (PRM p.149). */
+    pdfColumns?: string;
+    /** c12,m2 — PDF417 error-correction level 0-8; 9 (the default) is auto. */
+    pdfEcLevel?: string;
+    /** c12,m3 — PDF417 truncate flag: '1' drops the right row indicators. */
+    pdfTruncate?: string;
+    /** c21,m1 — EAN.UCC Composite version 0-12, selecting the linear
+     * component and which CC variant pairs with it (PRM p.162). */
+    compositeVersion?: string;
+    /** c21,m3 — 2D columns (m1=0, 1-30) or segments per row (m1=12). */
+    compositeColumns?: string;
+    /** c21,m5 — height of each 2D row; 0 or absent = 3x magnification. */
+    compositeRowHeight?: string;
     /** c20,m1 — RSS/GS1 DataBar version 0-6 (default 2 = Stacked). */
     rssVersion?: string;
     /** c20,m2 — separator-row height for the stacked versions. */
@@ -327,6 +366,62 @@ export const buildBwipSpec = (symbology: string, data: string, params: BarcodePa
         const mask = parseInt(params.qrMask ?? '', 10);
         if (Number.isInteger(mask) && mask >= 0 && mask <= 7) opts.mask = mask + 1;
         return { main: { bcid: 'qrcode', text: data, opts } };
+    }
+    if (symbology === '21') {
+        // EAN.UCC Composite c21[,m1][,m2][,m3][,m4][,m5][,m6] (PRM p.162).
+        //
+        // The data is TWO components separated by <HT>: the linear part first,
+        // then the 2D supplement ("to print a Composite bar code with the
+        // linear component encoding 112233445566 and the 2D component encoding
+        // aabbccddeeff, the data is sent as 112233445566<HT>aabbccddeeff").
+        // bwip's composite encoders take exactly that shape with '|' as the
+        // separator, and they exist for every linear family the manual lists —
+        // an earlier note in this file claimed they only accept a GS1-AI form,
+        // which the probed behaviour disproves (they encode bare linear data
+        // such as '9520123456788|(99)1234-abcd').
+        //
+        // m1 selects the linear component AND, implicitly, the CC variant the
+        // printer will pair with it (the printer picks CC-A or CC-B from the
+        // data length; only m1=0 fixes CC-C). Versions 1-12 all mean "the same
+        // family as this linear symbology, with CC-A or CC-B".
+        const version = params.compositeVersion ?? '0';
+        const bcid = COMPOSITE_BCID[version];
+        if (!bcid) return null;
+        // The separator arrives either as a raw 0x09 byte (what a printer
+        // capture carries) or as the literal "<HT>" spelling a hand-authored
+        // or editor-pasted stream uses. Accept both, exactly as the tokenizer
+        // accepts <STX> and 0x02 for the same delimiter.
+        const parts = data.replace(/<HT>/gi, '\t').split('\t');
+        if (parts.length < 2 || !parts[0] || !parts[1]) return null;
+        const opts: Record<string, unknown> = {};
+        // m1=0 is the only version the manual pins to CC-C; the rest are
+        // CC-A/CC-B, which is bwip's 'b' (it upgrades to CC-C only when the
+        // data cannot fit a MicroPDF417).
+        opts.ccversion = version === '0' ? 'c' : 'b';
+        const cols = parseInt(params.compositeColumns ?? '0', 10);
+        if (Number.isInteger(cols) && cols > 0 && cols <= 30) opts.cccolumns = cols;
+        const rowH = parseInt(params.compositeRowHeight ?? '0', 10);
+        if (Number.isInteger(rowH) && rowH > 0) opts.ccrowheight = rowH;
+        return { main: { bcid, text: `${parts[0]}|${parts[1]}`, opts } };
+    }
+    if (symbology === '12') {
+        // PDF417 c12[[,m1][,m2][,m3]] (PRM p.149): m1 columns 0-30 (0 = the
+        // printer picks a near-square symbol), m2 error-correction level 0-8
+        // (9 = auto), m3 truncation. All three were previously dropped, so a
+        // stream asking for a specific column count or EC level silently got
+        // the encoder's defaults — the encoder's `rowmult` is already 3, which
+        // is the ratio the manual cites for the auto case, so the DEFAULT
+        // shape was right while every explicit parameter was ignored.
+        const opts: Record<string, unknown> = {};
+        const cols = parseInt(params.pdfColumns ?? '0', 10);
+        if (Number.isInteger(cols) && cols > 0) {
+            if (cols > 30) return null; // out of the documented range
+            opts.columns = cols;
+        }
+        const ec = parseInt(params.pdfEcLevel ?? '9', 10);
+        if (Number.isInteger(ec) && ec >= 0 && ec <= 8) opts.eclevel = ec;
+        if (params.pdfTruncate === '1') opts.compact = true;
+        return { main: { bcid: 'pdf417', text: data, opts } };
     }
     if (symbology === '19') {
         // MicroPDF417 c19[,m1][,m2] (PRM p.164): m1 columns 0-4, m2 rows;
@@ -472,6 +567,8 @@ const paramsKey = (p: BarcodeParams): string =>
         p.ratio ?? 1, p.narrowDots ?? 0,
         p.qrModel ?? '', p.qrEcl ?? '', p.qrMask ?? '',
         p.microColumns ?? '', p.microRows ?? '',
+        p.pdfColumns ?? '', p.pdfEcLevel ?? '', p.pdfTruncate ?? '',
+        p.compositeVersion ?? '', p.compositeColumns ?? '', p.compositeRowHeight ?? '',
         p.rssVersion ?? '', p.rssSepHeight ?? '', p.rssSegments ?? '',
         p.maxiMode ?? ''].join('\x00');
 

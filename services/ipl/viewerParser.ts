@@ -1254,11 +1254,61 @@ export class IPLViewerParser {
         let qrMask: string | undefined;
         let microColumns: string | undefined;
         let microRows: string | undefined;
+        let pdfColumns: string | undefined;
+        let pdfEcLevel: string | undefined;
+        let pdfTruncate: string | undefined;
+        let compositeVersion: string | undefined;
+        let compositeColumns: string | undefined;
+        let compositeRowHeight: string | undefined;
         let hibcMode: string | undefined;
         let rssVersion: string | undefined;
         let rssSepHeight: string | undefined;
         let rssSegments: string | undefined;
         let maxiMode: string | undefined;
+        if (parts[0] === '21') {
+            // EAN.UCC Composite c21[,m1][,m2][,m3][,m4][,m5][,m6] (PRM p.162):
+            // m1 selects the linear component and the CC variant paired with it
+            // (0-12), m3 the 2D columns or segments per row, m5 the row height.
+            // m2 (separator row), m4 (display spacing) and m6 (linear HRI) are
+            // presentation details this viewer does not model.
+            compositeVersion = parts[1];
+            compositeColumns = parts[3];
+            compositeRowHeight = parts[5];
+            if (compositeVersion) {
+                const v = Number(compositeVersion);
+                if (!Number.isInteger(v) || v < 0 || v > 12) {
+                    this.printer.issue('warning', 'composite-version-invalid', `EAN.UCC Composite version c21,m1="${compositeVersion}" is outside 0-12 (PRM p.162); defaulted to 0 (UCC/EAN-128 with CC-C).`, cmd);
+                    compositeVersion = undefined;
+                }
+            }
+            const compositeData = params.find(p2 => p2.key === 'd')?.value ?? '';
+            if (!/\t/.test(compositeData) && !/<HT>/i.test(compositeData)) {
+                this.printer.issue('warning', 'composite-needs-two-parts', `EAN.UCC Composite (c21) needs a linear component and a 2D component separated by <HT> in the data (PRM p.160); this field has only one part.`, cmd);
+            }
+        }
+        if (parts[0] === '12') {
+            // PDF417 c12[[,m1][,m2][,m3]] (PRM p.149): m1 columns 0-30 with 0
+            // meaning "as close to square as possible", m2 error-correction
+            // level 0-8 with 9 meaning auto, m3 truncation. These were captured
+            // nowhere before, so every explicit parameter was silently ignored.
+            pdfColumns = parts[1];
+            pdfEcLevel = parts[2];
+            pdfTruncate = parts[3];
+            const c = Number(pdfColumns ?? 0);
+            if (pdfColumns && (!Number.isInteger(c) || c < 0 || c > 30)) {
+                this.printer.issue('warning', 'pdf417-columns-invalid', `PDF417 columns c12,m1="${pdfColumns}" is outside 0-30 (PRM p.149); defaulted to automatic.`, cmd);
+                pdfColumns = undefined;
+            }
+            const e = Number(pdfEcLevel ?? 9);
+            if (pdfEcLevel && (!Number.isInteger(e) || e < 0 || e > 9)) {
+                this.printer.issue('warning', 'pdf417-ec-invalid', `PDF417 error-correction level c12,m2="${pdfEcLevel}" is outside 0-9 (PRM p.149); defaulted to automatic.`, cmd);
+                pdfEcLevel = undefined;
+            }
+            if (pdfTruncate !== undefined && pdfTruncate !== '' && pdfTruncate !== '0' && pdfTruncate !== '1') {
+                this.printer.issue('warning', 'pdf417-truncate-invalid', `PDF417 truncate flag c12,m3="${pdfTruncate}" is not 0 or 1 (PRM p.149); ignored.`, cmd);
+                pdfTruncate = undefined;
+            }
+        }
         if (parts[0] === '18') {
             qrModel = parts[1];
             qrEcl = parts[2] ? parts[2].toUpperCase() : undefined;
@@ -1344,11 +1394,11 @@ export class IPLViewerParser {
             }
             heightDots = 101;
             moduleDots = 1;
-        } else if (parts[0] === '15' || parts[0] === '21') {
-            // No faithful encoder exists: JIS-ITF (c15) is a boxed variant bwip
-            // lacks; EAN.UCC Composite (c21) carries its 2D component as raw
-            // host data, which bwip only accepts in GS1-AI form — forcing it
-            // would render a confident-but-wrong symbol. Placeholder + info.
+        } else if (parts[0] === '15') {
+            // JIS-ITF is a boxed variant bwip lacks (PRM p.157). c21 no longer
+            // belongs here: bwip ships composite encoders for every linear
+            // family the manual lists, which the earlier note in this file
+            // wrongly claimed it did not.
             this.printer.issue('info', 'symbology-no-encoder', `Symbology c${parts[0]} has no faithful encoder in the viewer; the field renders as a placeholder.`, cmd);
         } else if (parts[0] === '8' || parts[0] === '16') {
             hibcMode = parts[1];
@@ -1361,12 +1411,12 @@ export class IPLViewerParser {
         }
 
         // Deep-validate fixed data against the symbology when the encoder is up.
-        // Symbologies with no bwip mapping (JIS-ITF c15, composite c21…) skip
+        // Symbologies with no bwip mapping (JIS-ITF c15) skip
         // deep validation — the regex pass already ran. Batch A (2026-09-21)
         // wired 8/9/10/11/16/18/19/22 and Batch B added 14/20 into bwip.
         // c6 data is pre-strip-validated: '{' entries would otherwise consume
         // literal braces, so validation uses the same forced prefix as painting.
-        const DEEP_VALIDATE_SKIP = new Set(['15', '21']);
+        const DEEP_VALIDATE_SKIP = new Set(['15']);
         const source = this.resolveSource(params);
         const encodable = applyI2of5Padding(parts[0], source.type === 'fixed' ? source.data : '');
         if (source.type === 'fixed' && encodable && !DEEP_VALIDATE_SKIP.has(parts[0]) && !eanDSeries) {
@@ -1374,6 +1424,8 @@ export class IPLViewerParser {
                 eanUpcVersion, code39Mode, code128StartSubset: code128StartSubset,
                 code128Ucc, code128KeepInterpretive: code128Keep,
                 qrModel, qrEcl, qrMask, microColumns, microRows,
+                pdfColumns, pdfEcLevel, pdfTruncate,
+                compositeVersion, compositeColumns, compositeRowHeight,
                 rssVersion, rssSepHeight, rssSegments, maxiMode,
             })) {
                 this.printer.issue('error', 'barcode-data-invalid', parts[0] === '6' && code128Ucc === '1'
@@ -1405,6 +1457,12 @@ export class IPLViewerParser {
         if (qrMask) element.qrMask = qrMask;
         if (microColumns) element.microColumns = microColumns;
         if (microRows) element.microRows = microRows;
+        if (pdfColumns) element.pdfColumns = pdfColumns;
+        if (pdfEcLevel) element.pdfEcLevel = pdfEcLevel;
+        if (pdfTruncate) element.pdfTruncate = pdfTruncate;
+        if (compositeVersion) element.compositeVersion = compositeVersion;
+        if (compositeColumns) element.compositeColumns = compositeColumns;
+        if (compositeRowHeight) element.compositeRowHeight = compositeRowHeight;
         if (rssVersion) element.rssVersion = rssVersion;
         if (rssSepHeight) element.rssSepHeight = rssSepHeight;
         if (rssSegments) element.rssSegments = rssSegments;

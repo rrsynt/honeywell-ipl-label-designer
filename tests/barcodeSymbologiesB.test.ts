@@ -159,12 +159,18 @@ describe('parseBarcodeField — c20/c14 plumbing', () => {
         expect(label.issues.find(i => i.code === 'barcode-data-invalid')).toBeFalsy();
     });
 
-    it('JIS-ITF (c15) and Composite (c21) say they have no encoder (info, not silence)', () => {
+    it('JIS-ITF (c15) says it has no encoder (info, not silence)', () => {
         const c15 = bar(['B1;o10,10;c15;h50;w2;d3,12345678901234']);
         expect(c15.label.issues.find(i => i.code === 'symbology-no-encoder')).toBeTruthy();
-        const c21 = bar(['B2;o10,10;c21,0;h50;w2;d3,5901234123457|21123456']);
-        expect(c21.label.issues.find(i => i.code === 'symbology-no-encoder')).toBeTruthy();
-        // and they still skip deep validation (placeholder, no false error)
+    });
+
+    it('Composite (c21) no longer claims to lack an encoder', () => {
+        // It used to, and the claim was wrong: bwip ships composite encoders
+        // for every linear family PRM p.162 lists. See c21Composite.test.ts.
+        const HT = String.fromCharCode(9);
+        const c21 = bar([`B2;o10,10;c21,0;h50;w2;d3,(01)09521234543213(10)ABC${HT}(21)XYZ`]);
+        expect(c21.label.issues.find(i => i.code === 'symbology-no-encoder')).toBeFalsy();
+        // and no false data error either — the data is valid
         expect(c21.label.issues.find(i => i.code === 'barcode-data-invalid')).toBeFalsy();
     });
 });

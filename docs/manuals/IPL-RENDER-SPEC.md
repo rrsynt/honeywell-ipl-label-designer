@@ -845,9 +845,25 @@ real printer output or reference renders:
    manual documents only 0 and 1 for text fields and prints nothing for 2/3, so
    anything above 1 warns and falls back to horizontal rather than inventing a
    180/270 reading the printer may not share. `tests/charRotation.test.ts`.
-9. **Composite `c21` separator-pattern rendering** (m2) — described only as "height
-   of the separator pattern row"; exact module pattern must come from the GS1
-   Composite spec, not this manual.
-10. **PDF417 auto aspect (m1=0)** — "height magnification three times the width
-    magnification" gives the row/module ratio but the printer's exact column choice
-    algorithm is unpublished; near-square heuristic recommended.
+9. ~~**Composite `c21` separator-pattern rendering** (m2)~~ — **RESOLVED
+   2026-09-25, and the premise was wrong.** The manual does describe the
+   structure: a linear component plus an adjacent 2D component, "separated by
+   the `<HT>` command with the data for the linear component sent first", with
+   a worked example. The old code note claiming bwip only accepts a GS1-AI form
+   (so forcing it "would render a confident-but-wrong symbol") was also wrong:
+   bwip ships twelve composite encoders — `gs1-128composite`,
+   `ean13composite`, `upcacomposite`, the seven databar variants — whose data
+   shape is exactly `linear|2D`. All thirteen documented `m1` versions now map
+   to a real encoder, with CC-C for m1=0 and CC-A/CC-B elsewhere.
+   `tests/c21Composite.test.ts`.
+10. ~~**PDF417 auto aspect (m1=0)**~~ — **RESOLVED 2026-09-25: the algorithm IS
+   published, in prose.** The `c12` section states it: "If you select zero, the
+   printer provides the number of columns needed to create a symbol that is as
+   close to a square as possible", with a note that the auto case uses a height
+   magnification three times the width magnification. That is what the encoder
+   already does by default (its `rowmult` is 3, `columns` defaults to 0), so
+   the default shape was always right — what was missing was every EXPLICIT
+   parameter: `c12,m1/m2/m3` were captured nowhere, so a stream asking for 6
+   columns or EC level 8 silently got the defaults. All three are now parsed,
+   validated (m1 0-30, m2 0-9, m3 0/1), passed to the encoder, and included in
+   the encode cache key. `tests/pdf417Params.test.ts`.

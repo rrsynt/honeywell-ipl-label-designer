@@ -111,6 +111,20 @@ export interface BarcodeElement extends ElementBase {
     microColumns?: string;
     /** c19,m2 — MicroPDF417 data rows (0/auto = printer chooses). */
     microRows?: string;
+    /** c12,m1 — PDF417 data columns 0-30 (0/auto = as close to square as
+     * possible, PRM p.149). */
+    pdfColumns?: string;
+    /** c12,m2 — PDF417 error-correction level 0-8 (9/auto = printer chooses). */
+    pdfEcLevel?: string;
+    /** c12,m3 — PDF417 truncate flag ('1' drops the right row indicators). */
+    pdfTruncate?: string;
+    /** c21,m1 — EAN.UCC Composite version 0-12: which linear component, and
+     * the CC variant paired with it (PRM p.162). */
+    compositeVersion?: string;
+    /** c21,m3 — 2D columns (m1=0) or segments per row (m1=12). */
+    compositeColumns?: string;
+    /** c21,m5 — height of each 2D row (0/absent = 3x magnification). */
+    compositeRowHeight?: string;
     /** c20,m1 — RSS/GS1 DataBar version 0-6 (default 2 = Stacked, PRM p.166). */
     rssVersion?: string;
     /** c20,m2 — separator-row height (stacked versions only). */

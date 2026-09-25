@@ -148,11 +148,20 @@ describe('parseBarcodeField — new symbology plumbing', () => {
         expect(label.issues.find(i => i.code === 'barcode-data-invalid')).toBeTruthy();
     });
 
-    it('unmapped ids (composite c21, JIS-ITF c15) still skip deep validation', () => {
-        for (const id of ['21', '15']) {
-            const { label } = bar([`B1;o10,10;c${id};h50;w2;d3,12345!@#invalid-for-any`]);
-            expect(label.issues.find(i => i.code === 'barcode-data-invalid'), `c${id}`).toBeFalsy();
-        }
+    it('JIS-ITF (c15) still skips deep validation — it has no encoder', () => {
+        const { label } = bar(['B1;o10,10;c15;h50;w2;d3,12345!@#invalid-for-any']);
+        expect(label.issues.find(i => i.code === 'barcode-data-invalid')).toBeFalsy();
+    });
+
+    it('composite c21 IS validated now that bwip ships composite encoders', () => {
+        // c21 used to skip deep validation alongside c15, because this suite
+        // believed bwip had no composite encoder. It has twelve, so c21 is
+        // judged like any other symbology.
+        const HT = String.fromCharCode(9);
+        const good = bar([`B1;o10,10;c21,2;h50;w2;d3,9520123456788${HT}(99)1234-abcd`]);
+        expect(good.label.issues.find(i => i.code === 'barcode-data-invalid')).toBeFalsy();
+        const bad = bar(['B2;o10,10;c21,2;h50;w2;d3,12345"']);
+        expect(bad.label.issues.find(i => i.code === 'barcode-data-invalid')).toBeTruthy();
     });
 
     it('Batch B wired c20 in: garbage data now errors (was skipped)', () => {
