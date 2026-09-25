@@ -12,6 +12,7 @@
 // document is actually opened.
 
 import type { DataSource, Design } from '../types';
+import { requestToPromise, storeOf } from './designerDb';
 
 export interface LibraryMeta {
     name: string;
@@ -73,11 +74,10 @@ export interface RecoveryRecord {
     updatedAt: number;
 }
 
-const DB_NAME = 'ipl-designer';
-// Version 3 adds the `fonts` store, opened by services/fontStore.ts. Version 4
-// adds `recovery`. Both modules open this one database, so the version has to
-// move in both places or the second opener throws a VersionError.
-const DB_VERSION = 4;
+// The database schema — its name, version and every store's key path — is
+// owned by services/designerDb.ts. It used to be duplicated here and in
+// fontStore.ts, and the duplicate `recovery` key path silently disabled
+// autosave on any browser that opened this module first.
 const STORE = 'designs';
 /** Fase 2: data sources saved for reuse across designs. A separate store so
  *  listing the library never has to read a table's rows. */
@@ -86,12 +86,6 @@ const SOURCE_STORE = 'sources';
  *  overwrote a named design would destroy the user's last good version just
  *  because they experimented after saving. */
 const RECOVERY_STORE = 'recovery';
-
-const requestToPromise = <T>(req: IDBRequest<T>): Promise<T> =>
-    new Promise((resolve, reject) => {
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-    });
 
 /** Reject names that would collide with the key path or can't be shown. */
 export const isLibraryName = (name: unknown): name is string =>
@@ -102,46 +96,10 @@ const toMeta = (record: LibraryRecord): LibraryMeta => {
     return meta;
 };
 
-/**
- * The browser backend. The database is opened lazily and the handle cached;
- * a version-change from another tab invalidates it so the next call reopens.
- */
+/** The browser backend, over the shared database in services/designerDb.ts. */
 export const indexedDbBackend = (): LibraryBackend => {
-    let dbPromise: Promise<IDBDatabase> | null = null;
-
-    const open = (): Promise<IDBDatabase> => {
-        if (dbPromise) return dbPromise;
-        dbPromise = new Promise((resolve, reject) => {
-            const req = indexedDB.open(DB_NAME, DB_VERSION);
-            req.onupgradeneeded = () => {
-                const db = req.result;
-                if (!db.objectStoreNames.contains(STORE)) {
-                    db.createObjectStore(STORE, { keyPath: 'name' });
-                }
-                if (!db.objectStoreNames.contains(SOURCE_STORE)) {
-                    db.createObjectStore(SOURCE_STORE, { keyPath: 'name' });
-                }
-                if (!db.objectStoreNames.contains('fonts')) {
-                    db.createObjectStore('fonts', { keyPath: 'name' });
-                }
-                if (!db.objectStoreNames.contains(RECOVERY_STORE)) {
-                    db.createObjectStore(RECOVERY_STORE, { keyPath: 'name' });
-                }
-            };
-            req.onsuccess = () => {
-                const db = req.result;
-                db.onversionchange = () => { db.close(); dbPromise = null; };
-                resolve(db);
-            };
-            req.onerror = () => { dbPromise = null; reject(req.error); };
-        });
-        return dbPromise;
-    };
-
-    const store = async (mode: IDBTransactionMode, which: string = STORE): Promise<IDBObjectStore> => {
-        const db = await open();
-        return db.transaction(which, mode).objectStore(which);
-    };
+    const store = (mode: IDBTransactionMode, which: string = STORE): Promise<IDBObjectStore> =>
+        storeOf(which, mode);
 
     return {
         list: async () => (await requestToPromise((await store('readonly')).getAll()) as LibraryRecord[])

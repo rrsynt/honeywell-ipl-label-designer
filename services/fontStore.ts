@@ -13,6 +13,7 @@
 // table; measuring here, once, is what lets the two agree.
 
 import { registerUploadedFontMetrics, clearUploadedFontMetrics, type UploadedFontMetrics } from './ipl/fontMetrics';
+import { requestToPromise, storeOf } from './designerDb';
 
 export interface StoredFont {
     /** Family name taken from the file, and the key everywhere else. */
@@ -30,58 +31,18 @@ export interface FontBackend {
     remove(name: string): Promise<void>;
 }
 
-const DB_NAME = 'ipl-designer';
-// Version 3 added the `fonts` store, version 4 the `recovery` one. The upgrade
-// handler in libraryStore.ts is bumped in lockstep — both open the same
-// database, so a lower version here would throw on a browser that already ran
-// the other.
-const DB_VERSION = 4;
+// The `fonts` store is declared by the shared schema in services/designerDb.ts.
+// This module used to carry its own copy of the upgrade handler, and a copy is
+// what let the `recovery` key path drift out of agreement with libraryStore's.
 const FONT_STORE = 'fonts';
 
-const requestToPromise = <T>(req: IDBRequest<T>): Promise<T> =>
-    new Promise((resolve, reject) => {
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-    });
-
+/** The browser backend, over the shared database in services/designerDb.ts. */
 export const indexedDbFontBackend = (): FontBackend => {
-    let dbPromise: Promise<IDBDatabase> | null = null;
-    const open = (): Promise<IDBDatabase> => {
-        if (dbPromise) return dbPromise;
-        dbPromise = new Promise((resolve, reject) => {
-            const req = indexedDB.open(DB_NAME, DB_VERSION);
-            req.onupgradeneeded = () => {
-                const db = req.result;
-                // Recreated here too: this module can be the one that opens the
-                // database first, and a version jump must not drop the stores
-                // libraryStore.ts owns.
-                if (!db.objectStoreNames.contains('designs')) db.createObjectStore('designs', { keyPath: 'name' });
-                if (!db.objectStoreNames.contains('sources')) db.createObjectStore('sources', { keyPath: 'name' });
-                if (!db.objectStoreNames.contains(FONT_STORE)) db.createObjectStore(FONT_STORE, { keyPath: 'name' });
-                if (!db.objectStoreNames.contains('recovery')) db.createObjectStore('recovery', { keyPath: 'slot' });
-            };
-            req.onsuccess = () => {
-                const db = req.result;
-                db.onversionchange = () => { db.close(); dbPromise = null; };
-                resolve(db);
-            };
-            req.onerror = () => { dbPromise = null; reject(req.error); };
-        });
-        return dbPromise;
-    };
+    const store = (mode: IDBTransactionMode): Promise<IDBObjectStore> => storeOf(FONT_STORE, mode);
     return {
-        list: async () => {
-            const db = await open();
-            return await requestToPromise(db.transaction(FONT_STORE, 'readonly').objectStore(FONT_STORE).getAll()) as StoredFont[];
-        },
-        put: async (font) => {
-            const db = await open();
-            await requestToPromise(db.transaction(FONT_STORE, 'readwrite').objectStore(FONT_STORE).put(font));
-        },
-        remove: async (name) => {
-            const db = await open();
-            await requestToPromise(db.transaction(FONT_STORE, 'readwrite').objectStore(FONT_STORE).delete(name));
-        },
+        list: async () => await requestToPromise((await store('readonly')).getAll()) as StoredFont[],
+        put: async (font) => { await requestToPromise((await store('readwrite')).put(font)); },
+        remove: async (name) => { await requestToPromise((await store('readwrite')).delete(name)); },
     };
 };
 

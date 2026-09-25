@@ -76,3 +76,49 @@ describe('isDesignDirty contract', () => {
         expect(isDesignDirty(s)).toBe(true);
     });
 });
+
+// The autosaved draft is unsaved work by definition, so restoring it must NOT
+// re-baseline — that would clear the title asterisk and let the tab close
+// without a word, which is exactly the silent loss the slot exists to prevent.
+describe('RESTORE_DRAFT', () => {
+    const draftDesign: Design = { ...baseDesign, name: 'Invoice', nextId: 9 };
+
+    it('restores the draft onto the canvas', () => {
+        const s = appReducer(cleanState(), { type: 'RESTORE_DRAFT', payload: { design: draftDesign } });
+        expect(s.history.present.name).toBe('Invoice');
+        expect(s.history.present.nextId).toBe(9);
+    });
+
+    it('stays DIRTY: a restored draft is not a saved design', () => {
+        const s = appReducer(cleanState(), { type: 'RESTORE_DRAFT', payload: { design: draftDesign } });
+        expect(isDesignDirty(s)).toBe(true);
+        // and the baseline is untouched, not replaced by the restored object
+        expect(s.history.baseline).toBe(baseDesign);
+    });
+
+    it('clears undo history — the restored design has its own past', () => {
+        const edited = appReducer(cleanState(), { type: 'UPDATE_FIELD_PROPERTIES', payload: { fieldId: 1, updates: { x: 12 } } });
+        const s = appReducer(edited, { type: 'RESTORE_DRAFT', payload: { design: draftDesign } });
+        expect(s.history.past).toEqual([]);
+        expect(s.history.future).toEqual([]);
+    });
+
+    it('does NOT claim the design is open in the library (no delete-on-rename)', () => {
+        // A draft is not proof the design it is named after still exists.
+        const s = appReducer(cleanState(), { type: 'RESTORE_DRAFT', payload: { design: draftDesign } });
+        expect(s.originalDesignName).toBeNull();
+    });
+
+    it('saving the restored draft makes it clean', () => {
+        const restored = appReducer(cleanState(), { type: 'RESTORE_DRAFT', payload: { design: draftDesign } });
+        expect(isDesignDirty(appReducer(restored, { type: 'DESIGN_SAVED' }))).toBe(false);
+    });
+
+    it('migrates the draft the same way SET_DESIGN does', () => {
+        // A draft written by an older build may carry a legacy groupId pairing;
+        // restoring must not skip the migration path.
+        const legacy = { ...baseDesign, fields: [{ ...baseDesign.fields[0], groupId: undefined }] } as unknown as Design;
+        const s = appReducer(cleanState(), { type: 'RESTORE_DRAFT', payload: { design: legacy } });
+        expect(s.history.present.fields).toHaveLength(1);
+    });
+});

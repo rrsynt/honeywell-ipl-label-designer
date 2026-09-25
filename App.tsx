@@ -13,7 +13,7 @@ import { requestConfirm, notify } from './services/uiDialogs';
 import { ContextMenu } from './components/ContextMenu';
 import type { ContextMenuOption } from './components/ContextMenu';
 import { getSavedDesigns, saveDesign, loadDesign, deleteDesign } from './services/designManager';
-import { getLibraryRecord, saveLibraryRecord, deleteLibraryRecord, migrateLegacyLibrary, serializeLabelFile, parseLabelFile, writeRecovery, clearRecovery } from './services/libraryStore';
+import { getLibraryRecord, saveLibraryRecord, deleteLibraryRecord, migrateLegacyLibrary, serializeLabelFile, parseLabelFile, writeRecovery, readRecovery, clearRecovery, designChecksum } from './services/libraryStore';
 import { loadInstalledFonts } from './services/fontStore';
 import { getAxisAlignedBoundingBox } from './services/geometry';
 import { expandIdsWithGroups } from './services/dragMath';
@@ -170,6 +170,28 @@ export function appReducer(state: AppState, action: any): AppState {
                 selectedFieldIds: [],
                 clipboard: null,
                 originalDesignName: action.payload.originalDesignName,
+            };
+        }
+        case 'RESTORE_DRAFT': {
+            const restored = migrateDesign(action.payload.design);
+            // A restored draft is unsaved work BY DEFINITION — the autosave
+            // effect is the only thing that ever wrote it. Re-baselining onto
+            // it (as SET_DESIGN does) would clear the title asterisk and let
+            // the tab close without a word, which is the silent loss this slot
+            // exists to prevent. The baseline is left alone, so the design
+            // reads dirty until the user saves it deliberately.
+            //
+            // originalDesignName stays null on purpose: a draft is not proof
+            // that the design it is named after still exists, and claiming so
+            // would let a rename-and-save delete a library record the user
+            // never asked to touch. Saving under the same name replaces it by
+            // name anyway, which is the case that matters.
+            return {
+                ...state,
+                history: { past: [], present: restored, future: [], intermediate: null, baseline: history.baseline },
+                selectedFieldIds: [],
+                clipboard: null,
+                originalDesignName: null,
             };
         }
         case 'UPDATE_INTERMEDIATE': {
@@ -655,6 +677,40 @@ export default function App() {
         // uses one measures and paints it on the first render, not only after
         // the user re-uploads the file.
         loadInstalledFonts().catch(e => console.error('Installed fonts failed to load:', e));
+    }, []);
+
+    // Offer the autosaved draft back after a crash or a closed tab. Writing a
+    // draft is only half the feature — nothing read it for a while, so this is
+    // the half that makes the recovery real.
+    //
+    // The ref is the StrictMode guard: dev mounts run this effect twice, and a
+    // second requestConfirm would resolve the first as cancelled, clearing the
+    // very draft the user is being asked about.
+    const draftOfferMadeRef = useRef(false);
+    useEffect(() => {
+        if (draftOfferMadeRef.current) return;
+        draftOfferMadeRef.current = true;
+        void (async () => {
+            const draft = await readRecovery().catch(() => null);
+            if (!draft) return;
+            // A draft identical to what is already on the canvas is not worth
+            // an interruption — a fresh session autosaves nothing, so this is
+            // normally only reachable when the draft was written and the app
+            // reloaded without any edit in between.
+            if (designChecksum(draft.design) === designChecksum(defaultDesign)) {
+                await clearRecovery().catch(() => {});
+                return;
+            }
+            const when = new Date(draft.updatedAt).toLocaleString();
+            const accept = await requestConfirm({
+                title: 'Restore unsaved draft?',
+                message: `"${draft.designName}" has unsaved changes from ${when}. Restore them, or discard the draft and start fresh?`,
+                confirmLabel: 'Restore',
+                danger: false,
+            });
+            if (accept) dispatch({ type: 'RESTORE_DRAFT', payload: { design: draft.design } });
+            else await clearRecovery().catch(e => console.error('Could not discard the autosave draft:', e));
+        })();
     }, []);
 
     // Fase 1 autosave. Writes the work-in-progress draft to a slot of its own
