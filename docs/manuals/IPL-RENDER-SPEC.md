@@ -804,25 +804,47 @@ Comparing PRM rev012 (fw 2.70) against rev008 (fw 2.30):
 Items the manuals do **not** pin down; each needs empirical calibration against a
 real printer output or reference renders:
 
-1. **Date/time field sources d0–d4 and DATE/TIME FORMAT INDEX tables** — absent from
-   all three documents. The existing `IPL-CHEATSHEET.md` mentions them; no manual
-   backing found. Recommend removing from the parser or stubbing as fixed text until
-   a firmware that supports them is identified.
-2. **Box stroke direction (inward vs outward)** — not stated. Examples suggest
-   inward; calibrate with a printed W field of large w.
-3. **w=1 barcodes in picket vs drag mode** (printer defaults w1→2 in picket mode).
-   Screen renderers can't know; expose a toggle, default literal w=1.
-4. **Pitch `g` glyph metric table** — no pt-height mapping given for pitch 1–50.
-   Calibrate against pitch label test print (`<SI>` Test and Service "Pitch Label").
-5. **Outline font advance widths** — proportional font c28 and Swiss variants have no
-   published metrics; approximate per-glyph advances need calibration
-   (~0.6 em monospace assumption noted in the cheat sheet).
-6. **Interpretive gap of "2 dots"** — measured from what exactly (last black bar row?
-   field bbox?) is unstated; assume bbox bottom + 2.
-7. **Negative origins** — outside documented 0–19999 range; clamp or pass through?
-   Undocumented printer behavior.
-8. **`r` character rotation limited to 0/1** — whether r2/r3 are accepted in H fields
-   (as 180/270 CCW) is undocumented; some hosts send them.
+1. ~~**Date/time field sources d0–d4 and DATE/TIME FORMAT INDEX tables**~~ —
+   **RESOLVED 2026-09-25.** They do not exist (PRM p.184 defines only d0–d3), so
+   the generator now bakes the value as `d3` at generate time, the viewer warns
+   `unknown-data-source`, and the importer still migrates old streams.
+   `tests/dateTimeBaking.test.ts`.
+2. ~~**Box stroke direction (inward vs outward)**~~ — **RESOLVED 2026-09-25,
+   inward, already correct.** Measured on `samples/bartender-tes1.ipl`'s
+   `W3;o13,14;h770;l492;w3` against its export: outer ink 769×493 for a declared
+   770×492, and the opening 763×486 = `l−2w` by `h−2w`. Centred would read
+   495×773 and outward 498×776. Pinned by `tests/strokeAndPicket.test.ts`.
+3. ~~**w=1 barcodes in picket vs drag mode**~~ — **RESOLVED 2026-09-25; it IS
+   decidable, so no toggle.** Field direction decides it: measured, f0/f2 draw
+   vertically barred symbols (bars along the feed = drag, keep w1) and f1/f3
+   horizontally barred ones (bars across the web = picket, promote w1 to 2).
+   Pinned by `tests/strokeAndPicket.test.ts`.
+4. ~~**Pitch `g` glyph metric table**~~ — **RESOLVED 2026-09-25, by using the
+   quantity the manual does define.** No height per pitch is tabulated, but `gn`
+   IS defined as "n characters per line", so the advance is `labelWidth / n`
+   and the cell keeps the font's own aspect. Pitch replaces h/w/k, exactly as
+   the manual states. `tests/pitch.test.ts`.
+5. ~~**Outline font advance widths**~~ — **RESOLVED (Batch U, 2026-09-24).** The
+   0.6 em guess is gone: `services/ipl/fontMetrics.ts` carries per-glyph advance
+   tables measured from the vendored Liberation faces, so the proportional
+   families (c28 Dutch Roman → serif, c61 Swiss → sans) measure within ~0.3% of
+   `measureText` and monospace stays byte-stable. `tests/fontMetrics.test.ts`.
+6. ~~**Interpretive gap of "2 dots"**~~ — **RESOLVED 2026-09-25: it is the field
+   box, not the last bar row.** The manual says "2 dots below bar code" (PRM
+   p.191), and the bar code field's declared height is the box the printer knows.
+   BarTender never emits `i1`/`i2` anyway — it places HRI as a separate `H` field
+   with explicit coordinates — so there is no reference render to contradict the
+   text. Anchored at `host.oy + host.heightDots + 2`; `tests/originAndHri.test.ts`.
+7. ~~**Negative origins**~~ — **RESOLVED 2026-09-25: passed through, not clamped.**
+   BarTender's own `edges` sweep places boxes at −0.4in and its preview keeps the
+   ink running to pixel 0 on three sides — the fields stay where the host put them
+   and the label edge cuts them. Sliding them inward would print ink the host never
+   asked for, so the viewer now says "not clamped" instead of claiming a clamp.
+   `tests/originAndHri.test.ts`.
+8. ~~**`r` character rotation limited to 0/1**~~ — **RESOLVED 2026-09-25.** The
+   manual documents only 0 and 1 for text fields and prints nothing for 2/3, so
+   anything above 1 warns and falls back to horizontal rather than inventing a
+   180/270 reading the printer may not share. `tests/charRotation.test.ts`.
 9. **Composite `c21` separator-pattern rendering** (m2) — described only as "height
    of the separator pattern row"; exact module pattern must come from the GS1
    Composite spec, not this manual.

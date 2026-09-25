@@ -911,7 +911,13 @@ export class IPLViewerParser {
         }
         const { x, y } = parseOrigin(o.value);
         if (x < 0 || y < 0) {
-            this.printer.issue('warning', 'origin-negative', `${command} field origin (${x},${y}) has a negative coordinate; printers clamp to the label edge.`, command);
+            // Passed through rather than clamped to 0: a BarTender sweep placing
+            // boxes at X=-0.4in keeps them at their negative origin and lets the
+            // label edge cut them (measured: its preview's ink runs to pixel 0 on
+            // three sides, with the overhanging boxes' remaining halves visible).
+            // Moving the field inward instead would print ink where the host
+            // never asked for any.
+            this.printer.issue('warning', 'origin-negative', `${command} field origin (${x},${y}) is negative and outside the documented 0-19999 range; it is not clamped, so the part beyond the label edge will not print.`, command);
         }
         return { ox: x, oy: y };
     }
@@ -971,6 +977,58 @@ export class IPLViewerParser {
         const borderDots = borderRaw > 0 ? Math.min(borderRaw, 999) : undefined;
         let hMag = this.int(params, 'h', 2);
         let wMag = this.int(params, 'w', 2);
+        // Pitch `gn` (PRM p.197, 2.70 p.206, 4400 7-120): "Pitch is characters
+        // per line. The higher the pitch, the smaller the characters." It is a
+        // THIRD sizing mode, and "when you use the pitch size command, you
+        // disable the height and width magnification and point" — so a field
+        // carrying g ignores h, w and k entirely (default 12, range 1-50).
+        //
+        // The manuals never tabulate a glyph height per pitch, so the only
+        // quantity they define directly is the count: n characters fit the
+        // label's width. Size the glyph from that — advance = widthDots / n —
+        // and derive the cell height from the font's own aspect, which is what
+        // "scales smoothly" describes for outline faces.
+        const pitchParam = params.find(p => p.key === 'g');
+        let pitchChars: number | undefined;
+        if (pitchParam) {
+            const n = parseInt(pitchParam.value.split(',')[0], 10);
+            if (!Number.isInteger(n) || n < 1 || n > 50) {
+                this.printer.issue('warning', 'pitch-out-of-range', `Pitch g${pitchParam.value} is outside the documented range 1-50 characters per line; ignored.`, `H${id ?? ''}`);
+            } else if (this.printer.label.widthDots === null) {
+                this.printer.issue('warning', 'pitch-without-width', `Pitch g${n} needs the label width (<SI>W) to size characters, which the stream has not set; ignored.`, `H${id ?? ''}`);
+            } else {
+                pitchChars = n;
+            }
+        }
+        if (pitchChars !== undefined) {
+            // Pitch wins over the other three, as the manual states, so point
+            // size and magnification are dropped rather than combined. The
+            // manual defines the count and nothing else, so the advance is
+            // derived from it: n characters span the label's width.
+            const widthDots = this.printer.label.widthDots!;
+            const advance = widthDots / pitchChars;
+            const bitmap = FONT_MAP[font]?.type === 'bitmap';
+            this.printer.issue('info', 'pitch-applied', `Pitch g${pitchChars} fits ${pitchChars} characters across the ${widthDots}-dot label (${Math.round(advance * 10) / 10} dots each); h, w and k are ignored as the manual specifies.`, `H${id ?? ''}`);
+            const pitched: TextElement = {
+                kind: 'text',
+                id,
+                ...origin,
+                f: this.rotationOf(params, `H${id ?? ''}`),
+                font,
+                hMag: 1,
+                wMag: 1,
+                pitchAdvanceDots: advance,
+                // An outline face still needs a canvas size; express the pitch
+                // advance as the equivalent point size, which is the same 0.6 em
+                // relation the fontMetrics tables use for monospace.
+                pointSize: bitmap ? undefined : Math.max(1, Math.round((advance / 0.6) * 72 / 203)),
+                borderDots,
+                charRot: this.charRotationOf(params, `H${id ?? ''}`),
+                source: this.resolveSource(params),
+            };
+            this.printer.commitElement(pitched);
+            return;
+        }
         if (OUTLINE_FONTS.has(font)) {
             if (pointSize !== undefined && (pointSize <= 0 || pointSize > 720)) {
                 this.printer.issue('warning', 'size-out-of-range', `Outline font size k${pointSize} is outside the printable range (1-720 points).`, `H${id ?? ''}`);

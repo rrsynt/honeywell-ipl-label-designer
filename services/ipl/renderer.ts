@@ -121,6 +121,15 @@ export const estimateElementSize = (
             // c0 = 79 dots wide — PRM270 p.54). Cell heights from §7.3.
             const meta = FONT_MAP[el.font] ?? FONT_FALLBACK;
             const gap = meta.gapWidth ?? 2;
+            // Pitch (g) replaces the cell metrics with one derived from the
+            // label width: n characters per line (PRM p.197).
+            if (el.pitchAdvanceDots !== undefined) {
+                const cellH = el.pitchAdvanceDots * ((meta.baseHeight ?? 9) / ((meta.baseWidth ?? 7) + gap));
+                return {
+                    lengthDots: Math.max(0, Math.round(maxChars * el.pitchAdvanceDots)),
+                    crossDots: Math.round(cellH * lines.length),
+                };
+            }
             const advance = fontAdvanceDots(el.font) * el.wMag;
             return {
                 lengthDots: Math.max(0, maxChars * advance - gap * el.wMag),
@@ -244,6 +253,15 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
                 const family = meta.family ?? 'monospace';
                 outlineW = (line: string) => outlineTextBlockWidthDots([line], hPx, family);
                 ctx.font = `${hPx}px ${fontStack(family)}`;
+            } else if (el.pitchAdvanceDots !== undefined) {
+                // Pitched field: the advance comes from the label width, and
+                // the cell keeps the font's own aspect so a pitched c0 still
+                // looks like c0 (PRM p.197 — pitch scales, it does not restyle).
+                const gap = meta.gapWidth ?? 2;
+                charW = el.pitchAdvanceDots * s;
+                const cellH = el.pitchAdvanceDots * ((meta.baseHeight ?? 9) / ((meta.baseWidth ?? 7) + gap)) * s;
+                lineH = cellH;
+                ctx.font = `${cellH}px ${FONT_FAMILIES.monospace}`;
             } else {
                 const cellH = (meta.baseHeight ?? 9) * el.hMag * s;
                 // Advance = cell width + intercharacter gap (c0: +1, others +2).
@@ -267,7 +285,21 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
                 ctx.fillRect(-el.borderDots * s, -el.borderDots * s, textW + 2 * el.borderDots * s, textH + 2 * el.borderDots * s);
                 ctx.fillStyle = '#ffffff';
             }
-            if (el.charRot === 1) {
+            if (el.pitchAdvanceDots !== undefined && el.charRot !== 1) {
+                // Pitched field: the advance is the label width divided by the
+                // pitch count, NOT the font's own advance — that is the whole
+                // point of `gn` ("n characters per line", PRM p.197). Drawn
+                // per glyph so the sp one the printer was asked for is the
+                // spacing that appears.
+                const adv = el.pitchAdvanceDots * s;
+                lines.forEach((line, li) => {
+                    let cx = 0;
+                    for (const ch of line) {
+                        ctx.fillText(ch, cx, li * lineH);
+                        cx += adv;
+                    }
+                });
+            } else if (el.charRot === 1) {
                 // r1 (PRM p.170): each character turns 90° CCW in place while
                 // the advance still runs along the field's own axis. That is
                 // why the manual pairs it with f3 (its own example, p.40):
@@ -284,7 +316,13 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
                 lines.forEach((line, li) => {
                     let cx = 0;
                     for (const ch of line) {
-                        const adv = ctx.measureText(ch).width;
+                        // A pitched field advances by the pitch; otherwise the
+                        // advance is measured from the canvas, exactly as the
+                        // flat path lets fillText advance, so spacing stays
+                        // identical between r0 and r1.
+                        const adv = el.pitchAdvanceDots !== undefined
+                            ? el.pitchAdvanceDots * s
+                            : ctx.measureText(ch).width;
                         ctx.save();
                         ctx.translate(cx + adv / 2, li * lineH + lineH / 2);
                         ctx.rotate(-Math.PI / 2);

@@ -52,6 +52,14 @@ export interface TextElement extends ElementBase {
      * field's own axis, so `f3;r1` prints a column of upright characters.
      */
     charRot?: 0 | 1;
+    /**
+     * Pitch sizing (`gn`, PRM p.197): per-character advance in dots when the
+     * field asks for n characters per line. Pitch is a third sizing mode that
+     * REPLACES h/w/k ("when you use the pitch size command, you disable the
+     * height and width magnification and point"), so a field carrying this has
+     * hMag/wMag of 1 and no k of its own.
+     */
+    pitchAdvanceDots?: number;
     /** Set when this is an interpretive field (I<n>) bound to barcode <n>;
      * its default anchor was derived from that barcode's rendered box. */
     interpretiveOf?: number;

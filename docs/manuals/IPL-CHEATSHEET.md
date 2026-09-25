@@ -35,8 +35,8 @@
 | `w` | lebar garis/modul/karakter (dots) |
 | `c` | pilihan font (teks) atau symbology (barcode) |
 | `r` | rotasi karakter (teks) atau rasio wide:narrow (barcode) |
-| `d` | sumber data: `d0,<data>` fixed; `d1` variabel; date/time via index format |
-| `g` | pitch (spasi antar karakter, dots) |
+| `d` | sumber data: `d0`/`d1` print-mode, `d2,m1` salin dari field lain, `d3,<data>` fixed. Hanya 0–3 (PRM p.184); tanggal/waktu di-bake sebagai `d3` |
+| `g` | pitch = **karakter per baris** (1–50, default 12), bukan spasi dalam dots. Menonaktifkan `h`/`w`/`k` |
 | `k` | point size untuk outline font |
 | `i` | interpretive field on/off (HRI) |
 | `b` | border sekeliling teks human-readable |
