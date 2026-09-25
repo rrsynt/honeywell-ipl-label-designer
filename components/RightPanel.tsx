@@ -628,7 +628,7 @@ const TableSourceEditor: React.FC<{
     const loadXlsx = async (file: File) => {
         if (file.size > MAX_CSV_FILE_BYTES) { setError(`File exceeds ${MAX_CSV_FILE_BYTES / 1024 / 1024} MB.`); return; }
         try {
-            const found = readWorkbook(new Uint8Array(await file.arrayBuffer()));
+            const found = await readWorkbook(new Uint8Array(await file.arrayBuffer()));
             if (found.length === 0) { setError('Workbook has no sheets.'); return; }
             setError(null);
             setSheets(found);

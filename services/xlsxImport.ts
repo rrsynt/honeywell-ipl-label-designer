@@ -7,9 +7,16 @@
 // nothing and clutter the query UI. Cell values are strings: a label prints
 // text, and keeping numbers as text preserves leading zeros ("007").
 
-import * as XLSX from 'xlsx';
 import { tableFromRows } from './tableSource';
 import type { DataTable } from './tableSource';
+
+// SheetJS is ~430 KB of the main bundle and only a .xlsx import needs it, so it
+// is loaded on first use rather than at module load — the same reason jspdf is
+// imported this way. The cast keeps the module's own signatures synchronous:
+// readWorkbook stays the one async entry point, and callers already await it.
+type XlsxModule = typeof import('xlsx');
+let xlsxModule: Promise<XlsxModule> | null = null;
+const loadXlsx = (): Promise<XlsxModule> => (xlsxModule ??= import('xlsx'));
 
 export interface WorkbookSheet {
     name: string;
@@ -24,7 +31,8 @@ const cellText = (value: unknown): string => {
 
 /** Every sheet as a grid of trimmed strings. Dates come through as Excel's
  *  formatted text (cellDates off), which is what should print. */
-export const readWorkbook = (bytes: Uint8Array): WorkbookSheet[] => {
+export const readWorkbook = async (bytes: Uint8Array): Promise<WorkbookSheet[]> => {
+    const XLSX = await loadXlsx();
     const wb = XLSX.read(bytes, { type: 'array' });
     return wb.SheetNames.map(name => {
         const grid = XLSX.utils.sheet_to_json<(string | number | null)[]>(wb.Sheets[name], {
