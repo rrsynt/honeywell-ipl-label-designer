@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateIPL } from '../services/iplGenerator';
 import { parseIPL } from '../services/iplParser';
+import { parseViewerIPL } from '../services/ipl/viewerParser';
 import type { Design, Field, TextField, BarcodeField } from '../types';
 
 const DPI = 203 as const;
@@ -203,6 +204,54 @@ describe('IPL generator -> parser round trip', () => {
         expect(parsed.fields).toHaveLength(2);
         expect(parsed.fields.find(f => f.id === 1)!.rotation).toBe(90);
         expect(parsed.fields.find(f => f.id === 2)!.rotation).toBe(270);
+    });
+
+    it('writes each bar code before the interpretive that binds to it', async () => {
+        // An I<n> field interprets bar code <n>, so the bar code must already
+        // be defined when it appears (PRM p.191). The generator used to push
+        // the I command while iterating but the B command only after the loop,
+        // so EVERY stream had I before B and the viewer reported
+        // "references bar code field N, which has not been defined". Nothing
+        // caught it because the parser still renders both fields either way —
+        // only the ordering was wrong, and only the viewer's issue list said so.
+        const design = makeDesign([
+            text(1, 5, 5, 'Label'),
+            barcode(2, 5, 20, '12345678', { humanReadable: 'below' }),
+        ]);
+        const ipl = await generateIPL(design);
+        const bPos = ipl.indexOf('<STX>B2;');
+        const iPos = ipl.indexOf('<STX>I2;');
+        expect(bPos, 'bar code B2 is emitted').toBeGreaterThanOrEqual(0);
+        expect(iPos, 'interpretive I2 is emitted').toBeGreaterThanOrEqual(0);
+        expect(bPos, 'B2 must precede I2').toBeLessThan(iPos);
+    });
+
+    it('puts the interpretive of a later field after that field, not before it', async () => {
+        // Two barcodes, so a fix that merely moved every I to the end of the
+        // loop would still emit I3 before B3.
+        const design = makeDesign([
+            barcode(2, 5, 20, '12345678', { humanReadable: 'below' }),
+            text(1, 5, 5, 'Between'),
+            barcode(3, 5, 40, '98765432', { humanReadable: 'above' }),
+        ]);
+        const ipl = await generateIPL(design);
+        expect(ipl.indexOf('<STX>B2;')).toBeLessThan(ipl.indexOf('<STX>I2;'));
+        expect(ipl.indexOf('<STX>B3;')).toBeLessThan(ipl.indexOf('<STX>I3;'));
+        // and the second interpretive is not smuggled in ahead of the second
+        // bar code by sitting right after the first field's flush
+        expect(ipl.indexOf('<STX>B3;')).toBeGreaterThan(ipl.indexOf('<STX>I2;'));
+    });
+
+    it('generates a stream the viewer parses without an ordering warning', async () => {
+        // The user-visible symptom, asserted directly: no "references bar code
+        // field N, which has not been defined" from the real viewer parser.
+        const design = makeDesign([
+            barcode(2, 5, 20, '12345678', { humanReadable: 'below' }),
+            barcode(3, 5, 40, '98765432', { humanReadable: 'above' }),
+        ]);
+        const label = parseViewerIPL(await generateIPL(design));
+        const warned = label.issues.filter(i => i.code === 'interpretive-no-host');
+        expect(warned.map(w => w.message)).toEqual([]);
     });
 });
 

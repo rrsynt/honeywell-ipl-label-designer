@@ -180,6 +180,8 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
     commands.push(`<STX>E${formatId};F${formatId}<ETX>`);
     
     const variableFieldsForPrint: { field: TextField | BarcodeField, source?: DataSource }[] = [];
+    /** I<n> commands waiting for their B<n> to be written (see the barcode case). */
+    const pendingInterpretive: string[] = [];
 
 
     visibleFields.forEach(field => {
@@ -325,23 +327,28 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
                 const dsCmd = processDataSource(field);
                 if (dsCmd) params.push(dsCmd);
                 commandString = [field.type === 'text' ? fieldId : barcodeId, ...params].join(';');
-                 if (field.type === 'barcode' && field.humanReadable !== 'none') {
-                     const hriParams = [];
-                     const hriFont = field.hriFont || '21';
-                     const hriFontSize = field.hriFontSize || 10;
-                     const fontInfo = FONT_MAP[hriFont];
+                if (field.type === 'barcode' && field.humanReadable !== 'none') {
+                    const hriParams = [];
+                    const hriFont = field.hriFont || '21';
+                    const hriFontSize = field.hriFontSize || 10;
+                    const fontInfo = FONT_MAP[hriFont];
 
-                     if (fontInfo?.type === 'bitmap') {
+                    if (fontInfo?.type === 'bitmap') {
                         hriParams.push(`c${hriFont}`);
-                     } else { // Outline font
-                         hriParams.push(`c${hriFont}`, `k${hriFontSize}`);
-                     }
-                     
-                     if (hriParams.length > 0) {
-                         const iCommand = `I${field.id};${hriParams.join(';')}`;
-                         commands.push(`<STX>${iCommand}<ETX>`);
-                     }
-                 }
+                    } else { // Outline font
+                        hriParams.push(`c${hriFont}`, `k${hriFontSize}`);
+                    }
+
+                    if (hriParams.length > 0) {
+                        // Emitted AFTER the bar code field is written, below.
+                        // The interpretive field binds to a bar code by id, so
+                        // it must follow that bar code's definition — pushing it
+                        // here put I<n> before B<n> in every stream, and the
+                        // viewer rightly reported "references bar code field N,
+                        // which has not been defined".
+                        pendingInterpretive.push(`I${field.id};${hriParams.join(';')}`);
+                    }
+                }
                 break;
             }
             case 'line': {
@@ -373,6 +380,10 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
             }
         }
         if (commandString) commands.push(`<STX>${commandString}<ETX>`);
+        // Now that this field is defined, its interpretive may follow it.
+        while (pendingInterpretive.length > 0) {
+            commands.push(`<STX>${pendingInterpretive.shift()}<ETX>`);
+        }
     });
     
     commands.push(`<STX>R<ETX>`);
