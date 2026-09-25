@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeDragSelectionIds, snapRotation } from '../services/dragMath';
+import { computeDragSelectionIds, guideMmFromRuler, snapRotation } from '../services/dragMath';
 import { getHandleAtPos, isPointInRotatedRect } from '../services/canvasDrawer';
 import { PREVIEW_SCALE } from '../constants';
 import type { Design, BoxField, TextField, WorkspaceState } from '../types';
@@ -61,6 +61,30 @@ describe('snapRotation (audit T6: 90° quadrants only)', () => {
     });
 });
 
+describe('guideMmFromRuler (guide pulled off a ruler)', () => {
+    // At zoom 1 a millimetre is PREVIEW_SCALE px. The ruler's "0" tick is drawn
+    // at pan + RULER_SIZE (Rulers.tsx), while the label's "0" is painted at pan,
+    // so the ruler width has to come off or the guide misses its tick by it.
+    const pxPerMm = PREVIEW_SCALE;
+    const pan = 50;
+    const ruler = 30;
+    it('lands on the millimetre whose tick the pointer is on', () => {
+        // the 20mm tick is drawn at 20*pxPerMm + pan + ruler = 160
+        expect(guideMmFromRuler(160, pan, ruler, pxPerMm)).toBe(20);
+        expect(guideMmFromRuler(0 * pxPerMm + pan + ruler, pan, ruler, pxPerMm)).toBe(0);
+    });
+    it('the pre-fix reading (ruler width left in) is off by the ruler width', () => {
+        const pointer = 20 * pxPerMm + pan + ruler;
+        const withoutRuler = (pointer - pan) / pxPerMm;
+        expect(withoutRuler).toBe(27.5);
+        expect(guideMmFromRuler(pointer, pan, ruler, pxPerMm)).not.toBe(withoutRuler);
+    });
+    it('follows the pan and the zoom', () => {
+        // zoom 2: 8px per mm, ruler still 30px, pan 40 → 10mm tick at 10*8+40+30
+        expect(guideMmFromRuler(150, 40, ruler, 8)).toBe(10);
+    });
+});
+
 describe('getHandleAtPos rotation-handle hit test (audit T8: zoom double-scale)', () => {
     // Box 10x5 mm → at zoom z the box is 40z x 20z px; the drawn handle sits
     // at (boxWidth/2, -OFFSET*z) = (20z, -20z).
@@ -84,6 +108,13 @@ describe('getHandleAtPos rotation-handle hit test (audit T8: zoom double-scale)'
         // handle at (40,-40) lands at screen (-40,-40).
         expect(getHandleAtPos(stubCtx, rotated, design, -40, -40, ws(2))).toBe('rotate');
     });
+    it('finds the handles where they are drawn, pan included', () => {
+        const panned = { zoom: 1, pan: { x: 50, y: 50 } } as WorkspaceState;
+        // box 10x5mm → 40x20px; resize handle at the bottom-right corner
+        expect(getHandleAtPos(stubCtx, boxField, design, 50 + 40, 50 + 20, panned)).toBe('resize-br');
+        // rotation handle sits ROTATION_HANDLE_OFFSET above the top edge
+        expect(getHandleAtPos(stubCtx, boxField, design, 50 + 20, 50 - 20, panned)).toBe('rotate');
+    });
     it('a point inside the field body returns no handle', () => {
         expect(getHandleAtPos(stubCtx, boxField, design, 40, 20, ws(2))).toBeNull();
     });
@@ -102,6 +133,17 @@ describe('isPointInRotatedRect (hit-test core behind select/drag/marquee)', () =
         expect(isPointInRotatedRect(stubCtx, rotated, design, 10, -20, ws(1))).toBe(true);
         // the old CW-side point is outside under CCW
         expect(isPointInRotatedRect(stubCtx, rotated, design, -10, 20, ws(1))).toBe(false);
+    });
+    it('hits a field at the screen position it is painted at, pan included', () => {
+        // drawElements translates the whole scene by the canvas pan, and the
+        // mouse handlers pass raw screen points. The hit test used to ignore
+        // the pan, so with the default pan of (50,50) every click landed 50px
+        // up-left of the field under the cursor: the first click started a
+        // marquee instead of selecting it.
+        const panned = { zoom: 1, pan: { x: 50, y: 50 } } as WorkspaceState;
+        expect(isPointInRotatedRect(stubCtx, boxField, design, 50 + 20, 50 + 10, panned)).toBe(true);
+        // the same point with no pan is far outside the box
+        expect(isPointInRotatedRect(stubCtx, boxField, design, 50 + 20, 50 + 10, ws(1))).toBe(false);
     });
     it('centered text: box is symmetric about the origin in local x', () => {
         const text: TextField = { id: 2, type: 'text', name: 'T', x: 0, y: 0, rotation: 0, align: 'center', dataSource: { type: 'fixed', data: 'AB' }, font: '25', fontSize: 12, h_mag: 1, w_mag: 1 };

@@ -5,7 +5,7 @@ import { drawElements, getFieldBoundingBox, getHandleAtPos, isPointInRotatedRect
 import { ensureBarcodesReady } from '../services/ipl/barcodes';
 import { Rulers } from './Rulers';
 import { getAxisAlignedBoundingBox, getObjectBoundingBox } from '../services/geometry';
-import { computeDragSelectionIds, snapRotation, expandIdsWithGroups } from '../services/dragMath';
+import { computeDragSelectionIds, snapRotation, expandIdsWithGroups, guideMmFromRuler } from '../services/dragMath';
 
 const RULER_SIZE = 30;
 
@@ -113,7 +113,11 @@ export const Workspace: React.FC<{
         return { x: e.clientX - rect.left, y: e.clientY - rect.top };
     };
     
-    const screenToCanvas = (pos: {x:number, y:number}) => ({ x: pos.x - workspaceState.pan.x, y: pos.y - workspaceState.pan.y });
+    // Mouse position is already in the same space the scene is painted in:
+    // drawElements translates by the pan, it does not scroll the div, so
+    // subtracting the pan here shifted every hit pan.x/pan.y (50px at the
+    // default) away from the pixels under the cursor.
+    const screenToCanvas = (pos: {x:number, y:number}) => ({ x: pos.x, y: pos.y });
     const canvasToMm = (pos: number) => pos / (PREVIEW_SCALE * workspaceState.zoom);
     const mmToCanvas = (pos: number) => pos * PREVIEW_SCALE * workspaceState.zoom;
 
@@ -133,17 +137,18 @@ export const Workspace: React.FC<{
         const canvasPos = screenToCanvas(mousePos);
         const { zoom } = workspaceState;
 
-        // Check for guide clicks
+        // Guide clicks. Guides are painted inside the panned transform
+        // (canvasDrawer), so their screen position is mmToCanvas(pos) + pan.
         const clickThreshold = 5 / zoom;
         for (let i = 0; i < design.guides.vertical.length; i++) {
-            if (Math.abs(canvasPos.x - mmToCanvas(design.guides.vertical[i])) < clickThreshold) {
+            if (Math.abs(canvasPos.x - (mmToCanvas(design.guides.vertical[i]) + workspaceState.pan.x)) < clickThreshold) {
                 setDragMode('drag-guide-v');
                 setInitialDragState({ index: i, initialPos: design.guides.vertical[i], mouseOffset: canvasToMm(canvasPos.x) - design.guides.vertical[i] });
                 return;
             }
         }
         for (let i = 0; i < design.guides.horizontal.length; i++) {
-            if (Math.abs(canvasPos.y - mmToCanvas(design.guides.horizontal[i])) < clickThreshold) {
+            if (Math.abs(canvasPos.y - (mmToCanvas(design.guides.horizontal[i]) + workspaceState.pan.y)) < clickThreshold) {
                 setDragMode('drag-guide-h');
                 setInitialDragState({ index: i, initialPos: design.guides.horizontal[i], mouseOffset: canvasToMm(canvasPos.y) - design.guides.horizontal[i] });
                 return;
@@ -173,7 +178,7 @@ export const Workspace: React.FC<{
                 break;
             }
         }
-        
+
         if (clickedField) {
             if (clickedField.locked) {
                  if (!e.shiftKey) dispatch({ type: 'SET_SELECTION', payload: [] });
@@ -220,8 +225,10 @@ export const Workspace: React.FC<{
         const templateWidth = displayWidth / (columns || 1);
         const templateHeight = displayHeight / (rows || 1);
 
-        if (canvasPos.x >= 0 && canvasPos.x <= templateWidth * scale && canvasPos.y >= 0 && canvasPos.y <= templateHeight * scale) {
-            setMouseCoords({ x: canvasToMm(canvasPos.x), y: canvasToMm(canvasPos.y) });
+        const labelX = canvasPos.x - pan.x;
+        const labelY = canvasPos.y - pan.y;
+        if (labelX >= 0 && labelX <= templateWidth * scale && labelY >= 0 && labelY <= templateHeight * scale) {
+            setMouseCoords({ x: canvasToMm(labelX), y: canvasToMm(labelY) });
         } else {
             setMouseCoords(null);
         }
@@ -272,6 +279,9 @@ export const Workspace: React.FC<{
         
         if (dragMode === 'drag-guide-h' || dragMode === 'drag-guide-v') {
             const orientation = dragMode === 'drag-guide-h' ? 'horizontal' : 'vertical';
+            // mousePos is in screen space (origin at the workspace div, which the
+            // rulers share) while a guide's stored position is label millimetres.
+            // The scene is painted pan pixels in, so the pan comes off first.
             const newPosMm = canvasToMm(orientation === 'horizontal' ? mousePos.y - pan.y : mousePos.x - pan.x) - initialDragState.mouseOffset;
             
             const guides = { ...design.guides };
@@ -442,7 +452,7 @@ export const Workspace: React.FC<{
     const handleMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
         if (e.button === 2) return;
         if (dragMode === 'marquee' && marquee) {
-            const marqueeInCanvas = { x: marquee.x - workspaceState.pan.x, y: marquee.y - workspaceState.pan.y, width: marquee.width, height: marquee.height };
+            const marqueeInCanvas = { x: marquee.x, y: marquee.y, width: marquee.width, height: marquee.height };
             const ctx = canvasRef.current?.getContext('2d');
             if (ctx) {
                 // Batch O: a marquee that catches any group member catches the
@@ -453,7 +463,7 @@ export const Workspace: React.FC<{
                 const rawIds = design.fields.filter(field => {
                     if (field.locked || field.visible === false) return false;
                     const aabb = getAxisAlignedBoundingBox([field], design);
-                    const fieldRect = { x: mmToCanvas(aabb.minX), y: mmToCanvas(aabb.minY), width: mmToCanvas(aabb.maxX - aabb.minX), height: mmToCanvas(aabb.maxY - aabb.minY) };
+                    const fieldRect = { x: mmToCanvas(aabb.minX) + workspaceState.pan.x, y: mmToCanvas(aabb.minY) + workspaceState.pan.y, width: mmToCanvas(aabb.maxX - aabb.minX), height: mmToCanvas(aabb.maxY - aabb.minY) };
                     return fieldRect.x < marqueeInCanvas.x + marqueeInCanvas.width && fieldRect.x + fieldRect.width > marqueeInCanvas.x && fieldRect.y < marqueeInCanvas.y + marqueeInCanvas.height && fieldRect.y + fieldRect.height > marqueeInCanvas.y;
                 }).map(f => f.id);
                 const idsToSelect = expandIdsWithGroups(design.fields, rawIds);
@@ -543,7 +553,13 @@ export const Workspace: React.FC<{
 
     const handleGuideDragStart = (orientation: 'horizontal' | 'vertical', e: React.MouseEvent<HTMLDivElement>) => {
         const mousePos = getMousePos(e);
-        const position = canvasToMm(orientation === 'horizontal' ? mousePos.y - workspaceState.pan.y : mousePos.x - workspaceState.pan.x);
+        // Rulers.tsx paints its ticks RULER_SIZE further along than the canvas
+        // paints the same millimetre, so a guide pulled off the ruler lands
+        // RULER_SIZE away from its tick unless that width comes off first
+        // (guideMmFromRuler).
+        const alongRuler = orientation === 'horizontal' ? mousePos.y : mousePos.x;
+        const panPx = orientation === 'horizontal' ? workspaceState.pan.y : workspaceState.pan.x;
+        const position = guideMmFromRuler(alongRuler, panPx, RULER_SIZE, PREVIEW_SCALE * workspaceState.zoom);
         
         const newGuides = { ...design.guides };
         const guideArray = [...newGuides[orientation], position];

@@ -183,12 +183,20 @@ export const getFieldBoundingBox = (ctx: CanvasRenderingContext2D, field: Field,
     return { width, height };
 };
 
+/** Screen position of a field's anchor. drawElements translates the whole
+ *  scene by the canvas pan before painting and the mouse handlers pass raw
+ *  screen points, so the pan belongs here too — without it every click lands
+ *  pan.x/pan.y (50px at the default) off the pixels under the cursor. */
+const fieldOriginPx = (field: Field, workspace: WorkspaceState) => ({
+    fieldX: field.x * PREVIEW_SCALE * workspace.zoom + workspace.pan.x,
+    fieldY: field.y * PREVIEW_SCALE * workspace.zoom + workspace.pan.y,
+});
+
 export const isPointInRotatedRect = (ctx: CanvasRenderingContext2D, field: Field, design: Design, px: number, py: number, workspace: WorkspaceState): boolean => {
     const { zoom } = workspace;
     const box = getFieldBoundingBox(ctx, field, design, zoom);
-    
-    let fieldX = field.x * PREVIEW_SCALE * zoom;
-    let fieldY = field.y * PREVIEW_SCALE * zoom;
+
+    const { fieldX, fieldY } = fieldOriginPx(field, workspace);
     
     // Translate point to be relative to the field's origin
     const translatedPx = px - fieldX;
@@ -222,8 +230,7 @@ export const getHandleAtPos = (ctx: CanvasRenderingContext2D, field: Field, desi
     const { zoom } = workspace;
     const box = getFieldBoundingBox(ctx, field, design, zoom);
 
-    let fieldX = field.x * PREVIEW_SCALE * zoom;
-    let fieldY = field.y * PREVIEW_SCALE * zoom;
+    const { fieldX, fieldY } = fieldOriginPx(field, workspace);
     
     // Transform the mouse coordinates into the local, unrotated space of the
     // rectangle. Batch W: inverse of the CCW draw frame (ctx.rotate(-r)) is +r.

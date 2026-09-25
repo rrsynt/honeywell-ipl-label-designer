@@ -56,6 +56,24 @@ export const expandIdsWithGroups = <T extends { id: number; groupId?: number }>(
  * return -90/-180/-270, values outside Field['rotation'] (found by the
  * batch-6 behavior tests; the extraction fixes it).
  */
+/**
+ * Label millimetres a guide lands at when it is pulled off a ruler.
+ * `alongRulerPx` is the pointer measured from the workspace origin (the rulers
+ * and the canvas share it), `panPx` the canvas pan on that axis.
+ *
+ * The ruler paints its ticks RULER_SIZE further along than the canvas paints
+ * the same millimetre — its "0" sits at pan + rulerSize, the label's "0" at
+ * pan — so that width comes off before the pan does. Leaving it in put every
+ * new guide rulerSize (30px, 7.5mm at zoom 1) away from the tick it was pulled
+ * from, on both axes.
+ */
+export const guideMmFromRuler = (
+    alongRulerPx: number,
+    panPx: number,
+    rulerSizePx: number,
+    pxPerMm: number,
+): number => (alongRulerPx - rulerSizePx - panPx) / pxPerMm;
+
 export const snapRotation = (initialRotation: number, angleDiffDeg: number): Field['rotation'] => {
     const newRotation = (((initialRotation + angleDiffDeg) % 360) + 360) % 360;
     return ((Math.round(newRotation / 90) * 90) % 360) as Field['rotation'];
