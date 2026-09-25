@@ -630,6 +630,26 @@ export class IPLViewerParser {
         for (let i = 0; i < segments.length; i++) {
             const s = segments[i].trim();
             if (!s) continue;
+            // "E1;F1" is ONE format header (PRM p.181), not two commands. The
+            // paired form must be consumed whole: flushing "E1" alone routes it
+            // to parseFieldFrame, which does not recognize a bare format id and
+            // warns "unrecognized command frame" — even though the following
+            // "F1" opens the format and every field parses correctly. The
+            // warning was false: the stream rendered, it just looked broken.
+            if (/^E\d+$/.test(s)) {
+                let partner = '';
+                let partnerAt = -1;
+                for (let j = i + 1; j < segments.length; j++) {
+                    const t = segments[j].trim();
+                    if (t) { partner = t; partnerAt = j; break; }
+                }
+                if (/^F\d*$/.test(partner)) {
+                    flush();
+                    this.openFormat(parseInt(s.slice(1), 10), `${s};${partner}`.slice(0, 24));
+                    i = partnerAt;
+                    continue;
+                }
+            }
             if (COMMAND_START.test(s)) {
                 // Inside d3 data, a header only counts as a boundary when an
                 // origin param follows it — otherwise the text wins.

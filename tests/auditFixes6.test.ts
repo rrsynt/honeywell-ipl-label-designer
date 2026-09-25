@@ -103,6 +103,28 @@ describe('d3 fixed data with ";" inside chained frames (audit T-chain)', () => {
         expect((ts.find(t => t.id === 1)!.source as { data: string }).data).toBe('X;B2;Y');
         expect((ts.find(t => t.id === 2)!.source as { data: string }).data).toBe('OK');
     });
+    it('the paired format header E<n>;F<n> raises no unrecognized-frame warning', () => {
+        // "E1;F1" is one format header, but the chain walker used to flush
+        // "E1" on its own. parseFieldFrame does not know a bare format id, so
+        // every chained stream warned "Unrecognized command frame ignored"
+        // (command "E1") while rendering perfectly — the viewer's built-in
+        // "Chained" sample showed it on load.
+        const code = stx('<ESC>P;E1;F1;H1;o100,100;f0;c25;k12;d3,Hello World!;B2;o100,200;f0;c6;h80;w2;i1;d3,12345678;R');
+        const label = parseViewerIPL(code);
+        expect(label.elements.map(e => e.kind)).toEqual(['text', 'barcode']);
+        expect(label.issues.filter(i => i.code === 'unknown-frame')).toEqual([]);
+    });
+    it('a bare format id without its F partner still warns', () => {
+        // The pairing only swallows "E<n>" when "F…" follows. A lone "E1"
+        // opens nothing, so the field after it is outside a format and the
+        // stray id itself is reported — the fix must not hide real problems.
+        const code = stx('<ESC>P;E1;H1;o10,10;c0;d3,OK;R');
+        const label = parseViewerIPL(code);
+        expect(label.elements).toHaveLength(0);
+        const codes = label.issues.map(i => i.code);
+        expect(codes).toContain('unknown-frame');
+        expect(codes).toContain('field-outside-format');
+    });
     it('R after d3 data still terminates the chain', () => {
         const code = stx('<ESC>P;E1;F1;H1;o10,10;c0;d3,TAIL;DATA;R');
         const label = parseViewerIPL(code);
