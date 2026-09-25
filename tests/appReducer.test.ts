@@ -2,6 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { appReducer } from '../App';
 import { newVariable, newCounter } from '../services/dataSources';
+import { generateIPL } from '../services/iplGenerator';
 import type { AppState, Design, Field, TextField } from '../types';
 
 const baseDesign: Design = {
@@ -146,5 +147,49 @@ describe('nudge baseline + commit (audit K5)', () => {
         s = appReducer(s, { type: 'COMMIT_INTERMEDIATE' });
         expect(s.history.past).toHaveLength(0);
         expect(s.history.intermediate).toBeNull();
+    });
+});
+
+describe('layer z-order changes the print order, not just the list (Fase 3)', () => {
+    // The generator emits one <STX>H<id> frame per text field, walking the
+    // fields array in order — and the canvas paints the same array in the same
+    // order. So the relative position of H1 and H2 in the stream IS the draw
+    // order. A reorder that only reshuffled the panel's display would leave
+    // this string untouched, which is exactly the failure this guards against.
+    const fix: TextField['dataSource'] = { type: 'fixed', data: 'X' };
+    const tf = (id: number): TextField => ({
+        id, type: 'text', name: `T${id}`, x: 5, y: 5, rotation: 0, locked: false, visible: true,
+        dataSource: fix, font: '0', fontSize: 12, h_mag: 1, w_mag: 1,
+    });
+    const d = designWithFields(tf(1), tf(2));
+    const orderOf = async (design: Design) => (await generateIPL(design)).match(/<STX>H\d/g);
+
+    it('BRING_TO_FRONT moves the field to the end of the stream', async () => {
+        const before = await orderOf(d);
+        const s = appReducer({ ...baseState(d), selectedFieldIds: [1] }, { type: 'BRING_TO_FRONT' });
+        expect(s.history.present.fields.map(f => f.id)).toEqual([2, 1]);
+        expect(await orderOf(s.history.present)).toEqual(['<STX>H2', '<STX>H1']);
+        expect(before).toEqual(['<STX>H1', '<STX>H2']); // the reorder, not the design, did it
+    });
+
+    it('SEND_TO_BACK moves the field to the start of the stream', async () => {
+        const s = appReducer({ ...baseState(d), selectedFieldIds: [2] }, { type: 'SEND_TO_BACK' });
+        expect(s.history.present.fields.map(f => f.id)).toEqual([2, 1]);
+        expect(await orderOf(s.history.present)).toEqual(['<STX>H2', '<STX>H1']);
+    });
+
+    it("REORDER_LAYER 'top' inserts AFTER the target (the list renders reversed)", async () => {
+        // The panel shows the array backwards, so dropping above a row means
+        // appearing before it visually, which is AFTER it in the array.
+        const s = appReducer(baseState(d), { type: 'REORDER_LAYER', payload: { draggedId: 1, targetId: 2, position: 'top' } });
+        expect(s.history.present.fields.map(f => f.id)).toEqual([2, 1]);
+        expect(await orderOf(s.history.present)).toEqual(['<STX>H2', '<STX>H1']);
+    });
+
+    it("REORDER_LAYER 'bottom' inserts BEFORE the target", async () => {
+        const three = designWithFields(tf(1), tf(2), tf(3));
+        const s = appReducer(baseState(three), { type: 'REORDER_LAYER', payload: { draggedId: 3, targetId: 2, position: 'bottom' } });
+        expect(s.history.present.fields.map(f => f.id)).toEqual([1, 3, 2]);
+        expect(await orderOf(s.history.present)).toEqual(['<STX>H1', '<STX>H3', '<STX>H2']);
     });
 });

@@ -14,6 +14,21 @@ export const PRINTER_MODELS: { [model: string]: (203 | 300 | 406)[] } = {
     'PD45S': [203, 300, 406],
 };
 
+/**
+ * Fase 3: the strip along each edge of the stock that the print head cannot
+ * reach, in mm, drawn as a guide rectangle on the canvas. Honeywell does not
+ * publish a per-model figure for this, so the values below are the conservative
+ * inset the designer warns with, NOT a measured printer specification — a
+ * design placed outside it may still print, and one inside it will. 'Generic'
+ * has no head to describe, so it gets none and draws no guide.
+ */
+export const UNPRINTABLE_MARGIN_MM: { [model: string]: number } = {
+    'Generic': 0,
+    'PD41': 1,
+    'PD43': 1,
+    'PD45S': 1,
+};
+
 // THE single source of font metrics (audit T1: the designer, the viewer
 // renderer and the parser each used to carry their own diverging table).
 // baseHeight/baseWidth are the GLYPH CELL in dots (PRM270 §7.3: c0 is 7×9,

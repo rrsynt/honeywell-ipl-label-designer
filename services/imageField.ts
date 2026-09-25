@@ -121,50 +121,107 @@ export const conformImages = (design: Design): Design => {
 };
 
 /**
- * Downscale + threshold an RGBA ImageData to a dot bitmap. Pixels are
- * composited over white (transparency = paper), weighted-luminance
- * compared against `threshold` (0-255). Optional Bayer 4x4 ordered
- * dithering for photos; logos should stay halftone=false.
- * Returns '' -rows when the target grid is degenerate.
+ * How a grey value becomes one bit. 'threshold' cuts on luminance (crisp for
+ * logos). 'bayer' is ordered dithering (the historical `halftone: true`).
+ * 'floyd-steinberg' spreads each pixel's rounding error onto its neighbours,
+ * which is what keeps a photograph's mid-tones on a 1-bit thermal head.
+ * A boolean is accepted because every existing caller passes one: true means
+ * 'bayer', false means 'threshold', so those callers change nothing.
+ */
+export type DitherMode = 'threshold' | 'bayer' | 'floyd-steinberg';
+
+const resolveDither = (halftone: boolean | DitherMode): DitherMode =>
+    halftone === true ? 'bayer' : halftone === false ? 'threshold' : halftone;
+
+/**
+ * Downscale an RGBA ImageData to a dot bitmap. Pixels are composited over
+ * white (transparency = paper) and reduced to 1 bit by `dither`.
+ * Returns [] when the target grid is degenerate.
  */
 export const imageDataSourceToBitmap = (
     data: Uint8ClampedArray, srcW: number, srcH: number,
-    dotsW: number, dotsH: number, threshold: number, halftone: boolean,
+    dotsW: number, dotsH: number, threshold: number, halftone: boolean | DitherMode,
 ): string[] => {
     if (dotsW <= 0 || dotsH <= 0 || srcW <= 0 || srcH <= 0) return [];
-    const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
-    const rows: string[] = [];
+    const mode = resolveDither(halftone);
+
+    // Luminance of the downscaled grid, row-major. Computed once so both the
+    // per-pixel modes and the error-diffusion pass read the same source.
+    const lum = new Float64Array(dotsW * dotsH);
     for (let y = 0; y < dotsH; y++) {
         const y0 = Math.floor((y * srcH) / dotsH);
         const y1 = Math.max(y0 + 1, Math.floor(((y + 1) * srcH) / dotsH));
-        let line = '';
         for (let x = 0; x < dotsW; x++) {
             const x0 = Math.floor((x * srcW) / dotsW);
             const x1 = Math.max(x0 + 1, Math.floor(((x + 1) * srcW) / dotsW));
-            // Average over the source block (area downscale: keeps thin
-            // marks and prevents moiré vs a single-pixel sample).
-            let lum = 0, n = 0;
+            // Average over the source block (area downscale: keeps thin marks
+            // and prevents moiré vs a single-pixel sample).
+            let acc = 0, n = 0;
             for (let sy = y0; sy < y1; sy++) {
                 for (let sx = x0; sx < x1; sx++) {
                     const i = (sy * srcW + sx) * 4;
                     const a = data[i + 3] / 255;
-                    const r = data[i] * a + 255 * (1 - a);
-                    const g = data[i + 1] * a + 255 * (1 - a);
-                    const b = data[i + 2] * a + 255 * (1 - a);
-                    lum += 0.299 * r + 0.587 * g + 0.114 * b;
+                    acc += 0.299 * (data[i] * a + 255 * (1 - a))
+                         + 0.587 * (data[i + 1] * a + 255 * (1 - a))
+                         + 0.114 * (data[i + 2] * a + 255 * (1 - a));
                     n++;
                 }
             }
-            lum = n ? lum / n : 255;
-            let ink: boolean;
-            if (halftone) {
-                const t = threshold + (BAYER[(y % 4) * 4 + (x % 4)] / 16 - 0.5) * 2 * 48;
-                ink = lum < t;
-            } else {
-                ink = lum < threshold;
-            }
-            line += ink ? '1' : '0';
+            lum[y * dotsW + x] = n ? acc / n : 255;
         }
+    }
+
+    if (mode === 'floyd-steinberg') return floydSteinberg(lum, dotsW, dotsH, threshold);
+
+    const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+    const rows: string[] = [];
+    for (let y = 0; y < dotsH; y++) {
+        let line = '';
+        for (let x = 0; x < dotsW; x++) {
+            const v = lum[y * dotsW + x];
+            const cut = mode === 'bayer'
+                ? threshold + (BAYER[(y % 4) * 4 + (x % 4)] / 16 - 0.5) * 2 * 48
+                : threshold;
+            line += v < cut ? '1' : '0';
+        }
+        rows.push(line);
+    }
+    return rows;
+};
+
+/**
+ * Floyd–Steinberg error diffusion. Each pixel is rounded to ink or paper and
+ * the error (how far the rounding moved it) is handed to the four pixels that
+ * have not been visited yet: 7/16 to the right, 3/16 below-left, 5/16 below,
+ * 1/16 below-right. Rows alternate direction so the error does not drift to
+ * one side of the image. A mid-grey therefore prints as roughly half ink,
+ * where a plain threshold would print it as a solid block.
+ */
+const floydSteinberg = (lum: Float64Array, w: number, h: number, threshold: number): string[] => {
+    const px = Float64Array.from(lum);
+    const ink = new Uint8Array(w * h);
+    const spread = (x: number, y: number, err: number, frac: number) => {
+        if (x >= 0 && x < w && y >= 0 && y < h) px[y * w + x] += err * frac;
+    };
+    for (let y = 0; y < h; y++) {
+        const ltr = y % 2 === 0;
+        for (let k = 0; k < w; k++) {
+            const x = ltr ? k : w - 1 - k;
+            const i = y * w + x;
+            const isInk = px[i] < threshold;
+            ink[i] = isInk ? 1 : 0;
+            const err = px[i] - (isInk ? 0 : 255);
+            const dir = ltr ? 1 : -1;
+            spread(x + dir, y, err, 7 / 16);
+            spread(x - dir, y + 1, err, 3 / 16);
+            spread(x, y + 1, err, 5 / 16);
+            spread(x + dir, y + 1, err, 1 / 16);
+        }
+    }
+    const rows: string[] = [];
+    for (let y = 0; y < h; y++) {
+        let line = '';
+        for (let x = 0; x < w; x++) line += ink[y * w + x] ? '1' : '0';
         rows.push(line);
     }
     return rows;
@@ -209,7 +266,7 @@ export const placeholderImage = (dpi: Design['printerSettings']['dpi']): { bitma
  * converters so unit tests can drive imageDataSourceToBitmap with synthetic
  * pixels.
  */
-export const loadImageFileToBitmap = (file: File, maxDotsW: number, threshold: number, halftone: boolean): Promise<string[]> =>
+export const loadImageFileToBitmap = (file: File, maxDotsW: number, threshold: number, halftone: boolean | DitherMode): Promise<string[]> =>
     new Promise((resolve, reject) => {
         const url = URL.createObjectURL(file);
         const img = new Image();

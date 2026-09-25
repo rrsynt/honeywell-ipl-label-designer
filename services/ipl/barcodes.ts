@@ -329,6 +329,15 @@ export const buildBwipSpec = (symbology: string, data: string, params: BarcodePa
             if (!/^\d{19}$/.test(digits)) return null;
             return { main: { bcid: 'code128', text: '^FNC100' + digits.slice(2), opts: { parsefnc: true } } };
         }
+        // GS1 data from the builder, written '(AI)value(AI)value' and containing
+        // at least two AIs. The plain code128 encoder would draw the parentheses;
+        // gs1-128 reads them as AI markers and inserts the FNC1 separators
+        // itself. Probed: it rejects the '^FNC1' spelling outright ("AIs must
+        // start with '('"). One lone '(10)…' is NOT this — c6,m2 treats a single
+        // parenthesised group as delimiters to strip, and that path owns it.
+        if (!params.code128Ucc && !params.code128KeepInterpretive && /^\(\d{2,4}\)[^(]*\(\d{2,4}\)/.test(data)) {
+            return { main: { bcid: 'gs1-128', text: data, opts: {} } };
+        }
         // m2=1: ignore parentheses and spaces in the bar code (they stay in
         // the interpretive field — see interpretiveText).
         const encoded = params.code128KeepInterpretive === '1' ? data.replace(/[() ]/g, '') : data;
@@ -353,6 +362,13 @@ export const buildBwipSpec = (symbology: string, data: string, params: BarcodePa
         if (!hibcData) return null;
         const bcid = symbology === '8' ? 'hibccode39' : 'hibccode128';
         return { main: { bcid, text: hibcData, opts: {} } };
+    }
+    if ((symbology === '17' || symbology === '18') && data.startsWith('(')) {
+        // Parenthesised GS1 data. The plain datamatrix/qrcode encoders would
+        // draw the parentheses as data; the gs1 variants read them as AI
+        // markers and insert the FNC1 separators themselves.
+        const bcid = symbology === '17' ? 'gs1datamatrix' : 'gs1qrcode';
+        return { main: { bcid, text: data, opts: {} } };
     }
     if (symbology === '18') {
         // QR Code c18[,m1][,m2][,m3] (PRM p.164): m1 model 1/2 (only model 2

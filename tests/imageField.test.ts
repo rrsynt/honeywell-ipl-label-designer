@@ -55,6 +55,35 @@ describe('bitmap math', () => {
     it('invertBitmap swaps ink and paper', () => {
         expect(invertBitmap(['10', '01'])).toEqual(['01', '10']);
     });
+
+    it('a boolean dither argument still means what it used to', () => {
+        // true = Bayer, false = plain threshold. Existing callers pass a
+        // boolean; changing that meaning would silently restyle every logo.
+        const solid = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255]);
+        expect(imageDataSourceToBitmap(solid, 2, 1, 2, 1, 128, false)).toEqual(['10']);
+        expect(imageDataSourceToBitmap(solid, 2, 1, 2, 1, 128, 'threshold')).toEqual(['10']);
+    });
+
+    it('Floyd–Steinberg keeps a grey ramp; a plain threshold flattens it', () => {
+        // 8 pixels stepping from black to white. At threshold 128 the left
+        // half is ink and the right half is paper — the whole ramp collapses
+        // to two blocks, which is exactly what loses a photograph's tones.
+        const ramp = new Uint8ClampedArray(8 * 4);
+        for (let x = 0; x < 8; x++) ramp.set([x * 36, x * 36, x * 36, 255], x * 4);
+
+        const flat = imageDataSourceToBitmap(ramp, 8, 1, 8, 1, 128, 'threshold')[0];
+        expect(flat).toBe('11110000');
+
+        const dithered = imageDataSourceToBitmap(ramp, 8, 1, 8, 1, 128, 'floyd-steinberg')[0];
+        // The error diffusion must place ink on BOTH sides of the cut, or it
+        // has done nothing the threshold did not already do.
+        expect(dithered.slice(0, 4)).toContain('0');
+        expect(dithered.slice(4)).toContain('1');
+        // And it must not invent ink where the source is white, nor drop it
+        // where the source is black.
+        expect(dithered[0]).toBe('1');
+        expect(dithered[7]).toBe('0');
+    });
 });
 
 describe('rebaseImage (property-panel consistency)', () => {

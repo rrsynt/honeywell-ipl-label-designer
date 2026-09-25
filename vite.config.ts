@@ -28,6 +28,10 @@ export default defineConfig(({ mode }) => {
         environment: 'happy-dom',
         setupFiles: ['./tests/setup.ts'],
         include: ['tests/**/*.test.{ts,tsx}'],
+        // The 5s default trips the heaviest render tests (pitch, picket) when
+        // the whole suite runs in parallel — they pass alone. 20s keeps the
+        // full run honest without hiding a genuine hang.
+        testTimeout: 20000,
       }
     };
 });

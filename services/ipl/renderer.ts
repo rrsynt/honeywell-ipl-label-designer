@@ -3,7 +3,7 @@ import { measureBarcode, paintBarcode, buildBwipSpec, applyI2of5Padding, interpr
 import { decodeGraphicColumns, paintBitmap } from './graphics';
 import { OUTLINE_FONTS } from './viewerParser';
 import { FONT_MAP, FONT_FAMILIES, fontAdvanceDots, fontStack } from '../../constants';
-import { outlineTextBlockWidthDots } from './fontMetrics';
+import { outlineTextBlockWidthDots, getUploadedFontMetrics } from './fontMetrics';
 
 export interface RenderOptions {
     /** Printer resolution - needed to convert outline font points to dots. */
@@ -110,7 +110,11 @@ export const estimateElementSize = (
                 // Batch U: per-glyph advance table (fontMetrics.ts) replaces
                 // the flat 0.6em — exact for monospace, calibrated for the
                 // proportional sans/serif families (c61 Swiss, c28 Dutch).
-                const family = FONT_MAP[el.font]?.family ?? 'monospace';
+                // An uploaded face is measured by its OWN table (fontMetrics.ts
+                // keeps one per installed font). A resident id resolves through
+                // FONT_MAP exactly as before.
+                const uploaded = getUploadedFontMetrics(el.font);
+                const family = uploaded ? el.font : (FONT_MAP[el.font]?.family ?? 'monospace');
                 return {
                     lengthDots: Math.round(outlineTextBlockWidthDots(lines, hDots, family)),
                     crossDots: Math.round(lines.length * hDots * 1.15),
@@ -256,9 +260,13 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
                 const hPx = (el.pointSize / 72) * dpi * s;
                 charW = hPx * 0.6; // fallback for the bitmap-style math below
                 lineH = hPx * 1.15;
-                const family = meta.family ?? 'monospace';
+                // Uploaded face: measure against its own advance table and paint
+                // with the family name it was registered under, so the drawn
+                // width and the measured width describe the same font.
+                const uploaded = getUploadedFontMetrics(el.font);
+                const family = uploaded ? el.font : (meta.family ?? 'monospace');
                 outlineW = (line: string) => outlineTextBlockWidthDots([line], hPx, family);
-                ctx.font = `${hPx}px ${fontStack(family)}`;
+                ctx.font = `${hPx}px ${uploaded ? uploaded.cssFamily : fontStack(family)}`;
             } else if (el.pitchAdvanceDots !== undefined) {
                 // Pitched field: the advance comes from the label width, and
                 // the cell keeps the font's own aspect so a pitched c0 still

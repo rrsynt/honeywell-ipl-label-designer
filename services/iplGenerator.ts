@@ -1,9 +1,49 @@
-import type { Design, Field, TextField, BarcodeField, LineField, BoxField, ImageField, PrinterSettings, FieldDataSource, DataSource, DateFormat, TimeFormat } from '../types';
+import type { Design, Field, TextField, BarcodeField, LineField, BoxField, ImageField, EllipseField, PolygonField, TriangleField, PrinterSettings, FieldDataSource, DataSource, DateFormat, TimeFormat } from '../types';
 import { getFormattedDateTime } from './dateTimeFormat';
 import { DPI_MAP, FONT_MAP } from '../constants';
 import { getObjectBoundingBox } from './geometry';
 import { encodeBitmapColumns, encodeColumnsToNibblizedRle } from './ipl/graphics';
 import { bitmapRowsToMatrix } from './imageField';
+import { resolveLinkedPreview, applyTransform, isSuppressed, suppressionValueFor, groupSuppressionValue } from './tableSource';
+import { getUploadedFontMetrics } from './ipl/fontMetrics';
+import { widthDelta } from './fontStore';
+
+/**
+ * The resident outline font emitted for an uploaded face. One id per family,
+ * chosen as the family's plain (non-bold, non-condensed) member: c61 Swiss 721,
+ * c28 Dutch Roman, c25 Swiss Mono. A printer has no way to accept the uploaded
+ * bytes, so this is the closest it can print.
+ */
+const RESIDENT_FONT_ID: Record<'sans-serif' | 'serif' | 'monospace', string> = {
+    'sans-serif': '61',
+    'serif': '28',
+    'monospace': '25',
+};
+
+/**
+ * The `c` parameter to emit for a font reference. A resident id passes through
+ * untouched. An uploaded face maps to its nearest resident family — and only
+ * here, so the field keeps the uploaded name for the screen renderer.
+ */
+const emitFontId = (font: string | undefined): string => {
+    const metrics = font ? getUploadedFontMetrics(font) : undefined;
+    return metrics ? RESIDENT_FONT_ID[metrics.family] : (font ?? '');
+};
+
+/**
+ * Fase 3: one entry per uploaded font the design uses. The stream itself is
+ * unchanged — a printer has no slot for an arbitrary face, so the field is
+ * emitted as its nearest resident family — but the caller can show how far that
+ * substitution moves the text. `delta` is a fraction of the resident width.
+ */
+export interface FontSubstitution {
+    /** The uploaded font's name, as the field stores it. */
+    font: string;
+    /** The resident IPL family emitted in its place. */
+    resident: 'sans-serif' | 'serif' | 'monospace';
+    /** |uploaded − resident| / resident, by average advance. */
+    delta: number;
+}
 
 export interface BatchData {
     rows: any[][];
@@ -22,6 +62,62 @@ export interface BatchData {
 export const sanitizePrintData = (s: string): string =>
     s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
      .replace(/<\/?(?:STX|ETX|CAN|EOT|ETB|ESC|NUL|SUB|RS|US|FS|GS)>/gi, '');
+
+/** A linked field's transform, applied to a value resolved outside a job (the
+ *  canvas preview, the single-label export). A blank expression is a no-op and
+ *  a broken one returns the value unchanged — see applyTransform. */
+const transformed = (value: string, dataSource: FieldDataSource, design: Design): string =>
+    dataSource.type === 'linked' && dataSource.transform
+        ? applyTransform(dataSource.transform, value, design).result
+        : value;
+
+/**
+ * Fase 4: the print-block data for one field on one label. A suppression
+ * condition that holds replaces the data with nothing, so the printer draws no
+ * ink for it on this label while the field stays defined for the labels where
+ * the condition does not hold. `resolved` is the row's cell when there is one;
+ * without it the condition is judged on the value the field would print.
+ */
+/**
+ * The value a group's condition is judged against for THIS label. In a batch
+ * that is the row's own cell for the group's reference field, so the group can
+ * be present on one row and gone on the next; without a row it is the preview
+ * value, which is what the canvas uses too.
+ */
+const groupValueForRow = (groupId: number, design: Design, row?: any[], batch?: BatchData): string => {
+    if (row && batch) {
+        const ref = design.fields
+            .filter(f => f.groupId === groupId && (f.type === 'text' || f.type === 'barcode'))
+            .sort((a, b) => a.id - b.id)[0];
+        const col = ref ? batch.mappings[ref.id] : undefined;
+        if (col !== undefined && col >= 0 && col < row.length) return String(row[col] ?? '');
+    }
+    return groupSuppressionValue(groupId, design);
+};
+
+const dataOrSuppressed = (field: TextField | BarcodeField, data: string, design: Design, resolved?: string, row?: any[], batch?: BatchData): string => {
+    // A group's condition hides every member. Judged on the row when there is
+    // one, so the whole group vanishes together and per label.
+    const groupCondition = field.groupId !== undefined ? design.groupSuppress?.[field.groupId] : undefined;
+    if (groupCondition && isSuppressed(groupCondition, groupValueForRow(field.groupId as number, design, row, batch)).suppress) return '';
+    return field.suppress && isSuppressed(field.suppress, resolved ?? suppressionValueFor(field, design)).suppress ? '' : data;
+};
+
+/**
+ * Which stored format this label prints. Format 1 is the base; a conditional
+ * group whose condition does NOT hold adds its own format (the base plus that
+ * group's static members). Two such groups both showing at once cannot be
+ * represented — a format is one or the other — so the lowest group id wins and
+ * the rest are named in the returned warnings.
+ */
+const formatForLabel = (design: Design, conditionalGroupIds: number[], row?: any[], batch?: BatchData): { formatId: number; warnings: string[] } => {
+    const shown = conditionalGroupIds.filter(id => {
+        const condition = design.groupSuppress?.[id];
+        return !!condition && !isSuppressed(condition, groupValueForRow(id, design, row, batch)).suppress;
+    });
+    const warnings = shown.slice(1).map(id => `Group ${id} overlaps another conditional group on this label, so only group ${shown[0]} is printed.`);
+    return { formatId: shown.length === 0 ? 1 : conditionalGroupIds.indexOf(shown[0]) + 2, warnings };
+};
 
 export const mmToDots = (mm: number, dpi: 203 | 300 | 406): number => {
     return Math.round(mm * DPI_MAP[dpi]);
@@ -68,11 +164,128 @@ const boxToIplGraphicData = (field: BoxField, dpi: number): { data: string[], wi
     return { data: encodeBitmapColumns(monoBitmap), width, height };
 };
 
+type ShapeField = EllipseField | PolygonField | TriangleField;
+
+/**
+ * Fase 3: rasterize an ellipse, polygon or triangle the same way a rounded box
+ * is rasterized — draw it on an offscreen canvas at the printer's dpi, then
+ * threshold to a mono bitmap. IPL has no command for these shapes, so this is
+ * how they print: as a downloaded graphic (G/U), never as an invented command.
+ * A zero thickness fills the shape; a positive one strokes it inside the box.
+ */
+const shapeToIplGraphicData = (field: ShapeField, dpi: number): { data: string[], width: number, height: number } | null => {
+    const mmPerDot = 25.4 / dpi;
+    const width = Math.max(1, Math.round(field.width / mmPerDot));
+    const height = Math.max(1, Math.round(field.height / mmPerDot));
+    const thickness = Math.max(0, Math.round(field.thickness / mmPerDot));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.beginPath();
+    if (field.type === 'ellipse') {
+        ctx.ellipse(width / 2, height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
+    } else if (field.type === 'triangle') {
+        ctx.moveTo(width / 2, 0);
+        ctx.lineTo(width, height);
+        ctx.lineTo(0, height);
+        ctx.closePath();
+    } else {
+        // Regular polygon, one vertex straight up, so a square reads as a diamond.
+        // Below 3 sides there is no polygon. The caller (the graphic loop)
+        // refuses to rasterize those, so this only ever sees a drawable one;
+        // the clamp stays as a backstop for a caller that forgets.
+        const sides = Math.max(3, Math.round(field.sides));
+        for (let i = 0; i < sides; i++) {
+            const a = -Math.PI / 2 + (i * 2 * Math.PI) / sides;
+            const px = width / 2 + (width / 2) * Math.cos(a);
+            const py = height / 2 + (height / 2) * Math.sin(a);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+    }
+
+    if (thickness <= 0) {
+        ctx.fillStyle = 'black';
+        ctx.fill();
+    } else {
+        // Inset the stroke by half its width so it stays inside the declared
+        // box — the same rule the box stroke follows (measured INSIDE l×h).
+        ctx.strokeStyle = 'black';
+        ctx.lineWidth = thickness;
+        ctx.lineJoin = 'miter';
+        ctx.stroke();
+    }
+
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const monoBitmap: number[][] = Array.from({ length: height }, () => new Array(width).fill(0));
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const i = (y * width + x) * 4;
+            if (imageData.data[i + 3] > 0 && imageData.data[i] < 255) monoBitmap[y][x] = 1;
+        }
+    }
+    return { data: encodeBitmapColumns(monoBitmap), width, height };
+};
+
 
 const sanitizeFieldName = (name: string): string => {
     return name.replace(/[^a-zA-Z0-9_]/g, '_').replace(/\s+/g, '_');
 };
 
+
+/**
+ * The uploaded fonts this design prints through a substitute, de-duplicated by
+ * font. Empty unless the user installed a face and a field uses it — resident
+ * ids are not in the uploaded-font registry, so an ordinary design reports
+ * nothing here.
+ */
+export const fontSubstitutions = (design: Design): FontSubstitution[] => {
+    const seen = new Set<string>();
+    const out: FontSubstitution[] = [];
+    for (const field of design.fields) {
+        if (field.type !== 'text' && field.type !== 'barcode') continue;
+        const name = field.type === 'text' ? field.font : field.hriFont;
+        if (!name || seen.has(name)) continue;
+        const metrics = getUploadedFontMetrics(name);
+        if (!metrics) continue;
+        seen.add(name);
+        out.push({ font: name, resident: metrics.family, delta: widthDelta(metrics.advances, metrics.family) });
+    }
+    return out;
+};
+
+/**
+ * Fase 4: suppression conditions that did nothing. A condition that doesn't
+ * parse never suppresses (a typo must not delete a field from every label), so
+ * the only way the user learns their rule was ignored is this list. Judged on
+ * the value the field prints right now — the wording of the failure doesn't
+ * depend on the data.
+ */
+export const suppressionWarnings = (design: Design): string[] => {
+    const out: string[] = [];
+    // A label can print only one conditional group's static members. When two
+    // such groups would both show, the generator keeps the lowest id and the
+    // rest are lost — say which.
+    const conditionalIds = Object.keys(design.groupSuppress ?? {}).map(Number)
+        .filter(id => design.fields.some(f => f.groupId === id && !['text', 'barcode'].includes(f.type)))
+        .sort((a, b) => a - b);
+    out.push(...formatForLabel(design, conditionalIds).warnings);
+    for (const field of design.fields) {
+        if (!field.suppress || field.suppress.trim() === '') continue;
+        const value = (field.type === 'text' || field.type === 'barcode')
+            ? suppressionValueFor(field, design) : '';
+        const { warning } = isSuppressed(field.suppress, value);
+        if (warning) out.push(`"${field.name}": ${warning.message}`);
+    }
+    return out;
+};
 
 export const generateIPL = async (design: Design, batchData?: BatchData): Promise<string> => {
     if (!design) return "";
@@ -102,7 +315,29 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
     commands.push(`<STX><SI>l13<ETX>`);
 
     const visibleFields = fields.filter(f => f.visible !== false);
+
+    // Fase 4: a group's condition hides every member of it, but a line, box,
+    // shape or image has no per-label data to blank — it is part of the format
+    // definition, which is written once. So a group whose condition hides such a
+    // member cannot share a format with the labels where it shows. Each such
+    // group gets a format of its own and the job picks one per row. Groups made
+    // only of text and barcodes stay in the shared format: their data can be
+    // emptied per row, which is what the printer actually wants.
+    const STATIC_TYPES = ['line', 'box', 'ellipse', 'polygon', 'triangle', 'image'];
+    const conditionalGroupIds = [...new Set(visibleFields
+        .filter(f => f.groupId !== undefined && design.groupSuppress?.[f.groupId] && visibleFields.some(m => m.groupId === f.groupId && STATIC_TYPES.includes(m.type)))
+        .map(f => f.groupId as number))];
+    /** The format a field belongs to: its group's own, or the shared one. */
+    const formatOf = (field: Field): number => {
+        const idx = field.groupId !== undefined ? conditionalGroupIds.indexOf(field.groupId) : -1;
+        return idx === -1 ? 0 : idx + 1;
+    };
+    const formatCount = conditionalGroupIds.length + 1;
     const roundedBoxFields = visibleFields.filter(f => f.type === 'box' && (f as BoxField).cornerRadius && (f as BoxField).cornerRadius > 0) as BoxField[];
+    // Ellipse, polygon and triangle have no IPL command of their own, so every
+    // one of them is a downloaded graphic — the rounded-box treatment, applied
+    // unconditionally rather than only past a radius threshold.
+    const shapeFields = visibleFields.filter(f => f.type === 'ellipse' || f.type === 'polygon' || f.type === 'triangle') as ShapeField[];
 
     const processedImages: { fieldId: number; graphicId: number; graphicData: { data: string[]; width: number; height: number; } }[] = [];
     // fieldId -> graphic resource id. A Map, not a (field as any)._graphicId
@@ -111,8 +346,12 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
     const boxGraphicIds = new Map<number, number>();
     let graphicIdCounter = 1;
 
-    for (const field of roundedBoxFields) {
-        const graphicData = boxToIplGraphicData(field, dpi);
+    for (const field of [...roundedBoxFields, ...shapeFields]) {
+        // A polygon needs 3 sides to enclose anything. Emitting a graphic for
+        // fewer would print a shape the user cannot see on screen either, so
+        // the field is dropped from the stream instead.
+        if (field.type === 'polygon' && field.sides < 3) continue;
+        const graphicData = field.type === 'box' ? boxToIplGraphicData(field, dpi) : shapeToIplGraphicData(field, dpi);
         if (graphicData) {
             const graphicId = graphicIdCounter++;
             boxGraphicIds.set(field.id, graphicId);
@@ -176,15 +415,18 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
         return commands.join(EOL);
     }
     
-    const formatId = 1;
-    commands.push(`<STX>E${formatId};F${formatId}<ETX>`);
-    
     const variableFieldsForPrint: { field: TextField | BarcodeField, source?: DataSource }[] = [];
     /** I<n> commands waiting for their B<n> to be written (see the barcode case). */
     const pendingInterpretive: string[] = [];
 
+    // One stored format per variant. Format 1 is the base (everything not in a
+    // conditional group); each conditional group adds a format that is the base
+    // plus that group's static members. Written as separate E/F blocks so the
+    // printer holds all of them and the job selects one per label.
+    for (let formatId = 1; formatId <= formatCount; formatId++) {
+    commands.push(`<STX>E${formatId};F${formatId}<ETX>`);
 
-    visibleFields.forEach(field => {
+    visibleFields.filter(field => formatOf(field) === 0 || formatOf(field) === formatId - 1).forEach(field => {
         let { x: x_mm, y: y_mm, rotation } = field;
         
         if (isLandscape) {
@@ -249,11 +491,16 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
                 return `d3,${getFormattedDateTime(dataSource.type, dataSource.format)}`;
             }
             
-            if (dataSource.type === 'linked') {
-                const source = dataSources.find(ds => ds.id === dataSource.sourceId);
-                variableFieldsForPrint.push({ field, source });
-            } else { // variable
-                variableFieldsForPrint.push({ field, source: undefined });
+            // Registered once. A field that lives in more than one format (the
+            // base) is visited once per format, and pushing it each time would
+            // emit its data twice in every print block.
+            if (!variableFieldsForPrint.some(v => v.field.id === field.id)) {
+                if (dataSource.type === 'linked') {
+                    const source = dataSources.find(ds => ds.id === dataSource.sourceId);
+                    variableFieldsForPrint.push({ field, source });
+                } else { // variable
+                    variableFieldsForPrint.push({ field, source: undefined });
+                }
             }
             return `d0,255`;
         };
@@ -266,8 +513,8 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
                 const barcodeId = `B${field.id}`;
                 let params: string[] = [`o${rounded_ox},${rounded_oy}`, `f${rotationCmd}`];
                 if (field.type === 'text') {
-                    const fontInfo = FONT_MAP[field.font];
-                    params.push(`c${field.font}`);
+                    const fontInfo = FONT_MAP[emitFontId(field.font)];
+                    params.push(`c${emitFontId(field.font)}`);
                     if (fontInfo?.type === 'bitmap') { 
                         params.push(`h${field.h_mag}`, `w${field.w_mag}`); 
                     } else { // Outline font
@@ -329,7 +576,7 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
                 commandString = [field.type === 'text' ? fieldId : barcodeId, ...params].join(';');
                 if (field.type === 'barcode' && field.humanReadable !== 'none') {
                     const hriParams = [];
-                    const hriFont = field.hriFont || '21';
+                    const hriFont = emitFontId(field.hriFont || '21');
                     const hriFontSize = field.hriFontSize || 10;
                     const fontInfo = FONT_MAP[hriFont];
 
@@ -365,6 +612,20 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
                 }
                 break;
             }
+            case 'ellipse':
+            case 'polygon':
+            case 'triangle': {
+                // No native command: the shape was rasterized into a downloaded
+                // graphic above, so it is placed exactly like an image field.
+                // A polygon with fewer than 3 sides never produced one, and a
+                // field with no graphic is simply omitted rather than emitting
+                // a command that references nothing.
+                const shapeGraphicId = boxGraphicIds.get(field.id);
+                if (shapeGraphicId) {
+                    commandString = [`U${field.id}`, `o${rounded_ox},${rounded_oy}`, `f${rotationCmd}`, `c${shapeGraphicId}`].join(';');
+                }
+                break;
+            }
             case 'image': {
                 // Direct Graphics mode places the image from its own payload
                 // (emitted after the format), so it needs no format field.
@@ -385,8 +646,9 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
             commands.push(`<STX>${pendingInterpretive.shift()}<ETX>`);
         }
     });
-    
+
     commands.push(`<STX>R<ETX>`);
+    } // end of the per-format loop
 
     // Direct Graphics image straight into the printer's image bands, so they
     // belong to the print stream rather than the stored format. One <ESC>g1
@@ -412,6 +674,7 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
             if (source) {
                 if (source.type === 'variable') data = source.sampleData;
                 else if (source.type === 'counter') data = source.start.toString().padStart(source.padding, '0');
+                else data = transformed(resolveLinkedPreview(source, field.dataSource as Extract<typeof field.dataSource, { type: 'linked' }>, field.name) ?? '', field.dataSource, design);
             } else if (field.dataSource.type === 'variable') {
                 data = field.dataSource.defaultData;
             }
@@ -420,9 +683,18 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
         });
         const sortedFieldIds = variableFieldsForPrint.map(v => v.field.id).sort((a, b) => a - b);
         for (const row of batchData.rows) {
-            const dataForPrintBlock = sortedFieldIds.map(id => {
+            // Only the fields the chosen format actually defines get data.
+            // Sending <ESC>F for a field that lives in another format makes the
+            // printer substitute a blank of its own, which hides the mistake.
+            const { formatId } = formatForLabel(design, conditionalGroupIds, row, batchData);
+            const idsForFormat = sortedFieldIds.filter(id => {
+                const f = design.fields.find(field => field.id === id);
+                return f !== undefined && (formatOf(f) === 0 || formatOf(f) === formatId - 1);
+            });
+            const dataForPrintBlock = idsForFormat.map(id => {
                 const col = batchData.mappings[id];
-                const raw = col !== undefined && col >= 0 && col < row.length ? String(row[col] ?? '') : (dataByField.get(id) ?? '');
+                const cell = col !== undefined && col >= 0 && col < row.length ? String(row[col] ?? '') : undefined;
+                const raw = dataOrSuppressed(fieldById.get(id)!, cell ?? (dataByField.get(id) ?? ''), design, cell, row, batchData);
                 const field = fieldById.get(id)!;
                 const data = field.type === 'text'
                     ? sanitizePrintData(raw).replace(/\r?\n/g, '<SUB><CR>')
@@ -451,6 +723,8 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
             if (source) {
                  if (source.type === 'variable') {
                     data = source.sampleData;
+                } else if (source.type === 'table') {
+                    data = transformed(resolveLinkedPreview(source, fieldDataSource as Extract<typeof fieldDataSource, { type: 'linked' }>, field.name) ?? '', fieldDataSource, design);
                 } else if (source.type === 'counter') {
                     data = source.start.toString().padStart(source.padding, '0');
                     if (source.serial && source.step !== 0) {
@@ -466,7 +740,7 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
             // control-notation text in variable data would truncate the block
             // and hijack the job command that follows it (the batch path has
             // always sanitized; the non-batch path silently didn't).
-            data = sanitizePrintData(data);
+            data = sanitizePrintData(dataOrSuppressed(field, data, design));
 
             // The sanitizer strips <FS> too — odometer markers go on LAST.
             if (serialWrap) data = `<FS>${data}<FS>`;
@@ -478,6 +752,7 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
             dataForPrintBlock.push(`<ESC>F${field.id}<NUL>${data}`);
         });
 
+        const { formatId } = formatForLabel(design, conditionalGroupIds);
         let printCommands = `<ESC>E${formatId}<CAN>`;
         if (dataForPrintBlock.length > 0) {
             printCommands += dataForPrintBlock.join('');

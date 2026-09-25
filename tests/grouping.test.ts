@@ -233,6 +233,37 @@ describe('groupId never leaks into generated IPL', () => {
         const grouped = designOf([textField(1, { groupId: 7 }), textField(2, { groupId: 7 })]);
         expect(await generateIPL(grouped)).toBe(await generateIPL(plain));
     });
+
+    it('a group condition is the one thing that does change the stream', async () => {
+        const { generateIPL } = await import('../services/iplGenerator');
+        // A variable field, so its data travels in the print block where a
+        // text-only group's condition can blank it. Fixed text is baked into the
+        // format and has nothing there to blank.
+        const variable = (id: number, groupId?: number): TextField => ({
+            ...textField(id, groupId === undefined ? {} : { groupId }),
+            dataSource: { type: 'variable', defaultData: 'HELLO' },
+        });
+        const plain = designOf([variable(1), variable(2)]);
+        const conditional = { ...designOf([variable(1, 7), variable(2, 7)]), groupSuppress: { 7: 'IF(value, "NOTEMPTY", "", "yes", "")' } };
+        const ipl = await generateIPL(conditional);
+        expect(ipl).not.toBe(await generateIPL(plain));
+        // The fields stay defined — the format is shared — but their data is
+        // gone from the print block.
+        expect(ipl).toContain('<STX>H1;');
+        expect(ipl).not.toContain('HELLO');
+    });
+});
+
+describe('SET_GROUP_SUPPRESS', () => {
+    it('stores a condition, and an empty one removes it entirely', () => {
+        const d = designOf([textField(1, { groupId: 7 }), textField(2, { groupId: 7 })]);
+        const s = appReducer(stateOf(d), { type: 'SET_GROUP_SUPPRESS', payload: { groupId: 7, condition: 'IF(value, "EQ", "X", "yes", "")' } });
+        expect(s.history.present.groupSuppress).toEqual({ 7: 'IF(value, "EQ", "X", "yes", "")' });
+        // Cleared: the key is dropped, not stored blank, so the design matches
+        // one that never had a condition.
+        const cleared = appReducer(s, { type: 'SET_GROUP_SUPPRESS', payload: { groupId: 7, condition: '   ' } });
+        expect(cleared.history.present.groupSuppress).toBeUndefined();
+    });
 });
 
 describe('grouping interacts with session safety and lock', () => {

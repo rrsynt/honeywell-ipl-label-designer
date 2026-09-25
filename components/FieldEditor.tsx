@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Field, TextField, BarcodeField, LineField, BoxField, ImageField, HRIPlacement, FieldDataSource, Design, DateFormat, TimeFormat } from '../types';
+import type { Field, TextField, BarcodeField, LineField, BoxField, ImageField, EllipseField, PolygonField, TriangleField, HRIPlacement, FieldDataSource, Design, DateFormat, TimeFormat } from '../types';
 import { FONT_MAP, BARCODE_MAP } from '../constants';
+import { installFontFile, listInstalledFonts, type StoredFont } from '../services/fontStore';
+import { GS1_AIS, buildGs1, type Gs1Pair } from '../services/gs1';
 import { validateBarcode } from '../services/validator';
 import { notify } from '../services/uiDialogs';
 import { loadImageFileToBitmap, invertBitmap, MAX_IMAGE_DOTS } from '../services/imageField';
+import { applyTransform } from '../services/tableSource';
 
 const usePropEditor = <T,>(
     initialValue: T | 'multiple',
@@ -132,6 +135,71 @@ function getCommonValue<T, K extends keyof T>(items: T[], key: K): T[K] | 'multi
 }
 
 
+/**
+ * A linked field points at a data source. A variable or counter has exactly one
+ * value, so the source is enough; a TABLE has columns, and the field must say
+ * which one it prints. The transform is optional and the same for every source
+ * type — a bad expression is reported here, where it can be fixed, and still
+ * prints the raw value rather than failing the job.
+ */
+const LinkedSourceEditor: React.FC<{
+    dataSource: Extract<FieldDataSource, { type: 'linked' }>;
+    fieldName: string;
+    dataSources: Design['dataSources'];
+    handleUpdate: (updates: Partial<Field>) => void;
+}> = ({ dataSource, fieldName, dataSources, handleUpdate }) => {
+    const source = dataSources.find(ds => ds.id === dataSource.sourceId);
+    const isTable = source?.type === 'table';
+    const [expr, setExpr] = useState(dataSource.transform ?? '');
+    const focused = useRef(false);
+    useEffect(() => { if (!focused.current) setExpr(dataSource.transform ?? ''); }, [dataSource.transform]);
+
+    const commitExpr = () => {
+        focused.current = false;
+        const next = expr.trim();
+        if (next === (dataSource.transform ?? '')) return;
+        handleUpdate({ dataSource: { ...dataSource, transform: next || undefined } } as Partial<Field>);
+    };
+    // The design's tables, so a LOOKUP in the expression can be checked against the
+    // real columns while it is typed. Only the sources are needed for that.
+    const warning = expr.trim() === '' ? null : applyTransform(expr, '', { dataSources }).warning;
+
+    return (
+        <>
+            <PropInput label="Link to" fullWidth>
+                <select value={dataSource.sourceId} onChange={(e) => handleUpdate({ dataSource: { ...dataSource, sourceId: e.target.value, column: undefined } } as Partial<Field>)} className={inputClasses}>
+                    {dataSources.map(ds => (
+                        <option key={ds.id} value={ds.id}>{ds.name}{ds.type === 'table' ? ' (table)' : ''}</option>
+                    ))}
+                </select>
+                {dataSources.length === 0 && <p className="text-xs text-yellow-400 mt-1">No variables defined. Go to the 'Data' tab to create one.</p>}
+            </PropInput>
+            {isTable && source.type === 'table' && (
+                <PropInput label="Column" fullWidth>
+                    <select value={dataSource.column ?? ''} aria-label="Linked column"
+                        onChange={e => handleUpdate({ dataSource: { ...dataSource, column: e.target.value || undefined } } as Partial<Field>)}
+                        className={inputClasses}>
+                        <option value="">{source.columns.includes(fieldName) ? `Match field name ("${fieldName}")` : 'Choose a column…'}</option>
+                        {source.columns.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    {source.columns.length === 0 && <p className="text-xs text-yellow-400 mt-1">This table has no columns yet. Load a file in the Data tab.</p>}
+                </PropInput>
+            )}
+            <PropInput label="Transform" fullWidth>
+                <input value={expr} aria-label="Value transform" placeholder="e.g. UPPER(value)"
+                    onChange={e => setExpr(e.target.value)}
+                    onFocus={() => { focused.current = true; }}
+                    onBlur={commitExpr}
+                    onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                    className={inputClasses} />
+                {warning
+                    ? <p className="text-[10px] text-amber-400 mt-1">{warning.message}</p>
+                    : <p className="text-[10px] text-gray-500 mt-1">Optional. UPPER, LOWER, TRIM, SUBSTR, PAD, REPLACE, IF, CONCAT, LOOKUP — <span className="font-mono">value</span> is the cell.</p>}
+            </PropInput>
+        </>
+    );
+};
+
 const DataSourceEditor: React.FC<{
     fields: (TextField | BarcodeField)[];
     dataSources: Design['dataSources'];
@@ -187,14 +255,7 @@ const DataSourceEditor: React.FC<{
             </PropInput>
 
             {dataSource.type === 'linked' ? (
-                 <PropInput label="Link to" fullWidth>
-                    <select value={dataSource.sourceId} onChange={(e) => handleUpdate({dataSource: { ...dataSource, sourceId: e.target.value }} as Partial<Field>)} className={inputClasses}>
-                        {dataSources.map(ds => (
-                            <option key={ds.id} value={ds.id}>{ds.name}</option>
-                        ))}
-                    </select>
-                    {dataSources.length === 0 && <p className="text-xs text-yellow-400 mt-1">No variables defined. Go to the 'Data' tab to create one.</p>}
-                 </PropInput>
+                 <LinkedSourceEditor dataSource={dataSource} fieldName={fields.length === 1 ? fields[0].name : ''} dataSources={dataSources} handleUpdate={handleUpdate} />
             ) : dataSource.type === 'date' ? (
                 <PropInput label="Date Format" fullWidth>
                     <select value={dataSource.format} onChange={(e) => handleUpdate({dataSource: { ...dataSource, format: e.target.value as DateFormat }} as Partial<Field>)} className={inputClasses}>
@@ -238,14 +299,43 @@ const TextFieldEditor: React.FC<{ fields: TextField[]; design: Design; handleUpd
     const wMagEditor = usePropEditor(commonWMag, (val: number) => handleUpdate({ w_mag: val } as Partial<Field>));
     
     const isBitmapFont = commonFont !== 'multiple' && FONT_MAP[commonFont]?.type === 'bitmap';
-    
+
+    // Fase 3: faces the user uploaded. They are screen fonts — the printer gets
+    // the nearest resident family, and the IPL tab says how far that is off.
+    const [installed, setInstalled] = useState<StoredFont[]>([]);
+    const [fontError, setFontError] = useState<string | null>(null);
+    useEffect(() => { listInstalledFonts().then(setInstalled).catch(() => setInstalled([])); }, []);
+
+    const onFontFile = async (file: File) => {
+        setFontError(null);
+        try {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) throw new Error('Cannot measure the font in this browser.');
+            const stored = await installFontFile(file, ctx);
+            setInstalled(await listInstalledFonts());
+            handleUpdate({ font: stored.name } as Partial<Field>);
+        } catch (e) {
+            setFontError(e instanceof Error ? e.message : 'Could not read that font file.');
+        }
+    };
+
     return <>
         <DataSourceEditor fields={fields} dataSources={design.dataSources} handleUpdate={handleUpdate} />
         <PropInput label="Font" fullWidth>
             <select value={commonFont === 'multiple' ? '' : commonFont} onChange={e => handleUpdate({ font: e.target.value } as Partial<Field>)} className={inputClasses}>
                  {commonFont === 'multiple' && <option value="" disabled>Multiple Values</option>}
                  {Object.entries(FONT_MAP).map(([id, {name}]) => <option key={id} value={id}>{name}</option>)}
+                 {installed.length > 0 && <optgroup label="Uploaded (screen only)">
+                     {installed.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
+                 </optgroup>}
             </select>
+        </PropInput>
+        <PropInput label="Upload font" fullWidth>
+            <input type="file" accept=".ttf,.otf" title="Use a font from your computer. The screen shows it exactly; the printer substitutes its nearest built-in face."
+                onChange={e => { const f = e.target.files?.[0]; if (f) onFontFile(f); e.target.value = ''; }}
+                className="text-xs file:mr-2 file:rounded file:border-0 file:bg-gray-600 file:px-2 file:py-1 file:text-gray-100" />
+            {fontError && <span className="block text-xs text-red-400 mt-1">{fontError}</span>}
         </PropInput>
         {isBitmapFont ? (
             <>
@@ -266,6 +356,63 @@ const TextFieldEditor: React.FC<{ fields: TextField[]; design: Design; handleUpd
     </>
 };
 
+/**
+ * Fase 4: assemble a GS1 symbol from Application Identifiers instead of asking
+ * the user to type the parentheses by hand. Only offered for a single field
+ * whose data is fixed — a linked field's data comes from its column, and there
+ * is nothing here to write into. The built string is exactly what the encoder
+ * accepts (tests/gs1.test.ts), so "Apply" cannot produce a symbol that fails.
+ */
+const Gs1Builder: React.FC<{ field: BarcodeField; handleUpdate: (updates: Partial<Field>) => void; }> = ({ field, handleUpdate }) => {
+    const [pairs, setPairs] = useState<Gs1Pair[]>([{ ai: '01', value: '' }]);
+    const [open, setOpen] = useState(false);
+    if (!open) {
+        return (
+            <div className="col-span-2">
+                <button type="button" onClick={() => setOpen(true)} className="text-xs text-blue-400 hover:text-blue-300">Build GS1 data…</button>
+            </div>
+        );
+    }
+    const built = buildGs1(pairs.filter(p => p.value.trim() !== ''));
+    const data = field.dataSource.type === 'fixed' ? field.dataSource.data : '';
+    const apply = () => {
+        if (built.problems.length > 0 || built.data === '') return;
+        handleUpdate({ dataSource: { type: 'fixed', data: built.data } } as Partial<Field>);
+    };
+    return (
+        <div className="col-span-2 border border-gray-700 rounded-md p-2 space-y-1.5">
+            <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-gray-300">GS1 Application Identifiers</span>
+                <button type="button" onClick={() => setOpen(false)} className="text-xs text-gray-500 hover:text-gray-300">Close</button>
+            </div>
+            {pairs.map((pair, i) => (
+                <div key={i} className="flex gap-1">
+                    <select aria-label={`AI ${i + 1}`} value={pair.ai}
+                        onChange={e => setPairs(pairs.map((p, j) => j === i ? { ...p, ai: e.target.value } : p))}
+                        className={inputClasses + ' w-40 flex-shrink-0'}>
+                        {Object.entries(GS1_AIS).map(([ai, spec]) => <option key={ai} value={ai}>{ai} {spec.name}</option>)}
+                    </select>
+                    <input aria-label={`AI ${i + 1} value`} value={pair.value} placeholder="Value"
+                        onChange={e => setPairs(pairs.map((p, j) => j === i ? { ...p, value: e.target.value } : p))}
+                        className={inputClasses} />
+                    {pairs.length > 1 && (
+                        <button type="button" aria-label={`Remove AI ${i + 1}`}
+                            onClick={() => setPairs(pairs.filter((_, j) => j !== i))}
+                            className="text-gray-500 hover:text-red-400 px-1">×</button>
+                    )}
+                </div>
+            ))}
+            <button type="button" onClick={() => setPairs([...pairs, { ai: '10', value: '' }])} className="text-xs text-blue-400 hover:text-blue-300">Add AI</button>
+            {built.problems.map((p, i) => <p key={i} className="text-[10px] text-amber-400">{p.message}</p>)}
+            {built.data && <p className="text-[10px] font-mono text-gray-400 break-all">{built.data}</p>}
+            <button type="button" onClick={apply} disabled={built.problems.length > 0 || built.data === '' || built.data === data}
+                className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md">
+                {built.data === data && built.data !== '' ? 'Applied' : 'Apply to field'}
+            </button>
+        </div>
+    );
+};
+
 const BarcodeFieldEditor: React.FC<{ fields: BarcodeField[]; design: Design; handleUpdate: (updates: Partial<Field>) => void; }> = ({ fields, design, handleUpdate }) => {
     const commonSymbology = getCommonValue(fields, 'symbology');
     const commonHMag = getCommonValue(fields, 'h_mag');
@@ -283,6 +430,10 @@ const BarcodeFieldEditor: React.FC<{ fields: BarcodeField[]; design: Design; han
 
     return <>
         <DataSourceEditor fields={fields} dataSources={design.dataSources} handleUpdate={handleUpdate} />
+
+        {fields.length === 1 && fields[0].dataSource.type === 'fixed'
+            && ['6', '17', '18'].includes(fields[0].symbology)
+            && <Gs1Builder field={fields[0]} handleUpdate={handleUpdate} />}
 
         <PropInput label="Symbology" fullWidth>
             <select value={commonSymbology === 'multiple' ? '' : commonSymbology} onChange={e => handleUpdate({ symbology: e.target.value } as Partial<Field>)} className={inputClasses}>
@@ -440,6 +591,32 @@ const BoxFieldEditor: React.FC<{ fields: BoxField[]; handleUpdate: (updates: Par
     </>
 };
 
+/**
+ * Fase 3 shapes share width, height and stroke. A zero stroke fills the shape.
+ * The polygon adds a side count; below 3 there is nothing to draw, so the
+ * generator emits no graphic for it.
+ */
+const ShapeFieldEditor: React.FC<{ fields: (EllipseField | PolygonField | TriangleField)[]; handleUpdate: (updates: Partial<Field>) => void; }> = ({ fields, handleUpdate }) => {
+    const commonWidth = getCommonValue(fields, 'width');
+    const commonHeight = getCommonValue(fields, 'height');
+    const commonThickness = getCommonValue(fields, 'thickness');
+    const widthEditor = usePropEditor(commonWidth, (val: number) => handleUpdate({ width: val } as Partial<Field>));
+    const heightEditor = usePropEditor(commonHeight, (val: number) => handleUpdate({ height: val } as Partial<Field>));
+    const thicknessEditor = usePropEditor(commonThickness, (val: number) => handleUpdate({ thickness: val } as Partial<Field>));
+
+    const isPolygon = fields.every(f => f.type === 'polygon');
+    const commonSides = isPolygon ? getCommonValue(fields, 'sides') : undefined;
+    const sidesEditor = usePropEditor(commonSides, (val: number) => handleUpdate({ sides: Math.max(3, Math.min(24, Math.round(val))) } as Partial<Field>));
+
+    return <>
+        <PropInput label="Width (mm)"><input type="number" step="0.1" min="0.1" value={widthEditor.localValue} placeholder={commonWidth === 'multiple' ? 'Multiple' : ''} onChange={e => widthEditor.handleChange(e.target.value, pFloat, vMinFloat)} onFocus={widthEditor.handleFocus} onBlur={() => widthEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={widthEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Height (mm)"><input type="number" step="0.1" min="0.1" value={heightEditor.localValue} placeholder={commonHeight === 'multiple' ? 'Multiple' : ''} onChange={e => heightEditor.handleChange(e.target.value, pFloat, vMinFloat)} onFocus={heightEditor.handleFocus} onBlur={() => heightEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={heightEditor.handleKeyDown} className={inputClasses}/></PropInput>
+        <PropInput label="Stroke (mm)"><input type="number" step="0.1" min="0" value={thicknessEditor.localValue} placeholder={commonThickness === 'multiple' ? 'Multiple' : ''} onChange={e => thicknessEditor.handleChange(e.target.value, pFloat, (v, o) => Math.max(0, vOrKeep(v, o)))} onFocus={thicknessEditor.handleFocus} onBlur={() => thicknessEditor.handleBlur(pFloat, (v, o) => Math.max(0, vOrKeep(v, o)))} onKeyDown={thicknessEditor.handleKeyDown} className={inputClasses} title="0 fills the shape solid"/></PropInput>
+        {isPolygon && <PropInput label="Sides"><input type="number" step="1" min="3" max="24" value={sidesEditor.localValue} placeholder={commonSides === 'multiple' ? 'Multiple' : ''} onChange={e => sidesEditor.handleChange(e.target.value, pInt)} onFocus={sidesEditor.handleFocus} onBlur={() => sidesEditor.handleBlur(pInt)} onKeyDown={sidesEditor.handleKeyDown} className={inputClasses}/></PropInput>}
+        <p className="col-span-2 text-[11px] text-gray-500">Prints as a downloaded raster graphic — IPL has no command for this shape.</p>
+    </>
+};
+
 const ImageFieldEditor: React.FC<{ fields: ImageField[]; handleUpdate: (updates: Partial<Field>) => void; }> = ({ fields, handleUpdate }) => {
     const commonWidth = getCommonValue(fields, 'width');
     const commonHeight = getCommonValue(fields, 'height');
@@ -460,7 +637,7 @@ const ImageFieldEditor: React.FC<{ fields: ImageField[]; handleUpdate: (updates:
         if (!file) return;
         setLoading(true);
         try {
-            const bitmap = await loadImageFileToBitmap(file, MAX_IMAGE_DOTS, fields[0].threshold ?? 128, false);
+            const bitmap = await loadImageFileToBitmap(file, MAX_IMAGE_DOTS, fields[0].threshold ?? 128, fields[0].dither ?? 'threshold');
             // (maxDotsW caps the wide axis; height follows the source aspect)
             if (!bitmap.length || !bitmap[0].length) throw new Error('empty');
             // Reducer re-derives mm from the dot grid at the design's dpi.
@@ -487,9 +664,43 @@ const ImageFieldEditor: React.FC<{ fields: ImageField[]; handleUpdate: (updates:
         </div>
         <PropInput label={`Dot Grid (W×H)`}><div className="w-full text-xs p-1.5 bg-gray-900 border border-gray-600 rounded-md text-gray-400">{hasImage ? `${dotsW} × ${dotsH} dots` : 'no image loaded'}</div></PropInput>
         <PropInput label="Threshold"><input type="number" step="1" min="1" max="254" value={thresholdEditor.localValue} placeholder={commonThreshold === 'multiple' ? 'Multiple' : ''} onChange={e => thresholdEditor.handleChange(e.target.value, pInt)} onFocus={thresholdEditor.handleFocus} onBlur={() => thresholdEditor.handleBlur(pInt)} onKeyDown={thresholdEditor.handleKeyDown} className={inputClasses} title="Luminance cut-off for next import (1 dark .. 254 light)"/></PropInput>
+        <PropInput label="Dithering" fullWidth>
+            <select value={fields.length === 1 ? (fields[0].dither ?? 'threshold') : ''} onChange={e => handleUpdate({ dither: e.target.value as ImageField['dither'] } as Partial<Field>)} className={inputClasses} title="How a colour image is reduced to the 1 bit a thermal head prints. Applied on the next import.">
+                {fields.length > 1 && <option value="" disabled>Multiple Values</option>}
+                <option value="threshold">Threshold (crisp, for logos)</option>
+                <option value="floyd-steinberg">Floyd–Steinberg (for photos)</option>
+            </select>
+        </PropInput>
         <PropInput label="Width (mm)"><input type="number" step="0.1" min="0.1" value={widthEditor.localValue} placeholder={commonWidth === 'multiple' ? 'Multiple' : ''} onChange={e => widthEditor.handleChange(e.target.value, pFloat, vMinFloat)} onFocus={widthEditor.handleFocus} onBlur={() => widthEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={widthEditor.handleKeyDown} className={inputClasses} title="Resamples the bitmap to the new dot grid"/></PropInput>
         <PropInput label="Height (mm)"><input type="number" step="0.1" min="0.1" value={heightEditor.localValue} placeholder={commonHeight === 'multiple' ? 'Multiple' : ''} onChange={e => heightEditor.handleChange(e.target.value, pFloat, vMinFloat)} onFocus={heightEditor.handleFocus} onBlur={() => heightEditor.handleBlur(pFloat, vMinFloat)} onKeyDown={heightEditor.handleKeyDown} className={inputClasses} title="Resamples the bitmap to the new dot grid"/></PropInput>
     </>
+};
+
+/**
+ * Fase 4: the condition that keeps a field off a label. Committed on every
+ * keystroke, not on blur — this panel unmounts when the tab changes, and a blur
+ * that never fires has already swallowed edits once. A condition that doesn't
+ * parse is shown here and suppresses nothing, so the warning is the only signal
+ * that the rule was ignored.
+ */
+const SuppressEditor: React.FC<{
+    fields: Field[];
+    dataSources: Design['dataSources'];
+    handleUpdate: (updates: Partial<Field>) => void;
+}> = ({ fields, dataSources, handleUpdate }) => {
+    const common = getCommonValue(fields, 'suppress');
+    const warning = typeof common === 'string' && common.trim() !== '' ? applyTransform(common, '', { dataSources }).warning : null;
+    return (
+        <PropInput label="Suppress when" fullWidth>
+            <input value={common === 'multiple' ? '' : (common ?? '')} aria-label="Suppression condition"
+                placeholder={common === 'multiple' ? 'Multiple values' : 'e.g. IF(value, "EQ", "EXPORT", "yes", "")'}
+                onChange={e => handleUpdate({ suppress: e.target.value.trim() || undefined } as Partial<Field>)}
+                className={inputClasses} />
+            {warning
+                ? <p className="text-[10px] text-amber-400 mt-1">{warning.message} The field prints anyway.</p>
+                : <p className="text-[10px] text-gray-500 mt-1">Optional. Prints nothing while this is non-empty. <span className="font-mono">value</span> is what the field would print.</p>}
+        </PropInput>
+    );
 };
 
 export const FieldEditor: React.FC<{ fields: Field[]; design: Design; dispatch: React.Dispatch<any>; }> = ({ fields, design, dispatch }) => {
@@ -513,6 +724,7 @@ export const FieldEditor: React.FC<{ fields: Field[]; design: Design; dispatch: 
             <PropInput label="Name" fullWidth><input type="text" value={nameEditor.localValue} placeholder={commonName === 'multiple' ? 'Multiple Values' : ''} onChange={e => nameEditor.handleChange(e.target.value, pString)} onFocus={nameEditor.handleFocus} onBlur={() => nameEditor.handleBlur(pString)} onKeyDown={nameEditor.handleKeyDown} className={inputClasses}/></PropInput>
             <PropInput label="X (mm)"><input type="number" step="0.1" value={xEditor.localValue} placeholder={commonX === 'multiple' ? 'Multiple' : ''} onChange={e => xEditor.handleChange(e.target.value, pFloat, vOrKeep)} onFocus={xEditor.handleFocus} onBlur={() => xEditor.handleBlur(pFloat, vOrKeep)} onKeyDown={xEditor.handleKeyDown} className={inputClasses}/></PropInput>
             <PropInput label="Y (mm)"><input type="number" step="0.1" value={yEditor.localValue} placeholder={commonY === 'multiple' ? 'Multiple' : ''} onChange={e => yEditor.handleChange(e.target.value, pFloat, vOrKeep)} onFocus={yEditor.handleFocus} onBlur={() => yEditor.handleBlur(pFloat, vOrKeep)} onKeyDown={yEditor.handleKeyDown} className={inputClasses}/></PropInput>
+            <SuppressEditor fields={fields} dataSources={design.dataSources} handleUpdate={handleUpdate} />
             <PropInput label="Rotation" fullWidth>
                 <select value={commonRotation === 'multiple' ? '' : commonRotation} onChange={e => handleUpdate({ rotation: parseInt(e.target.value) as Field['rotation'] } as Partial<Field>)} className={inputClasses}>
                     {commonRotation === 'multiple' && <option value="" disabled>Multiple Values</option>}
@@ -524,6 +736,7 @@ export const FieldEditor: React.FC<{ fields: Field[]; design: Design; dispatch: 
             {commonType !== 'multiple' && commonType === 'barcode' && <BarcodeFieldEditor fields={fields as BarcodeField[]} design={design} handleUpdate={handleUpdate} />}
             {commonType !== 'multiple' && commonType === 'line' && <LineFieldEditor fields={fields as LineField[]} handleUpdate={handleUpdate} />}
             {commonType !== 'multiple' && commonType === 'box' && <BoxFieldEditor fields={fields as BoxField[]} handleUpdate={handleUpdate} />}
+            {commonType !== 'multiple' && (commonType === 'ellipse' || commonType === 'polygon' || commonType === 'triangle') && <ShapeFieldEditor fields={fields as (EllipseField | PolygonField | TriangleField)[]} handleUpdate={handleUpdate} />}
             {commonType !== 'multiple' && commonType === 'image' && <ImageFieldEditor fields={fields as ImageField[]} handleUpdate={handleUpdate} />}
             {commonType === 'multiple' && <div className="col-span-2 text-center text-xs text-gray-400 p-4 border-t border-gray-700 mt-2">Select items of the same type to edit more properties.</div>}
         </div>

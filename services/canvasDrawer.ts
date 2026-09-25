@@ -1,8 +1,10 @@
-import type { Field, Design, WorkspaceState, DragMode, TextField, BarcodeField, FieldDataSource, DataSource, LineField, BoxField, ImageField } from '../types';
+import type { Field, Design, WorkspaceState, DragMode, TextField, BarcodeField, FieldDataSource, DataSource, LineField, BoxField, ImageField, EllipseField, PolygonField, TriangleField } from '../types';
 import { getFormattedDateTime } from './dateTimeFormat';
-import { DPI_MAP, FONT_MAP, FONT_FAMILIES, BARCODE_MAP, POINTS_TO_MM, PREVIEW_SCALE, bitmapTextWidthDots } from '../constants';
+import { resolveLinkedPreview, applyTransform, fieldIsSuppressed, groupIsSuppressed } from './tableSource';
+import { DPI_MAP, FONT_MAP, FONT_FAMILIES, BARCODE_MAP, POINTS_TO_MM, PREVIEW_SCALE, bitmapTextWidthDots, UNPRINTABLE_MARGIN_MM } from '../constants';
 import { validateBarcode } from './validator';
 import { measureBarcode, paintBarcode, isBarcodeEngineReady } from './ipl/barcodes';
+import { getUploadedFontMetrics } from './ipl/fontMetrics';
 import { designerBarcodeRender } from './designerBarcode';
 
 export const HANDLE_SIZE = 8;
@@ -39,6 +41,34 @@ export const getBitmapCanvas = (rows: string[]): HTMLCanvasElement => {
     return c;
 };
 
+/**
+ * Fase 3: the outline of an ellipse, polygon or triangle, in the field's own
+ * pixel box. Shared by the screen draw and kept in step with
+ * shapeToIplGraphicData (services/iplGenerator.ts) — a vertex straight up, so a
+ * square reads as a diamond and a triangle points up. The two must agree or the
+ * screen shows a shape the printer will not produce.
+ */
+const traceShape = (ctx: CanvasRenderingContext2D, field: EllipseField | PolygonField | TriangleField, w: number, h: number): void => {
+    ctx.beginPath();
+    if (field.type === 'ellipse') {
+        ctx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    } else if (field.type === 'triangle') {
+        ctx.moveTo(w / 2, 0);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+    } else {
+        const sides = Math.max(3, Math.round(field.sides));
+        for (let i = 0; i < sides; i++) {
+            const a = -Math.PI / 2 + (i * 2 * Math.PI) / sides;
+            const px = w / 2 + (w / 2) * Math.cos(a);
+            const py = h / 2 + (h / 2) * Math.sin(a);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+    }
+};
+
 /** Resolve a FontDef family key to its shared CSS stack (constants.ts:
  * Liberation-first so the designer preview, the viewer and golden renders
  * measure the same face on every host). */
@@ -72,13 +102,9 @@ const getFieldData = (field: TextField | BarcodeField, design: Design): string =
     }
     if (dataSource.type === 'linked') {
         const source = design.dataSources.find(ds => ds.id === dataSource.sourceId);
-        if (!source) return '[unlinked]';
-        if (source.type === 'variable') {
-            return source.sampleData;
-        }
-        if (source.type === 'counter') {
-            return source.start.toString().padStart(source.padding, '0');
-        }
+        const resolved = resolveLinkedPreview(source, dataSource, field.name);
+        if (resolved === null) return '[unlinked]';
+        return dataSource.transform ? applyTransform(dataSource.transform, resolved, design).result : resolved;
     }
     return '';
 };
@@ -124,7 +150,11 @@ export const getFieldBoundingBox = (ctx: CanvasRenderingContext2D, field: Field,
                 // formula the viewer renderer and geometry.ts use (audit T1).
                 width = bitmapTextWidthDots((field as TextField).font, maxChars, (field as TextField).w_mag) * dotSizePx;
             } else { // Outline font
-                const fontFamily = fontInfo?.family || 'sans-serif';
+                // An uploaded face is stored under its own name, which FONT_MAP
+                // does not know, so it resolves to the stack it was registered
+                // under rather than to a resident family.
+                const uploaded = getUploadedFontMetrics((field as TextField).font);
+                const fontFamily = uploaded?.cssFamily || fontInfo?.family || 'sans-serif';
                 const fontSize = (field as TextField).fontSize * POINTS_TO_MM * PREVIEW_SCALE * zoom;
                 ctx.font = `normal ${fontSize}px ${cssFontStack(fontFamily)}`;
                 let maxWidth = 0;
@@ -174,6 +204,12 @@ export const getFieldBoundingBox = (ctx: CanvasRenderingContext2D, field: Field,
         case 'box':
             width = (field as BoxField).width * scale;
             height = (field as BoxField).height * scale;
+            break;
+        case 'ellipse':
+        case 'polygon':
+        case 'triangle':
+            width = (field as EllipseField).width * scale;
+            height = (field as EllipseField).height * scale;
             break;
         case 'image':
             width = (field as ImageField).width * scale;
@@ -360,6 +396,31 @@ const drawRulerGuides = (ctx: CanvasRenderingContext2D, design: Design, workspac
     ctx.restore();
 };
 
+/**
+ * Fase 3: the band along each edge the print head cannot reach, as a dashed
+ * rectangle inset from the label edge. Drawn inside the label clip, so the
+ * hatching stops at the stock. A model with no published head (Generic) has a
+ * zero inset and draws nothing.
+ */
+const drawUnprintableMargin = (ctx: CanvasRenderingContext2D, design: Design, workspace: WorkspaceState) => {
+    const insetMm = UNPRINTABLE_MARGIN_MM[design.printerSettings.model] ?? 0;
+    if (insetMm <= 0) return;
+    const { width, height, columns, rows } = design.labelSettings;
+    const scale = PREVIEW_SCALE * workspace.zoom;
+    const labelW = (width / (columns || 1)) * scale;
+    const labelH = (height / (rows || 1)) * scale;
+    const inset = insetMm * scale;
+    // A label smaller than twice the inset has no printable area left to mark.
+    if (labelW <= inset * 2 || labelH <= inset * 2) return;
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(251, 146, 60, 0.9)'; // orange-400
+    ctx.lineWidth = 1 / workspace.zoom;
+    ctx.setLineDash([4 / workspace.zoom, 3 / workspace.zoom]);
+    ctx.strokeRect(inset, inset, labelW - inset * 2, labelH - inset * 2);
+    ctx.restore();
+};
+
 export const drawElements = (
     ctx: CanvasRenderingContext2D,
     design: Design,
@@ -399,9 +460,14 @@ export const drawElements = (
     ctx.clip();
     
     drawRulerGuides(ctx, design, workspace);
+    drawUnprintableMargin(ctx, design, workspace);
     
     fields.forEach(field => {
         if (field.visible === false) return;
+        // Fase 4: a field whose suppression condition holds prints nothing, so
+        // the preview must show nothing too. The field stays selectable — the
+        // selection outline is drawn separately — so it can still be edited.
+        if (fieldIsSuppressed(field, design) || groupIsSuppressed(field.groupId, design)) return;
         
         ctx.save();
         ctx.translate(field.x * PREVIEW_SCALE * zoom, field.y * PREVIEW_SCALE * zoom);
@@ -417,7 +483,7 @@ export const drawElements = (
                 const fontInfo = FONT_MAP[field.font];
                 const isBitmap = fontInfo?.type === 'bitmap';
                 const baseHeight = isBitmap ? (fontInfo.baseHeight || 9) : 0;
-                const fontFamily = isBitmap ? 'monospace' : (fontInfo?.family || 'sans-serif');
+                const fontFamily = isBitmap ? 'monospace' : (getUploadedFontMetrics(field.font)?.cssFamily || fontInfo?.family || 'sans-serif');
                 const fontSize = isBitmap ? (baseHeight * dotSizePx * field.h_mag) : (field.fontSize * POINTS_TO_MM * PREVIEW_SCALE * zoom);
                 ctx.font = `normal ${fontSize}px ${cssFontStack(fontFamily)}`;
                 ctx.fillStyle = 'black';
@@ -574,6 +640,25 @@ export const drawElements = (
                     ctx.rect(lineWidth / 2, lineWidth / 2, boxWidth - lineWidth, boxHeight - lineWidth);
                 }
                 ctx.stroke();
+                break;
+            }
+            case 'ellipse':
+            case 'polygon':
+            case 'triangle': {
+                const scale = PREVIEW_SCALE * zoom;
+                const w = field.width * scale;
+                const h = field.height * scale;
+                const lineWidth = field.thickness * scale;
+                traceShape(ctx, field, w, h);
+                if (lineWidth <= 0) {
+                    ctx.fillStyle = 'black';
+                    ctx.fill();
+                } else {
+                    ctx.strokeStyle = 'black';
+                    ctx.lineWidth = lineWidth;
+                    ctx.lineJoin = 'miter';
+                    ctx.stroke();
+                }
                 break;
             }
             case 'image': {

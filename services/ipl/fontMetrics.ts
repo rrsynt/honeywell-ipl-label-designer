@@ -45,7 +45,46 @@ const MONO_PER_MILLE = 600;
 const SANS_DEFAULT = 524;
 const SERIF_DEFAULT = 478;
 
+/**
+ * Fase 3: a user-uploaded font. The screen renders it by its real face (the
+ * browser and the golden harness both register the bytes under `cssFamily`),
+ * but the viewer's layout math is pure and cannot call measureText, so it reads
+ * `advances` — the same per-mille-of-em table the Liberation families use.
+ * `family` is which resident IPL family it is closest to, which is what the
+ * generator actually emits; the screen and the printer therefore differ by a
+ * known amount, and that amount is reported rather than hidden.
+ */
+export interface UploadedFontMetrics {
+    /** CSS family name the face was registered under. */
+    cssFamily: string;
+    /** Nearest resident family, by average advance. */
+    family: 'sans-serif' | 'serif' | 'monospace';
+    /** Per-mille advances, ASCII 32 through 126, measured at one size. */
+    advances: number[];
+    /** Average of `advances`, used for codepoints the table does not cover. */
+    dflt: number;
+}
+
+const uploadedFonts = new Map<string, UploadedFontMetrics>();
+
+/** Register (or replace) one uploaded font's metrics. Idempotent. */
+export const registerUploadedFontMetrics = (name: string, metrics: UploadedFontMetrics): void => {
+    uploadedFonts.set(name, metrics);
+};
+
+/** Drop one, or every uploaded font. Tests reset between cases with this. */
+export const clearUploadedFontMetrics = (name?: string): void => {
+    if (name === undefined) uploadedFonts.clear();
+    else uploadedFonts.delete(name);
+};
+
+export const getUploadedFontMetrics = (name: string): UploadedFontMetrics | undefined => uploadedFonts.get(name);
+
 const tableFor = (family: string | undefined): { t: readonly number[] | null; perMille: number; dflt: number } => {
+    // An uploaded font is addressed by its own name, which is never one of the
+    // three resident families, so this lookup cannot shadow them.
+    const uploaded = family ? uploadedFonts.get(family) : undefined;
+    if (uploaded) return { t: uploaded.advances, perMille: 0, dflt: uploaded.dflt };
     if (family === 'sans-serif') return { t: SANS, perMille: 0, dflt: SANS_DEFAULT };
     if (family === 'serif') return { t: SERIF, perMille: 0, dflt: SERIF_DEFAULT };
     return { t: null, perMille: MONO_PER_MILLE, dflt: MONO_PER_MILLE };

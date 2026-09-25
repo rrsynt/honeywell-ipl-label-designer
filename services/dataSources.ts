@@ -3,13 +3,18 @@
 // editor both go through these, so id creation and list edits stay uniform
 // and unit-testable without React.
 
-import type { CounterDataSource, DataSource, Field, VariableDataSource } from '../types';
+import type { CounterDataSource, DataSource, Field, TableDataSource, VariableDataSource } from '../types';
+import { EMPTY_QUERY } from './tableSource';
 
 const makeId = (prefix: string): string =>
     `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 export const newVariable = (name: string): VariableDataSource => ({
     id: makeId('var'), type: 'variable', name, sampleData: '',
+});
+
+export const newTable = (name: string): TableDataSource => ({
+    id: makeId('tbl'), type: 'table', name, columns: [], rows: [], query: { ...EMPTY_QUERY },
 });
 
 export const newCounter = (name: string): CounterDataSource => ({

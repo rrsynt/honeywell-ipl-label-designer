@@ -1,5 +1,6 @@
-import type { Field, Design, TextField, BarcodeField, LineField, BoxField } from '../types';
+import type { Field, Design, TextField, BarcodeField, LineField, BoxField, EllipseField } from '../types';
 import { getFormattedDateTime } from './dateTimeFormat';
+import { resolveLinkedPreview, applyTransform } from './tableSource';
 import { FONT_MAP, FONT_FAMILIES, POINTS_TO_MM, DPI_MAP, bitmapTextWidthDots } from '../constants';
 import { measureBarcode, isBarcodeEngineReady } from './ipl/barcodes';
 import { designerBarcodeRender } from './designerBarcode';
@@ -29,13 +30,9 @@ const getFieldData = (field: TextField | BarcodeField, design: Design): string =
     // bounding box, and resize then divided by it (newWidth/0 = Infinity).
     if (dataSource.type === 'linked') {
         const source = design.dataSources.find(ds => ds.id === dataSource.sourceId);
-        if (!source) return '[unlinked]';
-        if (source.type === 'variable') {
-            return source.sampleData;
-        }
-        if (source.type === 'counter') {
-            return source.start.toString().padStart(source.padding, '0');
-        }
+        const resolved = resolveLinkedPreview(source, dataSource, field.name);
+        if (resolved === null) return '[unlinked]';
+        return dataSource.transform ? applyTransform(dataSource.transform, resolved, design).result : resolved;
     }
     return '';
 };
@@ -126,6 +123,12 @@ export function getObjectBoundingBox(field: Field, design: Design): { width: num
         case 'box':
             width = field.width;
             height = field.height;
+            break;
+        case 'ellipse':
+        case 'polygon':
+        case 'triangle':
+            width = (field as EllipseField).width;
+            height = (field as EllipseField).height;
             break;
         case 'image':
             width = field.width;

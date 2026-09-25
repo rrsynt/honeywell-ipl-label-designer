@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import type { Design, PrinterSettings } from '../types';
 import { parseIPL } from '../services/iplParser';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
+import { parseZPL } from '../services/zpl/zplParser';
 import { computeLabelExtent, renderLabel } from '../services/ipl/renderer';
 import { ensureBarcodesReady } from '../services/ipl/barcodes';
 import type { ViewerIssue } from '../services/ipl/types';
@@ -200,7 +201,14 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
     // once the encoder engine is up, so a stream parsed (or opened/shared)
     // before it finished loading would otherwise keep a stale, error-free
     // issue list until the user edits the text.
-    const label = useMemo(() => parseViewerIPL(debouncedCode), [debouncedCode, bwipReady]);
+    // ZPL starts with ^XA, IPL with <STX>. Detecting from the bytes means one paste
+    // box serves both languages; a stream that is neither falls through to the
+    // IPL parser, whose "no frames found" error is the more useful of the two.
+    const label = useMemo(
+        () => (/^\s*\^XA/i.test(debouncedCode) ? parseZPL(debouncedCode) : parseViewerIPL(debouncedCode)),
+        [debouncedCode, bwipReady],
+    );
+    const isZpl = useMemo(() => /^\s*\^XA/i.test(debouncedCode), [debouncedCode]);
     const totalLabels = totalLabelCount(label);
     const batch = Math.min(previewBatch, Math.max(0, totalLabels - 1));
     const previewLabel = useMemo(() => resolveLabelAtBatch(label, batch, dpi), [label, batch, dpi]);
@@ -879,7 +887,8 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                             Confirm final output on the target printer or the Honeywell simulator
                             (docs/HONEYWELL-SIMULATOR.md); results vary by firmware and DPI.
                         </p>
-                        <button onClick={handleImport} disabled={!canImport}
+                        <button onClick={handleImport} disabled={!canImport || isZpl}
+                            title={isZpl ? 'ZPL preview only — importing a design back from ZPL is not supported yet' : undefined}
                             className="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded transition-colors">
                             Import into Designer
                         </button>

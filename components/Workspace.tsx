@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react';
-import type { Design, WorkspaceState, DragMode, EditingState, Field, BoxField, TextField, BarcodeField } from '../types';
+import type { Design, WorkspaceState, DragMode, EditingState, Field, BoxField, TextField, BarcodeField, Alignment } from '../types';
 import { PREVIEW_SCALE, SNAP_THRESHOLD, FONT_MAP, POINTS_TO_MM, DPI_MAP, GRID_SPACING_MM } from '../constants';
 import { drawElements, getFieldBoundingBox, getHandleAtPos, isPointInRotatedRect } from '../services/canvasDrawer';
 import { ensureBarcodesReady } from '../services/ipl/barcodes';
@@ -423,7 +423,10 @@ export const Workspace: React.FC<{
             const newHeightMm = Math.max(1, initialBox.height + rotatedDy / scale);
             
             switch (initialField.type) {
-                case 'box': updates = { width: newWidthMm, height: newHeightMm }; break;
+                case 'box':
+                case 'ellipse':
+                case 'polygon':
+                case 'triangle': updates = { width: newWidthMm, height: newHeightMm }; break;
                 // Images move mm only while dragging (cheap); the commit
                 // re-samples the bitmap to the new dot grid once.
                 case 'image': updates = { width: newWidthMm, height: newHeightMm }; break;
@@ -652,6 +655,48 @@ export const Workspace: React.FC<{
                         X: {mouseCoords.x.toFixed(1)}mm, Y: {mouseCoords.y.toFixed(1)}mm
                     </div>
                  )}
+                 {(() => {
+                    // Fase 3: the alignment actions live in the reducer already
+                    // (and in the top bar). This puts the same actions next to
+                    // the selection they act on, so a multi-select doesn't make
+                    // the user hunt up to the header. Hidden for one field,
+                    // because alignment needs at least two.
+                    if (selectedFieldIds.length < 2) return null;
+                    const selected = design.fields.filter(f => selectedFieldIds.includes(f.id));
+                    if (selected.length < 2) return null;
+                    const box = getAxisAlignedBoundingBox(selected, design);
+                    const { zoom, pan } = workspaceState;
+                    const left = box.minX * PREVIEW_SCALE * zoom + pan.x;
+                    const top = box.minY * PREVIEW_SCALE * zoom + pan.y;
+                    const right = box.maxX * PREVIEW_SCALE * zoom + pan.x;
+                    const cx = (left + right) / 2;
+                    const unlocked = selected.filter(f => !f.locked).length;
+                    const btn = (icon: string, title: string, action: () => void, disabled = false) => (
+                        <button key={title} type="button" title={title} disabled={disabled} onMouseDown={e => e.stopPropagation()} onClick={action}
+                            className="p-1 rounded hover:bg-gray-700 disabled:opacity-30 disabled:hover:bg-transparent">
+                            <span className="material-icons text-base leading-none">{icon}</span>
+                        </button>
+                    );
+                    const align = (alignment: Alignment) => dispatch({ type: 'ALIGN_SELECTED_FIELDS', payload: { alignment } });
+                    const distribute = (axis: 'horizontal' | 'vertical') => dispatch({ type: 'DISTRIBUTE_SELECTED_FIELDS', payload: { axis } });
+                    return (
+                        <div role="toolbar" aria-label="Align selection"
+                            onMouseDown={e => e.stopPropagation()}
+                            className="absolute z-20 flex items-center gap-0.5 bg-gray-800 border border-gray-600 rounded-md shadow-lg p-0.5 text-gray-200"
+                            style={{ left: `${cx}px`, top: `${top}px`, transform: 'translate(-50%, calc(-100% - 8px))' }}>
+                            {btn('align_horizontal_left', 'Align Left', () => align('left'))}
+                            {btn('align_horizontal_center', 'Align Horizontal Center', () => align('hcenter'))}
+                            {btn('align_horizontal_right', 'Align Right', () => align('right'))}
+                            <span className="h-4 border-l border-gray-600 mx-0.5" />
+                            {btn('align_vertical_top', 'Align Top', () => align('top'))}
+                            {btn('align_vertical_center', 'Align Vertical Middle', () => align('vmiddle'))}
+                            {btn('align_vertical_bottom', 'Align Bottom', () => align('bottom'))}
+                            <span className="h-4 border-l border-gray-600 mx-0.5" />
+                            {btn('arrow_range', 'Distribute horizontally (needs 3)', () => distribute('horizontal'), unlocked < 3)}
+                            {btn('height', 'Distribute vertically (needs 3)', () => distribute('vertical'), unlocked < 3)}
+                        </div>
+                    );
+                 })()}
             </div>
         </div>
     );

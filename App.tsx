@@ -6,12 +6,15 @@ import { Workspace } from './components/Workspace';
 import { HelpModal } from './components/HelpModal';
 import { IPLViewerModal } from './components/IPLViewerModal';
 import { TemplateGallery } from './components/TemplateGallery';
+import { StartScreen } from './components/StartScreen';
 import { createDefaultDesign, type LabelTemplate } from './services/templates';
 import { DialogHost } from './components/DialogHost';
 import { requestConfirm, notify } from './services/uiDialogs';
 import { ContextMenu } from './components/ContextMenu';
 import type { ContextMenuOption } from './components/ContextMenu';
 import { getSavedDesigns, saveDesign, loadDesign, deleteDesign } from './services/designManager';
+import { getLibraryRecord, saveLibraryRecord, deleteLibraryRecord, migrateLegacyLibrary, serializeLabelFile, parseLabelFile } from './services/libraryStore';
+import { loadInstalledFonts } from './services/fontStore';
 import { getAxisAlignedBoundingBox } from './services/geometry';
 import { expandIdsWithGroups } from './services/dragMath';
 import { rebaseImage, conformImages, rederiveAllImages, placeholderImage } from './services/imageField';
@@ -46,7 +49,7 @@ const migrateDesign = (design: any): Design => {
         // Image fields carry a bitmap, not a data source — nothing to migrate
         // except the visibility/lock defaults. (Falling through would bolt a
         // bogus {type:'fixed'} dataSource onto them.)
-        if (field.type === 'image') {
+        if (field.type === 'image' || field.type === 'ellipse' || field.type === 'polygon' || field.type === 'triangle') {
             return { ...fieldRest, ...base, ...groupPatch } as Field;
         }
         if (field.dataSource && (field.dataSource.type === 'fixed' || field.dataSource.type === 'variable' || field.dataSource.type === 'linked' || field.dataSource.type === 'date' || field.dataSource.type === 'time')) {
@@ -309,6 +312,11 @@ export function appReducer(state: AppState, action: any): AppState {
             else if(type === 'barcode') newField = { ...common, type: 'barcode', dataSource: { type: 'variable', defaultData: '1234567890' }, symbology: '6', humanReadable: 'below', h_mag: 50, w_mag: 1, code39_checkDigit: 'none', code128_subset: 'auto', hriFont: '21', hriFontSize: 10 };
             else if(type === 'line') newField = { ...common, type: 'line', length: 50, thickness: 1, lineEnding: 'none' };
             else if(type === 'box') newField = { ...common, type: 'box', width: 30, height: 20, thickness: 1, cornerRadius: 0 };
+            // Fase 3 shapes. They print as downloaded rasters (no IPL command
+            // exists for them), so a new one starts with a visible stroke.
+            else if(type === 'ellipse') newField = { ...common, type: 'ellipse', width: 30, height: 20, thickness: 1 };
+            else if(type === 'polygon') newField = { ...common, type: 'polygon', width: 25, height: 25, thickness: 1, sides: 6 };
+            else if(type === 'triangle') newField = { ...common, type: 'triangle', width: 25, height: 22, thickness: 1 };
             // A checkerboard stand-in (40x40 dots ~ 5mm): the Image tool can't
             // open a file picker itself, it drops a placeholder and the user
             // picks the real file in the Properties panel.
@@ -424,6 +432,19 @@ export function appReducer(state: AppState, action: any): AppState {
             // (same invariant the delete paths enforce).
             const newPresent = { ...currentDesign, fields: pruneOrphanGroups(regrouped), nextId: newGroupId + 1 };
             return { ...state, history: { past: commitPast(past, present), present: newPresent, future: [], intermediate: null, baseline: history.baseline }, selectedFieldIds: [...poolIds] };
+        }
+        case 'SET_GROUP_SUPPRESS': {
+            // Fase 4: one condition for a whole group. An empty string removes
+            // the entry rather than storing a blank, so a cleared rule leaves
+            // the saved design identical to one that never had one. The math
+            // lives here, not in the panel: the panel only reports what was typed.
+            const { groupId, condition } = action.payload as { groupId: number; condition: string };
+            const next = { ...(currentDesign.groupSuppress ?? {}) };
+            const trimmed = condition.trim();
+            if (trimmed) next[groupId] = trimmed; else delete next[groupId];
+            const groupSuppress = Object.keys(next).length > 0 ? next : undefined;
+            const newPresent = { ...currentDesign, groupSuppress };
+            return { ...state, history: { past: commitPast(past, present), present: newPresent, future: [], intermediate: null, baseline: history.baseline } };
         }
         case 'UNGROUP_SELECTED_FIELDS': {
             // Dissolves every group touched by the selection — one member
@@ -614,6 +635,22 @@ export default function App() {
     const [showHelp, setShowHelp] = useState(false);
     const [showTemplates, setShowTemplates] = useState(false);
     const [showIplViewer, setShowIplViewer] = useState(false);
+    const [showLibrary, setShowLibrary] = useState(false);
+    // Bumped after every save/delete so an open library grid re-reads storage.
+    const [libraryRevision, setLibraryRevision] = useState(0);
+
+    // One-time move of designs saved by older builds (localStorage, ~5 MB cap)
+    // into the IndexedDB library. Once per browser; a failure here must not
+    // block the editor, the old storage is still readable.
+    useEffect(() => {
+        migrateLegacyLibrary()
+            .then(moved => { if (moved > 0) setLibraryRevision(r => r + 1); })
+            .catch(e => console.error('Design library migration failed:', e));
+        // Uploaded fonts live in IndexedDB. Re-register them so a design that
+        // uses one measures and paints it on the first render, not only after
+        // the user re-uploads the file.
+        loadInstalledFonts().catch(e => console.error('Installed fonts failed to load:', e));
+    }, []);
     // Batch P: which image export is running (null = none). The ref guards
     // re-entry synchronously (two clicks in one paint frame); the state only
     // drives the button's "…" label.
@@ -823,15 +860,31 @@ export default function App() {
             const designToSave = history.intermediate ?? history.present;
             if (state.originalDesignName && state.originalDesignName !== designToSave.name) {
                 deleteDesign(state.originalDesignName);
+                void deleteLibraryRecord(state.originalDesignName);
             }
             saveDesign(designToSave);
             dispatch({ type: 'COMMIT_INTERMEDIATE' });
             dispatch({ type: 'SET_SAVED_DESIGNS', payload: getSavedDesigns() });
             dispatch({ type: 'DESIGN_SAVED' });
+            // The IndexedDB library is the one the start screen reads. It is
+            // async, so the screen refreshes off libraryRevision rather than
+            // off the synchronous savedDesigns list above.
+            const thumbnail = captureThumbnail();
+            saveLibraryRecord(designToSave, thumbnail ? { thumbnail } : {})
+                .then(() => setLibraryRevision(r => r + 1))
+                .catch(e => notify(`Saved locally, but the design library could not store it: ${e instanceof Error ? e.message : String(e)}`));
         },
         onLoad: async (name: string) => {
             if (!(await confirmDiscard('Load design', `Load "${name}"?`))) return;
-            const design = loadDesign(name); if (design) dispatch({ type: 'SET_DESIGN', payload: { design, originalDesignName: name } });
+            // Prefer the library (it holds image-heavy designs localStorage
+            // cannot); fall back to the legacy store for anything not yet
+            // migrated.
+            const record = await getLibraryRecord(name).catch(() => null);
+            const design = record?.design ?? loadDesign(name);
+            if (design) {
+                dispatch({ type: 'SET_DESIGN', payload: { design, originalDesignName: name } });
+                setShowLibrary(false);
+            }
         },
         // Importing a design (JSON file, or IPL viewer import) replaces the
         // canvas too — guard it the same way. Returns whether it happened so
@@ -846,14 +899,18 @@ export default function App() {
         onDelete: async (name: string) => {
             if (await requestConfirm({ title: 'Delete design', message: `Are you sure you want to delete "${name}"?`, confirmLabel: 'Delete' })) {
                 deleteDesign(name);
+                await deleteLibraryRecord(name).catch(e => console.error('Library delete failed:', e));
                 const newDesigns = getSavedDesigns();
                 dispatch({ type: 'DESIGN_DELETED', payload: { deletedName: name, newSavedDesigns: newDesigns } });
+                setLibraryRevision(r => r + 1);
             }
         },
         onExport: () => {
-            const blob = new Blob([JSON.stringify(history.present, null, 2)], { type: 'application/json' });
+            // Enveloped .label.json: schema version + checksum, so an import can
+            // tell a truncated file from a merely old one (see parseLabelFile).
+            const blob = new Blob([serializeLabelFile(history.present)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = `${history.present.name}.json`;
+            const a = document.createElement('a'); a.href = url; a.download = `${history.present.name}.label.json`;
             a.click(); URL.revokeObjectURL(url);
         },
         // Batch P: image exports (PNG / PDF / ZIP of PNGs) render through the
@@ -891,6 +948,7 @@ export default function App() {
                 setExportingImage(null);
             }
         },
+        onLibrary: () => setShowLibrary(true),
         onZoomToFit: () => {
             if (!workspaceContainerRef.current) return;
             const PADDING = 50; // pixels
@@ -910,6 +968,25 @@ export default function App() {
         }
     };
     saveShortcutRef.current = appActions.onSave;
+
+    // Small PNG of the on-screen label for the library grid. Best-effort: the
+    // designer canvas is the first <canvas> in the workspace, and a failure
+    // (tainted canvas, nothing drawn yet) just means "no thumbnail".
+    const captureThumbnail = (): string | null => {
+        const source = workspaceContainerRef.current?.querySelector('canvas');
+        if (!source || source.width === 0 || source.height === 0) return null;
+        try {
+            const MAX = 320;
+            const scale = Math.min(1, MAX / Math.max(source.width, source.height));
+            const thumb = document.createElement('canvas');
+            thumb.width = Math.max(1, Math.round(source.width * scale));
+            thumb.height = Math.max(1, Math.round(source.height * scale));
+            const ctx = thumb.getContext('2d');
+            if (!ctx) return null;
+            ctx.drawImage(source, 0, 0, thumb.width, thumb.height);
+            return thumb.toDataURL('image/png');
+        } catch { return null; }
+    };
     
      const handleContextMenu = (e: React.MouseEvent, clickedField: Field | null) => {
         e.preventDefault();
@@ -958,7 +1035,8 @@ export default function App() {
               savedDesigns={savedDesigns}
               dispatch={dispatch}
               onNew={appActions.onNew}
-              onTemplates={appActions.onTemplates} 
+              onTemplates={appActions.onTemplates}
+              onLibrary={appActions.onLibrary} 
               onSave={appActions.onSave} 
               onLoad={appActions.onLoad} 
               onDelete={appActions.onDelete}
@@ -1009,6 +1087,13 @@ export default function App() {
             <DialogHost />
             {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
             {showTemplates && <TemplateGallery onClose={() => setShowTemplates(false)} onPick={t => void appActions.onPickTemplate(t)} />}
+            {showLibrary && <StartScreen
+                revision={libraryRevision}
+                onClose={() => setShowLibrary(false)}
+                onNew={() => { setShowLibrary(false); void appActions.onNew(); }}
+                onTemplates={() => { setShowLibrary(false); setShowTemplates(true); }}
+                onOpen={name => void appActions.onLoad(name)}
+            />}
             {showIplViewer && <IPLViewerModal onClose={() => setShowIplViewer(false)} onImportDesign={appActions.onImportDesign} />}
         </div>
     );

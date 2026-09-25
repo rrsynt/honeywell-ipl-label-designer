@@ -2,15 +2,22 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { Design, Field, DataSource } from '../types';
 import { FieldEditor } from './FieldEditor';
 import { CodePanel } from './CodePanel';
-import { PRINTER_MODELS } from '../constants';
-import { generateIPL } from '../services/iplGenerator';
+import { PRINTER_MODELS, UNPRINTABLE_MARGIN_MM } from '../constants';
+import { generateIPL, fontSubstitutions, suppressionWarnings, type FontSubstitution } from '../services/iplGenerator';
+import { generateZPL } from '../services/zpl/zplGenerator';
 import { parseCsv, exportableVariableFields, planCsvJob, MAX_JOB_ROWS, decodeCsvText, MAX_CSV_FILE_BYTES } from '../services/csvJob';
 import { CsvRowPreview } from './CsvRowPreview';
 import { sendIplViaBridge } from '../services/bridgeSend';
 import { getPrinterTarget } from '../services/printerTarget';
 import { sanitizeBaseName } from '../services/zipStore';
-import { newCounter, newVariable, linkedFieldIds, nextSourceName, parseClampedInt } from '../services/dataSources';
+import { newCounter, newTable, newVariable, linkedFieldIds, nextSourceName, parseClampedInt } from '../services/dataSources';
+import { planDesignTableJob, applyQuery, applyTransform, applyLinkedTransforms } from '../services/tableSource';
+import { readWorkbook, sheetToTable } from '../services/xlsxImport';
+import type { WorkbookSheet } from '../services/xlsxImport';
+import type { TableDataSource, DataQuery } from '../types';
 import { requestConfirm, notify } from '../services/uiDialogs';
+import { listSharedSources, saveSharedSource, importSharedSource, deleteSharedSource } from '../services/libraryStore';
+import type { SourceSummary } from '../services/libraryStore';
 
 const PropInput: React.FC<{ label: string; children: React.ReactNode; fullWidth?: boolean }> = ({ label, children, fullWidth }) => (
     <div className={fullWidth ? 'col-span-2' : ''}>
@@ -219,6 +226,14 @@ const PrinterSettingsEditor: React.FC<{ settings: Design['printerSettings']; dis
 
     return (
         <div className="grid grid-cols-2 gap-3">
+            <PropInput label="Printer Language" fullWidth>
+                <select value={settings.language ?? 'ipl'} aria-label="Printer language"
+                    onChange={e => handleUpdate({ language: e.target.value as 'ipl' | 'zpl' })}
+                    className={inputClasses} title="Language the Code panel and the download button emit. The canvas does not change.">
+                    <option value="ipl">IPL (Honeywell)</option>
+                    <option value="zpl">ZPL (Zebra)</option>
+                </select>
+            </PropInput>
             <PropInput label="Printer Model" fullWidth>
                 <select value={settings.model} onChange={handleModelChange} className={inputClasses} title="Select target printer model">
                     {Object.keys(PRINTER_MODELS).map(model => <option key={model} value={model}>{model}</option>)}
@@ -261,6 +276,11 @@ const PrinterSettingsEditor: React.FC<{ settings: Design['printerSettings']; dis
                     <option value="g1">Direct Graphics (ASCII hex, paste-safe)</option>
                 </select>
             </PropInput>
+            {(UNPRINTABLE_MARGIN_MM[settings.model] ?? 0) > 0 && (
+                <p className="col-span-2 text-xs text-orange-300/80" title="Honeywell publishes no per-model figure for this, so it is a conservative warning, not a measured limit">
+                    Unprintable margin: {UNPRINTABLE_MARGIN_MM[settings.model]} mm per edge — shown as the dashed orange guide on the canvas.
+                </p>
+            )}
         </div>
     );
 };
@@ -286,6 +306,39 @@ const DataSourcePanel: React.FC<{
 
     const handleAddVariable = () => addSource(newVariable(nextSourceName('Variable', dataSources)));
     const handleAddCounter = () => addSource(newCounter(nextSourceName('Counter', dataSources)));
+    const handleAddTable = () => addSource(newTable(nextSourceName('Table', dataSources)));
+
+    // The shared library is read on demand, not watched: it only changes when
+    // this panel writes to it, and each write bumps `sharedTick` to re-read.
+    const [shared, setShared] = useState<SourceSummary[] | null>(null);
+    const [sharedTick, setSharedTick] = useState(0);
+    const [sharedOpen, setSharedOpen] = useState(false);
+    useEffect(() => {
+        if (!sharedOpen) return;
+        let alive = true;
+        listSharedSources().then(list => { if (alive) setShared(list); }).catch(() => { if (alive) setShared([]); });
+        return () => { alive = false; };
+    }, [sharedOpen, sharedTick]);
+
+    const handleSaveShared = async (source: DataSource) => {
+        try {
+            await saveSharedSource(source.name, source);
+            setSharedOpen(true);
+            setSharedTick(t => t + 1);
+            notify(`"${source.name}" saved to the shared library.`, 'info');
+        } catch (e) {
+            notify(`Could not save: ${e instanceof Error ? e.message : String(e)}`);
+        }
+    };
+
+    const handleImportShared = async (name: string) => {
+        // The id has to be fresh: a copy that kept the stored id would collide
+        // with a source this design already holds.
+        const copy = await importSharedSource(name, `imp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
+        if (!copy) { notify(`"${name}" is no longer in the library.`); setSharedTick(t => t + 1); return; }
+        copy.name = nextSourceName(copy.name, dataSources);
+        addSource(copy);
+    };
 
     const handleDelete = async (source: DataSource) => {
         const linked = linkedFieldIds(fields, source.id);
@@ -303,15 +356,17 @@ const DataSourcePanel: React.FC<{
             <div className="flex gap-2 mb-3">
                 <button onClick={handleAddVariable} className="flex-1 px-2 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-md" title="Add a variable data source">+ Variable</button>
                 <button onClick={handleAddCounter} className="flex-1 px-2 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-md" title="Add a counter data source">+ Counter</button>
+                <button onClick={handleAddTable} className="flex-1 px-2 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-md" title="Add a table of rows stored in the design">+ Table</button>
             </div>
             {dataSources.length === 0 && (
                 <p className="text-xs text-gray-600 italic">None yet — add one above, then set a field's Data Source to "Linked to Variable".</p>
             )}
             <div className="space-y-3">
                 {dataSources.map(source => (
-                    <DataSourceRow key={source.id} source={source} fieldCount={linkedFieldIds(fields, source.id).length} onChange={s => updateSource(s)} onDelete={() => handleDelete(source)} />
+                    <DataSourceRow key={source.id} source={source} fieldCount={linkedFieldIds(fields, source.id).length} onChange={s => updateSource(s)} onDelete={() => handleDelete(source)} onSaveShared={() => handleSaveShared(source)} />
                 ))}
             </div>
+            <SharedLibrary shared={shared} onOpen={() => setSharedOpen(true)} onImport={handleImportShared} onDelete={async name => { await deleteSharedSource(name); setSharedTick(t => t + 1); }} />
             <CsvJobExporter design={design} csv={jobCsv} setCsv={setJobCsv} />
         </div>
     );
@@ -335,7 +390,21 @@ const CsvJobExporter: React.FC<{ design: Design; csv: string; setCsv: (v: string
     // re-parsing on every unrelated RightPanel render would lock the
     // main thread for hundreds of ms. Memoize on the inputs that matter.
     const table = useMemo(() => parseCsv(csv), [csv]);
-    const plan = useMemo(() => (table.rows.length > 0 ? planCsvJob(design, table) : null), [design, table]);
+    const csvPlan = useMemo(() => (table.rows.length > 0 ? planCsvJob(design, table) : null), [design, table]);
+    // A pasted CSV wins: it is the explicit "print THIS" and must not be silently
+    // replaced by a table stored in the design. Transforms apply to it too, so a
+    // field prints the same string whichever route produced the job.
+    // No pasted CSV → print the design's own table sources. `empty` names a table
+    // whose query matched nothing, which must be said out loud: a filter typo
+    // would otherwise look exactly like "no data loaded".
+    const tableJob = useMemo(() => (csv.trim() === '' ? planDesignTableJob(design) : null), [design, csv]);
+    const plan = useMemo(() => {
+        if (csvPlan) {
+            const { batch } = applyLinkedTransforms(design, exportable, csvPlan.batch);
+            return batch === csvPlan.batch ? csvPlan : { ...csvPlan, batch };
+        }
+        return tableJob?.plan ?? null;
+    }, [design, exportable, csvPlan, tableJob]);
     const unmapped = exportable.length - (plan?.mapped ?? 0);
 
     // Batch H: load a CSV from disk. decodeCsvText handles Excel's
@@ -464,6 +533,22 @@ const CsvJobExporter: React.FC<{ design: Design; csv: string; setCsv: (v: string
                     >
                         <span className="material-icons text-sm">upload_file</span>Load CSV file
                     </button>
+                    {csv.trim() === '' && tableJob && (tableJob.plan || tableJob.empty.length > 0) && (
+                        <div className="text-[11px] mt-1 space-y-0.5">
+                            {tableJob.plan ? (
+                                <div className="text-gray-300">
+                                    From the design's tables: {tableJob.plan.batch.rows.length} row{tableJob.plan.batch.rows.length === 1 ? '' : 's'} · {tableJob.plan.mapped}/{exportable.length} fields mapped
+                                    {unmapped > 0 && <span className="text-amber-400"> · {unmapped} use defaults</span>}
+                                    {tableJob.plan.truncated && <span className="text-amber-400"> · truncated to {MAX_JOB_ROWS}</span>}
+                                </div>
+                            ) : (
+                                <span className="text-gray-500">The design's tables map to no field — name a field after a column, or pick the column in the field's Link.</span>
+                            )}
+                            {tableJob.empty.map(name => (
+                                <div key={name} className="text-amber-400">"{name}" matches no rows — nothing from it will print.</div>
+                            ))}
+                        </div>
+                    )}
                     {csv.trim() !== '' && (
                         <div className="text-[11px] mt-1 space-y-0.5">
                             {table.headers.length === 0 ? (
@@ -511,12 +596,252 @@ const CsvJobExporter: React.FC<{ design: Design; csv: string; setCsv: (v: string
     );
 };
 
+/**
+ * Editor for a table data source: load rows from CSV or .xlsx, then choose
+ * which of them print. The query is part of the source, so it is saved with
+ * the design. Only the first few rows are shown — the rest still print.
+ */
+const TableSourceEditor: React.FC<{
+    source: TableDataSource;
+    onChange: (updated: DataSource) => void;
+}> = ({ source, onChange }) => {
+    const fileRef = useRef<HTMLInputElement>(null);
+    const [sheets, setSheets] = useState<WorkbookSheet[] | null>(null);
+    const [sheet, setSheet] = useState('');
+    const [headerRow, setHeaderRow] = useState('1');
+    const [error, setError] = useState<string | null>(null);
+
+    const loadCsv = async (file: File) => {
+        if (file.size > MAX_CSV_FILE_BYTES) { setError(`File exceeds ${MAX_CSV_FILE_BYTES / 1024 / 1024} MB.`); return; }
+        const text = decodeCsvText(new Uint8Array(await file.arrayBuffer()));
+        const parsed = parseCsv(text);
+        if (parsed.headers.length === 0) { setError('No header row found.'); return; }
+        setError(null);
+        setSheets(null);
+        onChange({ ...source, columns: parsed.headers, rows: parsed.rows.map(r => {
+            const rec: Record<string, string> = {};
+            parsed.headers.forEach((h, i) => { rec[h] = r[i] ?? ''; });
+            return rec;
+        }) });
+    };
+
+    const loadXlsx = async (file: File) => {
+        if (file.size > MAX_CSV_FILE_BYTES) { setError(`File exceeds ${MAX_CSV_FILE_BYTES / 1024 / 1024} MB.`); return; }
+        try {
+            const found = readWorkbook(new Uint8Array(await file.arrayBuffer()));
+            if (found.length === 0) { setError('Workbook has no sheets.'); return; }
+            setError(null);
+            setSheets(found);
+            setSheet(found[0].name);
+            setHeaderRow('1');
+        } catch (e) {
+            setError(`Could not read workbook: ${e instanceof Error ? e.message : String(e)}`);
+        }
+    };
+
+    const applySheet = () => {
+        if (!sheets) return;
+        const table = sheetToTable(sheets, { sheet, headerRow: parseClampedInt(headerRow, 1, 1, 100000) });
+        if (!table) { setError('That header row is empty or past the end of the sheet.'); return; }
+        setError(null);
+        onChange({ ...source, columns: table.columns, rows: table.rows });
+    };
+
+    const onFile = (file: File) => {
+        const name = file.name.toLowerCase();
+        if (name.endsWith('.xlsx') || name.endsWith('.xls')) void loadXlsx(file);
+        else void loadCsv(file);
+    };
+
+    const setQuery = (patch: Partial<DataQuery>) => onChange({ ...source, query: { ...source.query, ...patch } });
+    const shown = source.rows.slice(0, 5);
+
+    // A hand-typed table. Columns are comma-separated so the panel stays one
+    // line wide; the row editor reuses them. Both commit on change — this
+    // editor unmounts when the tab switches, and a blur-only commit would lose
+    // the last keystroke.
+    const [draftCols, setDraftCols] = useState('');
+    const [draftRow, setDraftRow] = useState<Record<string, string>>({});
+    const defineColumns = () => {
+        const columns = draftCols.split(',').map(c => c.trim()).filter((c, i, all) => c !== '' && all.indexOf(c) === i);
+        if (columns.length === 0) { setError('Name at least one column.'); return; }
+        setError(null);
+        setDraftCols('');
+        onChange({ ...source, columns, rows: [], query: { ...source.query, filters: [], sortColumn: undefined } });
+    };
+    const addRow = () => {
+        if (source.columns.every(c => (draftRow[c] ?? '').trim() === '')) return;
+        const rec: Record<string, string> = {};
+        source.columns.forEach(c => { rec[c] = draftRow[c] ?? ''; });
+        setDraftRow({});
+        onChange({ ...source, rows: [...source.rows, rec] });
+    };
+
+    return (
+        <div className="space-y-1.5">
+            <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,text/csv" className="hidden" aria-hidden="true" tabIndex={-1}
+                onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} />
+            <button onClick={() => fileRef.current?.click()}
+                className="w-full px-2 py-1 text-xs font-semibold bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-md flex items-center justify-center gap-1"
+                title="Load rows from a .csv or .xlsx file. The rows are stored in the design; the file is not.">
+                <span className="material-icons text-sm">upload_file</span>Load CSV or Excel
+            </button>
+            {sheets && (
+                <div className="flex items-end gap-1">
+                    <label className="text-[10px] text-gray-500 flex-1">Sheet
+                        <select value={sheet} onChange={e => setSheet(e.target.value)} className={inputClasses} aria-label="Sheet">
+                            {sheets.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+                        </select>
+                    </label>
+                    <label className="text-[10px] text-gray-500 w-16">Header row
+                        <input value={headerRow} onChange={e => setHeaderRow(e.target.value)} className={inputClasses} aria-label="Header row" />
+                    </label>
+                    <button onClick={applySheet} className="px-2 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-md">Use</button>
+                </div>
+            )}
+            {error && <p className="text-[10px] text-red-400">{error}</p>}
+            {source.columns.length === 0 && (
+                <div className="flex items-center gap-1">
+                    <input value={draftCols} aria-label="Column names" placeholder="Columns, comma separated"
+                        onChange={e => setDraftCols(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') defineColumns(); }}
+                        className={inputClasses + ' flex-1'} />
+                    <button onClick={defineColumns} className="px-2 py-1.5 text-xs font-semibold bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-md">Set</button>
+                </div>
+            )}
+            {source.columns.length > 0 && (
+                <>
+                    <div className="overflow-x-auto">
+                        <table className="text-[10px] font-mono text-gray-300 border-collapse">
+                            <thead><tr>{source.columns.map(c => <th key={c} className="text-left font-semibold text-gray-400 pr-2 border-b border-gray-700">{c}</th>)}</tr></thead>
+                            <tbody>
+                                {shown.map((r, i) => <tr key={i}>{source.columns.map(c => <td key={c} className="pr-2 truncate max-w-[6rem]">{r[c] ?? ''}</td>)}</tr>)}
+                            </tbody>
+                        </table>
+                        {source.rows.length > shown.length && <p className="text-[10px] text-gray-500">+ {source.rows.length - shown.length} more rows</p>}
+                    </div>
+                    <div className="flex items-center gap-1">
+                        {source.columns.map(c => (
+                            <input key={c} value={draftRow[c] ?? ''} aria-label={`New row ${c}`} placeholder={c}
+                                onChange={e => setDraftRow(prev => ({ ...prev, [c]: e.target.value }))}
+                                onKeyDown={e => { if (e.key === 'Enter') addRow(); }}
+                                className={inputClasses + ' flex-1 min-w-0'} />
+                        ))}
+                        <button onClick={addRow} aria-label="Add row" title="Add this row"
+                            className="px-2 py-1.5 text-xs font-semibold bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-md">+</button>
+                    </div>
+                    <QueryEditor source={source} setQuery={setQuery} />
+                </>
+            )}
+        </div>
+    );
+};
+
+/** Filter / sort / range over a table source. One clause only — the data
+ *  model holds a list, but the panel is 240px wide and most label jobs
+ *  filter on a single column. */
+const QueryEditor: React.FC<{
+    source: TableDataSource;
+    setQuery: (patch: Partial<DataQuery>) => void;
+}> = ({ source, setQuery }) => {
+    const q = source.query;
+    const clause = q.filters[0];
+    const setClause = (column: string, op: DataQuery['filters'][number]['op'], value: string) =>
+        setQuery({ filters: column ? [{ column, op, value }] : [] });
+    // Counted here, not via planTableJob: that returns null when no field maps
+    // yet, and the row count is exactly what the user is tuning the filter for.
+    const matchedRows = applyQuery({ columns: source.columns, rows: source.rows }, q).rows.length;
+
+    return (
+        <div className="space-y-1 border-t border-gray-700 pt-1.5">
+            <div className="flex items-center gap-1">
+                <select value={clause?.column ?? ''} aria-label="Filter column"
+                    onChange={e => setClause(e.target.value, clause?.op ?? 'eq', clause?.value ?? '')}
+                    className={inputClasses + ' flex-1'}>
+                    <option value="">No filter</option>
+                    {source.columns.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <select value={clause?.op ?? 'eq'} aria-label="Filter operator" disabled={!clause}
+                    onChange={e => clause && setClause(clause.column, e.target.value as DataQuery['filters'][number]['op'], clause.value)}
+                    className={inputClasses + ' w-24'}>
+                    <option value="eq">equals</option>
+                    <option value="neq">not equal</option>
+                    <option value="empty">is empty</option>
+                    <option value="notEmpty">has value</option>
+                </select>
+            </div>
+            {clause && clause.op !== 'empty' && clause.op !== 'notEmpty' && (
+                <input value={clause.value} aria-label="Filter value" placeholder="value"
+                    onChange={e => setClause(clause.column, clause.op, e.target.value)}
+                    className={inputClasses} />
+            )}
+            <div className="flex items-center gap-1">
+                <select value={q.sortColumn ?? ''} aria-label="Sort column"
+                    onChange={e => setQuery({ sortColumn: e.target.value || undefined })}
+                    className={inputClasses + ' flex-1'}>
+                    <option value="">No sorting</option>
+                    {source.columns.map(c => <option key={c} value={c}>Sort by {c}</option>)}
+                </select>
+                <select value={q.sortDir ?? 'asc'} aria-label="Sort direction" disabled={!q.sortColumn}
+                    onChange={e => setQuery({ sortDir: e.target.value as 'asc' | 'desc' })}
+                    className={inputClasses + ' w-20'}>
+                    <option value="asc">A → Z</option>
+                    <option value="desc">Z → A</option>
+                </select>
+            </div>
+            <div className="flex items-center gap-1 text-[10px] text-gray-500">
+                <span>Rows</span>
+                <input value={q.fromRow ?? ''} aria-label="From row" placeholder="1"
+                    onChange={e => setQuery({ fromRow: e.target.value.trim() === '' ? undefined : parseClampedInt(e.target.value, 1, 1, 1000000) })}
+                    className={inputClasses + ' w-14'} />
+                <span>to</span>
+                <input value={q.toRow ?? ''} aria-label="To row" placeholder="end"
+                    onChange={e => setQuery({ toRow: e.target.value.trim() === '' ? undefined : parseClampedInt(e.target.value, 1, 1, 1000000) })}
+                    className={inputClasses + ' w-14'} />
+                <span className={matchedRows === 0 ? 'text-amber-400' : 'text-gray-400'}>{matchedRows} match{matchedRows === 1 ? '' : 'es'}</span>
+            </div>
+        </div>
+    );
+};
+
+/**
+ * Sources saved for reuse in other designs. Collapsed until opened — the list
+ * is a network read on first open, and most sessions never need it.
+ */
+const SharedLibrary: React.FC<{
+    shared: SourceSummary[] | null;
+    onOpen: () => void;
+    onImport: (name: string) => void;
+    onDelete: (name: string) => void;
+}> = ({ shared, onOpen, onImport, onDelete }) => (
+    <div className="mt-3 pt-3 border-t border-gray-700">
+        {shared === null ? (
+            <button onClick={onOpen} className="w-full px-2 py-1 text-xs font-semibold bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-md">Shared library…</button>
+        ) : shared.length === 0 ? (
+            <p className="text-[10px] text-gray-500">Nothing saved for reuse yet. Use the bookmark on a data source to add one.</p>
+        ) : (
+            <div className="space-y-1">
+                <p className="text-[10px] uppercase font-bold text-gray-500">Shared library</p>
+                {shared.map(s => (
+                    <div key={s.name} className="flex items-center gap-1 text-xs">
+                        <span className="text-gray-300 truncate flex-1" title={`${s.type}: ${s.detail}`}>{s.name}</span>
+                        <span className="text-[10px] text-gray-500">{s.detail}</span>
+                        <button onClick={() => onImport(s.name)} className="px-1.5 py-0.5 text-[10px] font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded" title="Add a copy to this design">Use</button>
+                        <button onClick={() => onDelete(s.name)} aria-label={`Remove ${s.name} from the library`} className="px-1 text-[10px] text-red-400 hover:text-red-300">✕</button>
+                    </div>
+                ))}
+            </div>
+        )}
+    </div>
+);
+
 const DataSourceRow: React.FC<{
     source: DataSource;
     fieldCount: number;
     onChange: (updated: DataSource) => void;
     onDelete: () => void;
-}> = ({ source, fieldCount, onChange, onDelete }) => {
+    onSaveShared: () => void;
+}> = ({ source, fieldCount, onChange, onDelete, onSaveShared }) => {
     // Local text mirrors so typing doesn't dispatch per keystroke (each commit
     // is one undo step). The prop→mirror resync skips whichever input is
     // focused: committing field A re-renders with a new `source` object, and
@@ -576,7 +901,14 @@ const DataSourceRow: React.FC<{
 
     const preview = source.type === 'variable'
         ? (source.sampleData || '(empty)')
-        : String(source.start).padStart(source.padding, '0');
+        : source.type === 'counter'
+            ? String(source.start).padStart(source.padding, '0')
+            : (() => {
+                const matched = applyQuery({ columns: source.columns, rows: source.rows }, source.query).rows.length;
+                return matched === source.rows.length
+                    ? `${source.rows.length} row${source.rows.length === 1 ? '' : 's'}`
+                    : `${matched} of ${source.rows.length} rows`;
+            })();
     const startOverflows = source.type === 'counter'
         && String(source.start).length > source.padding;
 
@@ -586,6 +918,9 @@ const DataSourceRow: React.FC<{
                 <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-gray-700 text-gray-300" title={source.id}>{source.type}</span>
                 <input value={name} onChange={e => setName(e.target.value)} {...focusHandlers('name', commitName)} onKeyDown={enterToCommit}
                     className={inputClasses + ' flex-1'} placeholder="Name" aria-label="Data source name" />
+                <button onClick={onSaveShared} className="px-1 py-0.5 text-gray-400 hover:text-blue-300" title="Save a copy to the shared library, so other designs can reuse it" aria-label={`Share ${source.name}`}>
+                    <span className="material-icons text-sm">bookmark_add</span>
+                </button>
                 <button onClick={onDelete} className="px-1.5 py-0.5 text-xs text-red-400 hover:text-red-300 border border-red-900 rounded hover:bg-red-900/30" title="Delete this data source" aria-label={`Delete ${source.name}`}>✕</button>
             </div>
             {source.type === 'variable' ? (
@@ -594,6 +929,8 @@ const DataSourceRow: React.FC<{
                     <input value={sample} onChange={e => setSample(e.target.value)} {...focusHandlers('sample', commitSample)} onKeyDown={enterToCommit}
                         className={inputClasses + ' flex-1'} placeholder="sample value" aria-label="Sample data" />
                 </div>
+            ) : source.type === 'table' ? (
+                <TableSourceEditor source={source} onChange={onChange} />
             ) : (
                 <>
                     <div className="grid grid-cols-3 gap-2">
@@ -624,6 +961,9 @@ const DataSourceRow: React.FC<{
 export const RightPanel: React.FC<{ activeDesign: Design; selectedFieldIds: number[]; dispatch: React.Dispatch<any>; }> = ({ activeDesign, selectedFieldIds, dispatch }) => {
     const [activeTab, setActiveTab] = useState('properties');
     const [iplCode, setIplCode] = useState('');
+    const [zplWarnings, setZplWarnings] = useState<string[]>([]);
+    const [fontWarnings, setFontWarnings] = useState<FontSubstitution[]>([]);
+    const [suppressWarnings, setSuppressWarnings] = useState<string[]>([]);
     // Lives here (not in CsvJobExporter) so pasted CSV survives tab switches.
     const [jobCsv, setJobCsv] = useState('');
     // ...but a DIFFERENT design must not inherit the old design's table:
@@ -633,7 +973,22 @@ export const RightPanel: React.FC<{ activeDesign: Design; selectedFieldIds: numb
     
     useEffect(() => {
         if (activeTab === 'code') {
-            generateIPL(activeDesign).then(setIplCode);
+            // ZPL is synchronous and lossy: fields it cannot represent come back as
+            // warnings, shown alongside the code so a missing barcode is announced
+            // rather than discovered at the printer. IPL stays the default.
+            if (activeDesign.printerSettings.language === 'zpl') {
+                const { zpl, warnings } = generateZPL(activeDesign);
+                setIplCode(zpl);
+                setZplWarnings(warnings);
+            } else {
+                setZplWarnings([]);
+                generateIPL(activeDesign).then(setIplCode);
+            }
+            // Uploaded fonts have no printer equivalent, so the stream
+            // substitutes a resident face. Say so next to the code rather than
+            // letting the width difference pass unnoticed.
+            setFontWarnings(fontSubstitutions(activeDesign));
+            setSuppressWarnings(suppressionWarnings(activeDesign));
         }
     }, [activeTab, activeDesign]);
 
@@ -675,7 +1030,7 @@ export const RightPanel: React.FC<{ activeDesign: Design; selectedFieldIds: numb
                 {activeTab === 'properties' && renderProperties()}
                 {activeTab === 'printer' && <PrinterSettingsEditor settings={activeDesign.printerSettings} dispatch={dispatch} />}
                 {activeTab === 'data' && renderDataSources()}
-                {activeTab === 'code' && <CodePanel iplCode={iplCode} />}
+                {activeTab === 'code' && <CodePanel iplCode={iplCode} fontWarnings={fontWarnings} suppressionWarnings={suppressWarnings} zplWarnings={zplWarnings} />}
             </div>
         </aside>
     );

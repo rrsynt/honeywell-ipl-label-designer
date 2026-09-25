@@ -1,7 +1,7 @@
 import type { ContextMenuOption } from './components/ContextMenu';
 
 // --- TYPE DEFINITIONS ---
-export type FieldType = 'text' | 'barcode' | 'line' | 'box' | 'image';
+export type FieldType = 'text' | 'barcode' | 'line' | 'box' | 'image' | 'ellipse' | 'polygon' | 'triangle';
 export type DragMode = 'move' | 'rotate' | 'resize-br' | 'pan' | 'marquee' | 'drag-guide-h' | 'drag-guide-v' | null;
 export type HRIPlacement = 'none' | 'below' | 'above';
 export type Alignment = 'left' | 'hcenter' | 'right' | 'top' | 'vmiddle' | 'bottom';
@@ -24,7 +24,24 @@ export type FieldDataSource =
   | { type: 'variable'; defaultData: string }
   | { type: 'date'; format: DateFormat }
   | { type: 'time'; format: TimeFormat }
-  | { type: 'linked'; sourceId: string };
+  | {
+      type: 'linked';
+      sourceId: string;
+      /**
+       * Fase 2: which COLUMN of a table source this field prints. Absent for
+       * variable/counter links (they have one value). A table link without it
+       * falls back to the field's own name as the column, then to nothing —
+       * so old designs, which never set it, behave exactly as before.
+       */
+      column?: string;
+      /**
+       * Fase 2: transform applied to the linked value before it prints, e.g.
+       * `UPPER(SUBSTR(value, 1, 3))`. Parsed by services/tableSource.ts; an
+       * expression that doesn't parse prints the raw value and warns, so a
+       * typo can never blank a label. Absent = print verbatim.
+       */
+      transform?: string;
+    };
 
 
 interface BaseField {
@@ -43,6 +60,14 @@ interface BaseField {
      *  is dropped (not set to undefined) on ungroup so saved JSON stays
      *  clean. Ignored by the IPL generator — groups are not a print concept. */
     groupId?: number;
+    /**
+     * Fase 4: don't print this field when the condition holds. Written in the
+     * same small language as a linked field's transform, but it must end in a
+     * true/false: `IF(value, "EQ", "EXPORT", "yes", "")`. A condition that
+     * doesn't parse never suppresses — a typo prints the field, it doesn't
+     * silently drop it. Absent = always print.
+     */
+    suppress?: string;
 }
 
 export interface TextField extends BaseField {
@@ -108,6 +133,36 @@ export interface BoxField extends BaseField {
     cornerRadius?: number; // in mm
 }
 
+/**
+ * Fase 3 shapes. IPL has no ellipse, polygon or triangle command, so none of
+ * these is emitted as one: the generator rasterizes the shape at the printer's
+ * dpi and downloads it as a stored graphic (the same G/U path a rounded box
+ * already takes), and the parser reads that graphic back as an image field.
+ * The shape therefore survives a generate→parse round trip as its bitmap, and
+ * the printer never sees a command it does not have.
+ */
+interface ShapeBase extends BaseField {
+    width: number; // mm
+    height: number; // mm
+    /** Stroke width in mm. 0 paints the shape solid. */
+    thickness: number;
+}
+
+export interface EllipseField extends ShapeBase {
+    type: 'ellipse';
+}
+
+export interface PolygonField extends ShapeBase {
+    type: 'polygon';
+    /** Vertices, at least 3. Fewer than 3 cannot be drawn, so the generator
+     *  emits nothing for it rather than a degenerate graphic. */
+    sides: number;
+}
+
+export interface TriangleField extends ShapeBase {
+    type: 'triangle';
+}
+
 export interface ImageField extends BaseField {
     type: 'image';
     /** Monochrome bitmap: one string per row, top row first; '1' = ink,
@@ -119,9 +174,17 @@ export interface ImageField extends BaseField {
     /** 1-254; pixels whose blended-on-white luminance is below it become ink.
      *  Kept on the field so the threshold survives design reloads. */
     threshold: number;
+    /**
+     * Fase 3: how a colour image becomes the 1-bit bitmap a thermal head can
+     * print. 'threshold' cuts on luminance; 'floyd-steinberg' spreads the
+     * rounding error to neighbouring pixels, which keeps a photograph's tones
+     * instead of posterizing them. Absent means 'threshold' — every image field
+     * saved before this existed must keep converting exactly as it did.
+     */
+    dither?: 'threshold' | 'floyd-steinberg';
 }
 
-export type Field = TextField | BarcodeField | LineField | BoxField | ImageField;
+export type Field = TextField | BarcodeField | LineField | BoxField | ImageField | EllipseField | PolygonField | TriangleField;
 
 export interface LabelSettings {
     width: number; // in mm
@@ -147,6 +210,12 @@ export interface PrinterSettings {
      * off by default: saved designs predate it and must keep generating G/U.
      */
     directGraphics?: boolean;
+    /**
+     * Fase 5: which printer language the Code panel and the download button emit.
+     * Absent means IPL — every design saved before ZPL existed must keep
+     * producing IPL, and the canvas is unaffected either way.
+     */
+    language?: 'ipl' | 'zpl';
 }
 
 export interface DataSourceBase {
@@ -157,6 +226,34 @@ export interface VariableDataSource extends DataSourceBase {
     type: 'variable';
     sampleData: string;
 }
+/**
+ * Fase 2: which rows of a table source print. Saved ON the data source, not
+ * in component state, so "rows 10-50 where Status = OK" survives a reload.
+ * `fromRow`/`toRow` are 1-based and inclusive over the filtered rows.
+ */
+export interface DataQuery {
+    filters: { column: string; op: 'eq' | 'neq' | 'empty' | 'notEmpty'; value: string }[];
+    /** Ignored when filters is empty. */
+    combine: 'and' | 'or';
+    sortColumn?: string;
+    sortDir?: 'asc' | 'desc';
+    fromRow?: number;
+    toRow?: number;
+}
+
+/**
+ * A whole table of rows stored inside the design (BarTender's "embedded
+ * database", minus the database). Rows are keyed by column name so a renamed
+ * column is an explicit edit, not a silent shift. Imported from CSV or .xlsx;
+ * the file itself is NOT kept, only the rows.
+ */
+export interface TableDataSource extends DataSourceBase {
+    type: 'table';
+    columns: string[];
+    rows: Record<string, string>[];
+    query: DataQuery;
+}
+
 export interface CounterDataSource extends DataSourceBase {
     type: 'counter';
     start: number;
@@ -173,7 +270,7 @@ export interface CounterDataSource extends DataSourceBase {
      */
     serial?: boolean;
 }
-export type DataSource = VariableDataSource | CounterDataSource;
+export type DataSource = VariableDataSource | CounterDataSource | TableDataSource;
 
 
 export interface Design {
@@ -187,6 +284,16 @@ export interface Design {
         horizontal: number[]; // y-positions in mm
         vertical: number[];   // x-positions in mm
     };
+    /**
+     * Fase 4: one suppression condition per group, keyed by groupId. Every
+     * member of the group is hidden on a record where the condition holds, so
+     * one design can carry several label variants (domestic vs export) without
+     * a second layout. Written in the same language as a field's `suppress`,
+     * and judged the same way: a condition that doesn't parse hides nothing.
+     * Absent groups are always shown. Groups are otherwise a designer concept
+     * the generator ignores — this is the one exception.
+     */
+    groupSuppress?: { [groupId: number]: string };
 }
 
 export interface WorkspaceState {

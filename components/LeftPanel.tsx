@@ -2,6 +2,13 @@
 
 import React, { useState } from 'react';
 import type { Field, Design } from '../types';
+import { applyTransform } from '../services/tableSource';
+
+/** One icon per field type, so a layer row says what it is without its name. */
+const FIELD_TYPE_ICON: Record<Field['type'], string> = {
+    text: 'title', barcode: 'qr_code_2', box: 'check_box_outline_blank', line: 'horizontal_rule',
+    image: 'image', ellipse: 'radio_button_unchecked', polygon: 'hexagon', triangle: 'change_history',
+};
 
 const LayerButton: React.FC<{ icon: string; onClick: (e: React.MouseEvent) => void; tooltip: string; }> = ({ icon, onClick, tooltip }) => (
     <button onClick={onClick} title={tooltip} className="p-1 rounded-full hover:bg-gray-600">
@@ -85,6 +92,9 @@ export const LeftPanel: React.FC<{ activeDesign: Design; selectedFieldIds: numbe
           <ToolbarButton icon="check_box_outline_blank" label="Box" title="Add Box" onClick={() => dispatch({ type: 'ADD_FIELD', payload: { type: 'box' } })} colorClass="text-red-400" />
           <ToolbarButton icon="horizontal_rule" label="Line" title="Add Line" onClick={() => dispatch({ type: 'ADD_FIELD', payload: { type: 'line' } })} colorClass="text-yellow-400" />
           <ToolbarButton icon="image" label="Image" title="Add Image (pick a file in Properties)" onClick={() => dispatch({ type: 'ADD_FIELD', payload: { type: 'image' } })} colorClass="text-purple-400" />
+          <ToolbarButton icon="radio_button_unchecked" label="Ellipse" title="Add Ellipse (prints as a raster graphic)" onClick={() => dispatch({ type: 'ADD_FIELD', payload: { type: 'ellipse' } })} colorClass="text-pink-400" />
+          <ToolbarButton icon="hexagon" label="Polygon" title="Add Polygon (prints as a raster graphic)" onClick={() => dispatch({ type: 'ADD_FIELD', payload: { type: 'polygon' } })} colorClass="text-pink-400" />
+          <ToolbarButton icon="change_history" label="Triangle" title="Add Triangle (prints as a raster graphic)" onClick={() => dispatch({ type: 'ADD_FIELD', payload: { type: 'triangle' } })} colorClass="text-pink-400" />
         </div>
       </div>
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -100,13 +110,39 @@ export const LeftPanel: React.FC<{ activeDesign: Design; selectedFieldIds: numbe
             .filter(f => f.groupId !== undefined)
             .sort((a, b) => a.id - b.id)
             .forEach(f => { if (!groupOrdinals.has(f.groupId as number)) groupOrdinals.set(f.groupId as number, groupOrdinals.size + 1); });
+          // Fase 4: one condition per group, edited once. Rendered above the
+          // group's first member in this (reversed) list, which is its topmost
+          // layer. Committed on change — this panel unmounts on a tab switch
+          // and a blur-only input loses its edit.
+          const seenGroups = new Set<number>();
           return [...activeDesign.fields].reverse().map(field => {
             const isDragged = dragState.draggedId === field.id;
             const isOver = dragState.overId === field.id;
 
+            const groupHeader = field.groupId !== undefined && !seenGroups.has(field.groupId);
+            if (field.groupId !== undefined) seenGroups.add(field.groupId);
+            const groupCondition = field.groupId !== undefined ? (activeDesign.groupSuppress?.[field.groupId] ?? '') : '';
+            // A condition that doesn't parse hides nothing, so the only way to learn
+            // it was ignored is to be told. LOOKUP needs the design's tables to be
+            // checked, which is why the warning is computed against them.
+            const groupWarning = groupCondition.trim() !== '' ? applyTransform(groupCondition, '', activeDesign).warning : null;
             return (
+              <React.Fragment key={field.id}>
+              {groupHeader && (
+                <div className="px-2 pt-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold px-1 py-px rounded bg-indigo-500/30 text-indigo-300 flex-shrink-0">G{groupOrdinals.get(field.groupId as number)}</span>
+                    <input value={groupCondition} aria-label={`Suppression for group G${groupOrdinals.get(field.groupId as number)}`}
+                      placeholder="Suppress group when…"
+                      title="Hides every member of this group while the condition holds. e.g. IF(value, &quot;EQ&quot;, &quot;EXPORT&quot;, &quot;yes&quot;, &quot;&quot;)"
+                      onChange={e => dispatch({ type: 'SET_GROUP_SUPPRESS', payload: { groupId: field.groupId, condition: e.target.value } })}
+                      onMouseDown={e => e.stopPropagation()}
+                      className="flex-1 min-w-0 text-xs p-1 border border-gray-600 bg-gray-700 rounded-md outline-none focus:border-blue-500" />
+                  </div>
+                  {groupWarning && <p className="text-[10px] text-amber-400 mt-0.5 pl-7">{groupWarning.message} The group prints anyway.</p>}
+                </div>
+              )}
               <div
-                key={field.id}
                 draggable={!field.locked}
                 onDragStart={!field.locked ? (e) => handleDragStart(e, field.id) : undefined}
                 onDragOver={!field.locked ? (e) => handleDragOver(e, field.id) : undefined}
@@ -123,12 +159,17 @@ export const LeftPanel: React.FC<{ activeDesign: Design; selectedFieldIds: numbe
                 {isOver && !isDragged && dragState.dropPosition === 'bottom' && <div className="absolute bottom-0 left-1 right-1 h-0.5 bg-blue-400 rounded-full z-10" />}
                 
                 <div onClick={(e) => { if (!field.locked) dispatch({ type: 'SELECT_FIELD', payload: { id: field.id, shiftKey: e.shiftKey } }) }} title={field.groupId !== undefined ? `Select layer: ${field.name} (in group G${groupOrdinals.get(field.groupId)}) — selects the whole group` : `Select layer: ${field.name}`} className="flex items-center gap-1.5 flex-1 min-w-0">
+                  <span className="material-icons text-sm text-gray-400 flex-shrink-0" aria-hidden="true">{FIELD_TYPE_ICON[field.type]}</span>
                   {field.groupId !== undefined && <span className="text-[10px] font-bold px-1 py-px rounded bg-indigo-500/30 text-indigo-300 flex-shrink-0" title={`Part of group G${groupOrdinals.get(field.groupId)}`}>G{groupOrdinals.get(field.groupId)}</span>}
                   <span className="text-sm truncate">{field.name}</span>
                 </div>
                 <div className="flex items-center opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                   <LayerButton 
-                        icon={field.visible === false ? 'visibility_off' : 'visibility'} 
+                   {selectedFieldIds.includes(field.id) && <>
+                       <LayerButton icon="flip_to_front" onClick={(e) => { e.stopPropagation(); dispatch({ type: 'BRING_TO_FRONT' }) }} tooltip="Bring to front"/>
+                       <LayerButton icon="flip_to_back" onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SEND_TO_BACK' }) }} tooltip="Send to back"/>
+                   </>}
+                   <LayerButton
+                        icon={field.visible === false ? 'visibility_off' : 'visibility'}
                         onClick={(e) => { e.stopPropagation(); dispatch({ type: 'TOGGLE_FIELD_VISIBILITY', payload: { id: field.id } })}}
                         tooltip={field.visible === false ? 'Show Layer' : 'Hide Layer'}
                     />
@@ -139,6 +180,7 @@ export const LeftPanel: React.FC<{ activeDesign: Design; selectedFieldIds: numbe
                     />
                 </div>
               </div>
+              </React.Fragment>
             );
           });
           })()}
