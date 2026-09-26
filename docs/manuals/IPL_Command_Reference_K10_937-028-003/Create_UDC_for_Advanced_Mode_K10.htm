@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html xmlns:MadCap="http://www.madcapsoftware.com/Schemas/MadCap.xsd" lang="en-us" xml:lang="en-us" data-mc-search-type="Stem" data-mc-help-system-file-name="Default.xml" data-mc-path-to-help-system="../../" data-mc-target-type="WebHelp2" data-mc-runtime-file-type="Topic" data-mc-preload-images="false" data-mc-in-preview-mode="false" data-mc-medium="non-print" data-mc-toc-path="How to Work with Fonts and Graphics|How to Create User-Defined Characters and Fonts">
+    <!-- saved from url=(0016)http://localhost -->
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" /><title>Creating User-Defined Font Characters for Advanced Mode</title>
+        <link href="../Resources/TableStyles/TableBasic.css" rel="stylesheet" />
+        <link href="../../Skins/Default/Stylesheets/Slideshow.css" rel="stylesheet" />
+        <link href="../../Skins/Default/Stylesheets/TextEffects.css" rel="stylesheet" />
+        <link href="../../Skins/Default/Stylesheets/Topic.css" rel="stylesheet" />
+        <link href="../Resources/Stylesheets/ITCOnlineHelp.css" rel="stylesheet" />
+        <script src="../../Resources/Scripts/custom.modernizr.js">
+        </script>
+        <script src="../../Resources/Scripts/jquery.min.js">
+        </script>
+        <script src="../../Resources/Scripts/foundation.min.js">
+        </script>
+        <script src="../../Resources/Scripts/plugins.min.js">
+        </script>
+        <script src="../../Resources/Scripts/require.min.js">
+        </script>
+        <script src="../../Resources/Scripts/require.config.js">
+        </script>
+        <script src="../../Resources/Scripts/MadCapAll.js">
+        </script>
+    </head>
+    <body>
+        <h2 style="background-color: Transparent;" xmlns="http://www.w3.org/1999/xhtml">Create User-Defined Font Characters for Advanced Mode</h2>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">Creating user-defined font characters for Advanced mode is almost identical to the procedure for creating user-defined characters. You need to define the format for each ASCII character you want to use. For help, see <a href="Create_User_Defined_Characters_for_Advanced_Mode.htm">Creating User-Defined Characters for Advanced Mode</a>.</p>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">Additionally, when you write the command strings that define the ASCII characters for the font, you need to include syntax for these commands:</p>
+        <ul xmlns="http://www.w3.org/1999/xhtml">
+            <li class="p-BulletList" value="1"><a href="../Bitmap_User_Defined_Font_Clear_or_Define.htm">Bitmap User-Defined Font, Clear or Define command</a>: This command creates a new font and font number. Syntax is T<span style="font-style: italic;">n</span>, where <span style="font-style: italic;">n</span> is the font number.</li>
+            <li class="p-BulletList" value="2"><a href="../Bitmap_Cell_Width_for_Graphic_or_UDF_Define.htm">Bitmap Cell Width for Graphic or UDF, Define command</a>: This command defines the width for all cells that contain a character from this font. Syntax is x<span style="font-style: italic;">n</span>, where <span style="font-style: italic;">n</span> is the cell width in dots.</li>
+            <li class="p-BulletList" value="3"><a href="../Bitmap_Cell_Height_for_Graphic_or_UDF_Define.htm">Bitmap Cell Height for Graphic or UDF, Define command</a>: This command defines the height for all cells that contain a character from this font. Syntax is y<span style="font-style: italic;">n</span>, where <span style="font-style: italic;">n</span> is the cell height in dots.</li>
+            <li class="p-BulletList" value="4"><a href="../User_Defined_Font_Character_Create.htm">User-Defined Font Character, Create command</a>: This command creates the new character. Syntax is t<span style="font-style: italic;">n</span>, where <span style="font-style: italic;">n</span> is the decimal equivalent of the corresponding ASCII character. For help, see the <a href="../Appendix/Full_ASCII_Table.htm">Full ASCII Table</a>. You need to add this syntax for each new character in your user-defined font.</li>
+            <li class="p-BulletList" value="5"><a href="../Intercharacter_Space_for_UDF_Define.htm">Intercharacter Space for UDF, Define command</a>: This command defines the amount of space added to the default intercharacter gap length for a bitmap font. Syntax is z<span style="font-style: italic;">n</span>, where <span style="font-style: italic;">n</span> is the number of dots to add to the default spacing of 2.</li>
+        </ul>
+        <h3 xmlns="http://www.w3.org/1999/xhtml">To create a user-defined font character for Advanced mode</h3>
+        <ol xmlns="http://www.w3.org/1999/xhtml">
+            <li value="1">Draw the graphic on graph paper. This procedure uses this graphic as an example:</li>
+        </ol>
+        <p class="ListItemImage" xmlns="">
+            <img src="../Resources/Images/ipl_031_2_125x163.png" style="border: none;float: none;border-style: none;border-style: none;width: 125;height: 163;" border="0" alt="" xmlns="http://www.w3.org/1999/xhtml" />
+        </p>
+        <ol start="2" xmlns="http://www.w3.org/1999/xhtml">
+            <li value="2">Convert each of the squares to either a one or a zero, where the blank boxes are zeros and the filled-in boxes are ones.</li>
+            <li value="3">Starting from the top row, divide each vertical column into groups of six digits. If the bottom group has less than six digits, add zeros to this group until it also has six.</li>
+        </ol>
+        <p class="ListItemImage" xmlns="">The six digits in each group are the six bits that you download in a byte of data. The top digit of each group is bit 0, the bottom digit is bit 5.</p>
+        <ol start="4" xmlns="http://www.w3.org/1999/xhtml">
+            <li value="4">To complete the bit, add ones in the bit 6 position, and then add zeros in the bit 7 position so that each group now has eight digits.</li>
+            <li value="5">Starting with the first group of 8 bits in the first column, reverse the order of each group so that bit 0 is now last and bit 7 is first. One way to see this quickly is to imagine rotating each group 90° clockwise.</li>
+        </ol>
+        <p class="ListItemImage" xmlns="">Reading from left to right, each line is now made up of three eight-digit groups, and each group represents an ASCII character in binary form.</p>
+        <ol start="6" xmlns="http://www.w3.org/1999/xhtml">
+            <li value="6">Translate each line into a string of three ASCII characters. For a list of ASCII characters and binary equivalents, see the <a href="../Appendix/Full_ASCII_Table.htm" xmlns="http://www.w3.org/1999/xhtml">Full ASCII Table</a>.</li>
+        </ol>
+        <p class="CodeSingleLineIndented" xmlns="http://www.w3.org/1999/xhtml">&lt;STX&gt;&lt;ESC&gt;C&lt;ETX&gt;<br />   &lt;STX&gt;&lt;ESC&gt;P&lt;ETX&gt;</p>
+        <ol start="7" xmlns="http://www.w3.org/1999/xhtml">
+            <li value="7">Write a command string to create a user-defined font:</li>
+        </ol>
+        <p class="CodeSingleLineIndented" xmlns="http://www.w3.org/1999/xhtml">&lt;STX&gt;T3,FONT3&lt;ETX&gt;</p>
+        <ol start="8" xmlns="http://www.w3.org/1999/xhtml">
+            <li value="8">Write a command string that defines the width and height for cells that contain characters in this font. For this example, the width and height are defined as 10 and 14 dots respectively:</li>
+        </ol>
+        <p class="CodeSingleLineIndented" xmlns="http://www.w3.org/1999/xhtml">&lt;STX&gt;x10;y14&lt;ETX&gt;</p>
+        <ol start="9" xmlns="http://www.w3.org/1999/xhtml">
+            <li value="9">Write a command string that creates the specific ASCII character and defines the width of that character. For this example, the user-defined graphic corresponds to the $ symbol (ASCII character 36) and has a width of 12 dots:</li>
+        </ol>
+        <p class="CodeSingleLineIndented" xmlns="http://www.w3.org/1999/xhtml">&lt;STX&gt;t36;z12&lt;ETX&gt;</p>
+        <ol start="10" xmlns="http://www.w3.org/1999/xhtml">
+            <li value="10">Add command strings for the character format you created earlier. Place the ASCII start of text character at the beginning of each line, followed by the <a href="../Graphic_or_UDC_Define.htm" xmlns="http://www.w3.org/1999/xhtml">Graphic or UDC, Define command</a> syntax (u). Number each line from 0 to 14, and then add the ASCII end of text character to the end of the line:</li>
+        </ol>
+        <p class="CodeSingleLineIndented" xmlns="http://www.w3.org/1999/xhtml">&lt;STX&gt;u0,|q@;&lt;ETX&gt;<br />   &lt;STX&gt;u1,~sA;&lt;ETX&gt;<br />   &lt;STX&gt;u2,FcA;&lt;ETX&gt;<br />   &lt;STX&gt;u3,FcA;&lt;ETX&gt;<br />   &lt;STX&gt;u4,&lt;DEL&gt;&lt;DEL&gt;C;&lt;ETX&gt;<br />   &lt;STX&gt;u5,&lt;DEL&gt;&lt;DEL&gt;C;&lt;ETX&gt;<br />   &lt;STX&gt;u6,FcA;&lt;ETX&gt;<br />   &lt;STX&gt;u7,FcA;&lt;ETX&gt;<br />   &lt;STX&gt;u8,N&lt;DEL&gt;A;&lt;ETX&gt;<br />   &lt;STX&gt;u9,L~@;&lt;ETX&gt;</p>
+        <ol start="11" xmlns="http://www.w3.org/1999/xhtml">
+            <li xmlns="http://www.w3.org/1999/xhtml" value="11">Repeat steps 4 and 5 for each character in your user-defined font. You must create and download all characters in a user-defined font at the same time. If you try to add other user-defined characters to an already existing user-defined font, you erase previously created characters.</li>
+            <li xmlns="http://www.w3.org/1999/xhtml" value="12">Write a command string to place the printer in Print mode:</li>
+        </ol>
+        <p class="CodeSingleLineIndented" xmlns="http://www.w3.org/1999/xhtml">&lt;STX&gt;R&lt;ETX&gt;</p>
+        <ol start="13" xmlns="http://www.w3.org/1999/xhtml">
+            <li xmlns="http://www.w3.org/1999/xhtml" value="13">Save the text file and send it to the printer.</li>
+        </ol>
+        <p class="ListItemImage" xmlns="http://www.w3.org/1999/xhtml">The user-defined font can now be used in a bar code label. You can specify the user-defined font for a human-readable or interpretive field. Characters in data you specify for those fields are mapped to the user-defined font.</p>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">This table lists the complete command string set for the user-defined font in this example.</p>
+        <table style="border-spacing: 0px;border-spacing: 0px;mc-table-style: url('../Resources/TableStyles/TableBasic.css');" cellspacing="0" xmlns="http://www.w3.org/1999/xhtml" class="TableStyle-TableBasic">
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <thead xmlns="">
+                <tr class="Head-Header1">
+                    <th class="HeadE-Column1-Header1">Commands</th>
+                    <th class="HeadD-Column1-Header1">Definitions</th>
+                </tr>
+            </thead>
+            <tbody xmlns="">
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;border-left-style: none;" class="BodyE-Column1-Body1">&lt;STX&gt;&lt;ESC&gt;C&lt;ETX&gt;</td>
+                    <td style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;" class="BodyD-Column1-Body1">Selects Advanced mode.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;border-left-style: none;" class="BodyE-Column1-Body1">&lt;ESC&gt;P;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;" class="BodyD-Column1-Body1">Enters Program mode.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&lt;STX&gt;T3,FONT3&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyD-Column1-Body1">Create bitmap font 3.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyE-Column1-Body1">&lt;STX&gt;x10;y14;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyD-Column1-Body1">Define cell width (10) and cell height (14).</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&lt;STX&gt;t36;Z12;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyD-Column1-Body1">Create ASCII character 36 ($), define character width as 12.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyE-Column1-Body1">&lt;STX&gt;u0,|q@;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyD-Column1-Body1">Defines column 0.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&lt;STX&gt;u1,~sA;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyD-Column1-Body1">Defines column 1.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyE-Column1-Body1">&lt;STX&gt;u2,FcA;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyD-Column1-Body1">Defines column 2.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&lt;STX&gt;u3,FcA;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyD-Column1-Body1">Defines column 3.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyE-Column1-Body1">&lt;STX&gt;u4,&lt;DEL&gt;&lt;DEL&gt;C;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyD-Column1-Body1">Defines column 4.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&lt;STX&gt;u5,&lt;DEL&gt;&lt;DEL&gt;C;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyD-Column1-Body1">Defines column 5.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyE-Column1-Body1">&lt;STX&gt;u6,FcA;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyD-Column1-Body1">Defines column 6.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&lt;STX&gt;u7,FcA;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyD-Column1-Body1">Defines column 7.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyE-Column1-Body1">&lt;STX&gt;u8,N&lt;DEL&gt;A;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyD-Column1-Body1">Defines column 8.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&lt;STX&gt;u9,L~@;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyD-Column1-Body1">Defines column 9.</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyB-Column1-Body1">&lt;STX&gt;R;&lt;ETX&gt;</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyA-Column1-Body1">Saves and exits to Print mode.</td>
+                </tr>
+            </tbody>
+        </table>
+        <p class="Footer">IPL Command Reference Manual, P/N 937-028-003<br />© 2012–2014 Intermec by Honeywell. All rights reserved.<br />Send feedback about this manual to <a href="mailto:TechnicalCommunications@intermec.com?subject=Feedback on IPL Command Reference Manual">TechnicalCommunications@intermec.com</a>.</p>
+    </body>
+</html>

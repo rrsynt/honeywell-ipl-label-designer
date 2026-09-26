@@ -1,0 +1,33 @@
+<xpml><page quantity='0' pitch='50.0 mm'></xpml>'Seagull:2.1:DP
+INPUT OFF
+VERBOFF
+INPUT ON
+SYSVAR(48) = 0
+SYSVAR(35)=0
+OPEN "tmp:setup.sys" FOR OUTPUT AS #1
+PRINT#1,"Printing,Media,Print Area,Media Margin (X),0"
+PRINT#1,"Printing,Print Quality,Darkness,66"
+PRINT#1,"Printing,Print Quality,Contrast,+0%"
+PRINT#1,"Printing,Print Quality,Print Speed,200"
+PRINT#1,"Printing,Media,Clip Default,On"
+CLOSE #1
+SETUP "tmp:setup.sys"
+KILL "tmp:setup.sys"
+<xpml></page></xpml><xpml><page quantity='1' pitch='50.0 mm'></xpml>CLL
+OPTIMIZE "BATCH" ON
+PP48,208:AN7
+NASC 8
+FT "Univers Condensed Bold",12,0,99
+PT "PT. HM. Sampoerna"
+PP48,168:FT "Univers Condensed Bold",12,0,99
+PT "10003051-0"
+PP48,136:FT "Univers Condensed Bold",12,0,99
+PT "Mettler Toledo Hawk"
+PP48,97:FT "Univers Condensed Bold",12,0,99
+PT "Mettler Toledo Machine"
+PP48,328:BARSET "CODE128C",2,1,2,102
+PB "3066«BIU«C7805804112«B,IU«C7815804210"
+LAYOUT RUN ""
+PF
+PRINT KEY OFF
+<xpml></page></xpml><xpml><end/></xpml>

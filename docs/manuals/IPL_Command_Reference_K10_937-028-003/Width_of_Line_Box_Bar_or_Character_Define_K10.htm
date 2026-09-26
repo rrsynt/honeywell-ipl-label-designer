@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html xmlns:MadCap="http://www.madcapsoftware.com/Schemas/MadCap.xsd" lang="en-us" xml:lang="en-us" data-mc-search-type="Stem" data-mc-help-system-file-name="Default.xml" data-mc-path-to-help-system="../" data-mc-target-type="WebHelp2" data-mc-runtime-file-type="Topic" data-mc-preload-images="false" data-mc-in-preview-mode="false" data-mc-medium="non-print" data-mc-toc-path="Command Formats and Syntax|Program Mode Commands|User-Defined Character Field Editing Commands">
+    <!-- saved from url=(0016)http://localhost -->
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" /><title>Width of Line, Box, Bar, or Character, Define</title>
+        <link href="Resources/TableStyles/TableBasic.css" rel="stylesheet" />
+        <link href="../Skins/Default/Stylesheets/Slideshow.css" rel="stylesheet" />
+        <link href="../Skins/Default/Stylesheets/TextEffects.css" rel="stylesheet" />
+        <link href="../Skins/Default/Stylesheets/Topic.css" rel="stylesheet" />
+        <link href="Resources/Stylesheets/ITCOnlineHelp.css" rel="stylesheet" />
+        <script src="../Resources/Scripts/custom.modernizr.js">
+        </script>
+        <script src="../Resources/Scripts/jquery.min.js">
+        </script>
+        <script src="../Resources/Scripts/foundation.min.js">
+        </script>
+        <script src="../Resources/Scripts/plugins.min.js">
+        </script>
+        <script src="../Resources/Scripts/require.min.js">
+        </script>
+        <script src="../Resources/Scripts/require.config.js">
+        </script>
+        <script src="../Resources/Scripts/MadCapAll.js">
+        </script>
+    </head>
+    <body>
+        <h2>Width of Line, Box, Bar, or Character, Define</h2>
+        <h3>Purpose</h3>
+        <p class="BodyText">Defines the width magnification of a line, box, bar code, 
+ or character. Defines the character width magnification for human-readable fields, graphics, and the POSTNET symbology.</p>
+        <h3 class="BodyText">Supported Printers</h3>
+        <p class="BodyText">All</p>
+        <h3>Syntax</h3>
+        <p class="BodyText">w<i>n</i></p>
+        <h3>Parameters</h3>
+        <p class="BodyText"><i>n</i>
+        </p>
+        <p class="ListItemImage">Width magnification (in dots) of a line, box, bar code, 
+ or character. Character width magnification for human-readable fields, graphics, and the POSTNET symbology.</p>
+        <p class="ListItemImage">Values for <i>n</i>:</p>
+        <table xmlns="http://www.w3.org/1999/xhtml" style="mc-table-style: url('Resources/TableStyles/TableBasic.css');" class="TableStyle-TableBasic" cellspacing="0">
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <thead xmlns="">
+                <tr class="Head-Header1">
+                    <th class="HeadE-Column1-Header1" xmlns="http://www.w3.org/1999/xhtml">Field Type</th>
+                    <th class="HeadE-Column1-Header1">Range</th>
+                    <th class="HeadD-Column1-Header1">Default</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">Line </td>
+                    <td class="BodyE-Column1-Body1">1 to 9999 dots</td>
+                    <td class="BodyD-Column1-Body1" xmlns="">1</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">Box </td>
+                    <td class="BodyE-Column1-Body1">1 to 9999 dots</td>
+                    <td class="BodyD-Column1-Body1" xmlns="">1</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">Bar code </td>
+                    <td class="BodyE-Column1-Body1">1 to 99 dots</td>
+                    <td class="BodyD-Column1-Body1" xmlns="">1</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">Character</td>
+                    <td class="BodyE-Column1-Body1">1 to 999 dots</td>
+                    <td class="BodyD-Column1-Body1" xmlns="">2</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">Graphics</td>
+                    <td class="BodyE-Column1-Body1">1 to 250</td>
+                    <td class="BodyD-Column1-Body1" xmlns="">1</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">Human-readable </td>
+                    <td class="BodyE-Column1-Body1">1 to 250</td>
+                    <td class="BodyD-Column1-Body1" xmlns="">2</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyB-Column1-Body1">POSTNET</td>
+                    <td class="BodyB-Column1-Body1">1 to 250</td>
+                    <td class="BodyA-Column1-Body1" xmlns="">2</td>
+                </tr>
+            </tbody>
+        </table>
+        <h3>Notes</h3>
+        <p class="BodyText">For Aztec, DataMatrix, and QR Code bar codes, the default value for <i>n</i> is 3.</p>
+        <p class="BodyText">In <a href="Advanced_Mode_Select.htm">Advanced mode</a>, a dot is:</p>
+        <ul>
+            <li value="1"> 5 mil for a 200 dpi printer.</li>
+            <li value="2">
+ 3.3 mil for a 300 dpi printer.</li>
+            <li value="3">2.5 mil for a 400 dpi printer (PM43, 
+ PM43c, PM23c).</li>
+        </ul>
+        <p class="Footer">IPL Command Reference Manual, P/N 937-028-003<br />© 2012–2014 Intermec by Honeywell. All rights reserved.<br />Send feedback about this manual to <a href="mailto:TechnicalCommunications@intermec.com?subject=Feedback on IPL Command Reference Manual">TechnicalCommunications@intermec.com</a>.</p>
+    </body>
+</html>

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html xmlns:MadCap="http://www.madcapsoftware.com/Schemas/MadCap.xsd" lang="en-us" xml:lang="en-us" data-mc-search-type="Stem" data-mc-help-system-file-name="Default.xml" data-mc-path-to-help-system="../../" data-mc-target-type="WebHelp2" data-mc-runtime-file-type="Topic" data-mc-preload-images="false" data-mc-in-preview-mode="false" data-mc-medium="non-print" data-mc-toc-path="Advanced Printer Programming|About Secondary Printer Modes">
+    <!-- saved from url=(0016)http://localhost -->
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" /><title>Using Direct Graphics Mode</title>
+        <link href="../Resources/TableStyles/TableBasic.css" rel="stylesheet" />
+        <link href="../../Skins/Default/Stylesheets/Slideshow.css" rel="stylesheet" />
+        <link href="../../Skins/Default/Stylesheets/TextEffects.css" rel="stylesheet" />
+        <link href="../../Skins/Default/Stylesheets/Topic.css" rel="stylesheet" />
+        <link href="../Resources/Stylesheets/ITCOnlineHelp.css" rel="stylesheet" />
+        <script src="../../Resources/Scripts/custom.modernizr.js">
+        </script>
+        <script src="../../Resources/Scripts/jquery.min.js">
+        </script>
+        <script src="../../Resources/Scripts/foundation.min.js">
+        </script>
+        <script src="../../Resources/Scripts/plugins.min.js">
+        </script>
+        <script src="../../Resources/Scripts/require.min.js">
+        </script>
+        <script src="../../Resources/Scripts/require.config.js">
+        </script>
+        <script src="../../Resources/Scripts/MadCapAll.js">
+        </script>
+    </head>
+    <body>
+        <h2 xmlns="http://www.w3.org/1999/xhtml">About Direct Graphics Mode</h2>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">You can significantly reduce the amount of time necessary to download and image a graphic by using <a href="../Direct_Graphics_Mode/Direct_Graphics_Mode_Select.htm" xmlns="http://www.w3.org/1999/xhtml">Direct Graphics mode</a>. Direct Graphics mode allows the printer to receive a compressed bitmap graphic and image it directly into the image bands without storing it in the printer.</p>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">Before you download the graphic, you must compress it into run-length encoded (RLE) data. The data compression greatly reduces the amount of data to download and the rasterized graphic requires minimal processing to image it into the image bands. You no longer need to store the graphic in Program mode, and then set up a format in Print mode.</p>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">When you download a direct graphic to the printer, the printer stores the graphic in the image bands until you:</p>
+        <ul xmlns="http://www.w3.org/1999/xhtml">
+            <li style="font-weight: normal;" class="p-BulletList" value="1">clear the label data.</li>
+            <li style="font-weight: normal;" class="p-BulletList" value="2">set up another format.</li>
+            <li style="font-weight: normal;" class="p-BulletList" value="3">enter Program mode or Test and Service mode.</li>
+        </ul>
+        <p class="BodyText" style="font-weight: normal;" xmlns="http://www.w3.org/1999/xhtml">When printing a label with direct graphics, you must have enough dynamic RAM installed in your printer to contain the entire label. Because Intermec printers normally reuse image bands, you can print long labels with standard RAM; however, when you download direct graphics, the printer retains no information regarding the existence of the graphic in its image bands. Therefore, the printer cannot reuse those image bands when you download a direct graphic.</p>
+        <p class="BodyText" style="font-weight: normal;" xmlns="http://www.w3.org/1999/xhtml">With standard memory, you should be able to print almost any label up to 15.2 cm (6 in) long. You may need to install more memory for longer labels.</p>
+        <h3 xmlns="http://www.w3.org/1999/xhtml">Understand Run-Length Encoding</h3>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">Run-length encoding (RLE) is a method of compressing bitmap graphics. RLE compresses graphics that have repeated runs of white or black dots in a column, reducing the amount of time required to download the graphics to a printer.</p>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">RLE sends a series of commands that define each bitmap column of a graphic and takes advantage of a series of repeated dots within a column by encoding them as transition commands. Instead of sending the entire column of bitmap data, it sends commands telling the printer how many series of black and white dots to image.</p>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">If columns are identical, a command can instruct the printer to repeat the last column. RLE is ideal for bar code graphics or designs with simple patterns.</p>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">In cases where patterns do not exist, you can send uncompressed bitmap data to the printer. You can mix raw bitmap data and RLE commands to ensure the most efficient way to download a graphic.</p>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">The RLE file may contain five types of data, each of which is one byte long.</p>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">&#160;</p>
+        <table xmlns="http://www.w3.org/1999/xhtml" style="mc-table-style: url('../Resources/TableStyles/TableBasic.css');" class="TableStyle-TableBasic" cellspacing="0">
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <thead xmlns="">
+                <tr class="Head-Header1">
+                    <th class="HeadE-Column1-Header1">Type of Data</th>
+                    <th class="HeadD-Column1-Header1">Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">Immediate Commands</td>
+                    <td class="BodyD-Column1-Body1">Recognized and executed as regular IPL commands or protocol commands. Syntax is removed from compressed data.<ul><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="1">Byte format (7-0): 000xxxx</li><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="2">Range: 0-31</li></ul></td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">Compression Encoding Commands</td>
+                    <td class="BodyD-Column1-Body1">Used as part of the compressed graphics file to change or set data modes, repeat lines, change the origin for the next lines of data, or end the compressed graphics file and return to IPL command printing.<ul xmlns="http://www.w3.org/1999/xhtml"><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="1">Byte format (7-0): 000xxxx</li><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="2">Range: 32-63</li></ul></td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">Low Order Data</td>
+                    <td class="BodyD-Column1-Body1">Can represent up to 7 bits of data (0 to 127). Must be preceded by a command byte so the printer knows how to interpret them.<ul xmlns="http://www.w3.org/1999/xhtml"><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="1">7 bits long and may be combined with high order data. Eighth bit is always set to 1.</li><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="2">Byte format (7 - 0): 1xxxxxx</li><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="3">Range: 128 - 255</li></ul></td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">High Order Data</td>
+                    <td class="BodyD-Column1-Body1">When combined with low order data, can represent up to 13 bits of data (0 - 8191). Must be preceded by a command byte so the printer knows how to interpret them. Printer ignores high order data followed by a command or more high order data.<ul xmlns="http://www.w3.org/1999/xhtml"><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="1">6 bits long and always combined with low order data. Seventh bit is always set to 1 and 8th bit is always set to 0.</li><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="2">Byte format (7 - 0): 01xxxxx</li><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="3">Range: 64 - 127</li><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="4">Data represented: 0-63</li></ul></td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyB-Column1-Body1">Bitmap Data</td>
+                    <td class="BodyA-Column1-Body1">Composed of uncompressed bytes (7 data bits per byte) that represent columns of your graphic. Eight bit is always set to 1.<ul xmlns="http://www.w3.org/1999/xhtml"><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="1">Byte format (7 - 0): 1xxxxxx</li><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="2">Range: 128 - 255</li><li xmlns="http://www.w3.org/1999/xhtml" class="TableBulletList" value="3">Data represented: Raw data</li></ul></td>
+                </tr>
+            </tbody>
+        </table>
+        <h3 xmlns="http://www.w3.org/1999/xhtml">Example</h3>
+        <p class="BodyText" style="font-weight: normal;" xmlns="http://www.w3.org/1999/xhtml">This example consists of two parts: a graphic and a line. The origin of the direct graphic is defined the same as the origin of a normal graphic. The coordinates for the origin of the complex graphic are 0,450; however, after you enter Direct Graphics mode, your printer loads the information in the reverse y direction. Each column of the graphic loads from the bottom to the top. Y coordinates now start at 0 from the bottom left corner and increase in size as the data loads. So, the printer starts loading data for the complex graphic at 0,450 and loads up to 0,425. Likewise, the data for the line starts loading at 19,450 and loads up to 19,0.</p>
+        <p class="BodyText" style="font-weight: normal;" xmlns="http://www.w3.org/1999/xhtml">
+            <img src="../Resources/Images/DirectGraphics-Mode-Example.jpg" style="border: none;width: 364px;height: 299px;float: none;border-style: none;border-style: none;" width="364" height="299" border="0" alt="Direct Graphics Mode Example" />
+        </p>
+        <p class="BodyText" style="font-weight: normal;" xmlns="http://www.w3.org/1999/xhtml">This table explains the hex data file in the example</p>
+        <table style="border-spacing: 0px;border-spacing: 0px;mc-table-style: url('../Resources/TableStyles/TableBasic.css');" cellspacing="0" class="TableStyle-TableBasic" xmlns="http://www.w3.org/1999/xhtml">
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <tr style="height: 22px;" valign="top" class="Body-Body1">
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-top-style: none;border-right-style: none;border-bottom-style: Solid;border-bottom-color: #e9e3db;border-bottom-width: 1px;border-left-style: none;" class="BodyE-Column1-Body1">1B</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-top-style: none;border-right-style: none;border-bottom-style: Solid;border-bottom-color: #e9e3db;border-bottom-width: 1px;" class="BodyE-Column1-Body1">67</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-top-style: none;border-right-style: none;border-bottom-style: Solid;border-bottom-color: #e9e3db;border-bottom-width: 1px;" class="BodyE-Column1-Body1">30</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-top-style: none;border-right-style: none;border-bottom-style: Solid;border-bottom-color: #e9e3db;border-bottom-width: 1px;" class="BodyE-Column1-Body1">21</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-top-style: none;border-right-style: none;border-bottom-width: 1px;border-bottom-color: #e9e3db;border-bottom-style: Solid;" class="BodyE-Column1-Body1">80</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-top-style: none;border-right-style: none;border-bottom-style: Solid;border-bottom-color: #e9e3db;border-bottom-width: 1px;" class="BodyE-Column1-Body1">43</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-top-style: none;border-right-style: none;border-bottom-style: Solid;border-bottom-color: #e9e3db;border-bottom-width: 1px;" class="BodyE-Column1-Body1">C2</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-top-style: none;border-right-style: none;border-bottom-style: Solid;border-bottom-color: #e9e3db;border-bottom-width: 1px;" class="BodyE-Column1-Body1">27</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-top-style: none;border-right-style: none;border-bottom-style: Solid;border-bottom-color: #e9e3db;border-bottom-width: 1px;" class="BodyE-Column1-Body1">90</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-top-style: none;border-right-style: none;border-bottom-style: Solid;border-bottom-color: #e9e3db;border-bottom-width: 1px;" class="BodyE-Column1-Body1">A8</td>
+                <td style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-top-style: none;border-right-style: none;border-bottom-style: Solid;border-bottom-color: #e9e3db;border-bottom-width: 1px;" class="BodyD-Column1-Body1">D5</td>
+            </tr>
+            <tr style="height: 22px;" valign="top" class="Body-Body1">
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">90</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">22</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">26</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">84</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyE-Column1-Body1">96</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">22</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">22</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">26</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">8C</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">84</td>
+                <td style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyD-Column1-Body1">22</td>
+            </tr>
+            <tr style="height: 22px;" valign="top" class="Body-Body1">
+                <td colspan="1" rowspan="1" style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;border-left-style: none;" class="BodyE-Column1-Body1">24</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;" class="BodyE-Column1-Body1">82</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;" class="BodyE-Column1-Body1">25</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;" class="BodyE-Column1-Body1">88</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">22</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;" class="BodyE-Column1-Body1">21</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;" class="BodyE-Column1-Body1">93</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;" class="BodyE-Column1-Body1">43</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;" class="BodyE-Column1-Body1">C2</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;" class="BodyE-Column1-Body1">25</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;padding-left: 0px;padding-right: 20px;" class="BodyD-Column1-Body1">43</td>
+            </tr>
+            <tr style="height: 22px;" valign="top" class="Body-Body1">
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-left-style: none;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">C2</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">25</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&#160;</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&#160;</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-color: #e9e3db;border-bottom-style: Solid;border-bottom-width: 1px;" class="BodyE-Column1-Body1">&#160;</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&#160;</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&#160;</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&#160;</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&#160;</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyE-Column1-Body1">&#160;</td>
+                <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;padding-right: 20px;border-right-style: none;border-bottom-width: 1px;border-bottom-style: Solid;border-bottom-color: #e9e3db;" class="BodyD-Column1-Body1">&#160;</td>
+            </tr>
+        </table>
+        <p class="BodyText" style="font-weight: normal;" xmlns="http://www.w3.org/1999/xhtml">&#160;</p>
+        <p class="BodyText" style="font-weight: normal;" xmlns="http://www.w3.org/1999/xhtml">This table explains the hex data file in the example.</p>
+        <table xmlns="http://www.w3.org/1999/xhtml" style="mc-table-style: url('../Resources/TableStyles/TableBasic.css');" class="TableStyle-TableBasic" cellspacing="0">
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <thead>
+                <tr class="Head-Header1">
+                    <th class="HeadE-Column1-Header1">Data</th>
+                    <th class="HeadE-Column1-Header1">Command</th>
+                    <th class="HeadD-Column1-Header1">Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">1B 67 30</td>
+                    <td class="BodyE-Column1-Body1">&lt;ESC&gt;g0</td>
+                    <td class="BodyD-Column1-Body1">Enter Direct Graphics mode</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">21 80 43 C2</td>
+                    <td class="BodyE-Column1-Body1">0x21<br xmlns="http://www.w3.org/1999/xhtml" />80 43<br xmlns="http://www.w3.org/1999/xhtml" />C2<br xmlns="http://www.w3.org/1999/xhtml" /></td>
+                    <td class="BodyD-Column1-Body1">Change origin<br xmlns="http://www.w3.org/1999/xhtml" />80 - 80 (LO) = 0x00 -&gt; X0<br xmlns="http://www.w3.org/1999/xhtml" />43 - 40 (HI) = 0x03<br xmlns="http://www.w3.org/1999/xhtml" />C2 - 80 (LO) = 0x42<br xmlns="http://www.w3.org/1999/xhtml" />(0x03 * 0x80) + 0x42 = 1C2 -&gt; Y450<br xmlns="http://www.w3.org/1999/xhtml" /></td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">27 90 A8 D5 90 22</td>
+                    <td class="BodyE-Column1-Body1">0x27<br xmlns="http://www.w3.org/1999/xhtml" />90<br xmlns="http://www.w3.org/1999/xhtml" />A8<br xmlns="http://www.w3.org/1999/xhtml" />D5<br xmlns="http://www.w3.org/1999/xhtml" />90<br xmlns="http://www.w3.org/1999/xhtml" />0x22<br xmlns="http://www.w3.org/1999/xhtml" /></td>
+                    <td class="BodyD-Column1-Body1">Raw bitmap data follows, starts at Y0<br xmlns="http://www.w3.org/1999/xhtml" />90 - 80 (LO) = 0x10 -&gt; 1 dot at Y4<br xmlns="http://www.w3.org/1999/xhtml" />A8 - 80 (LO) = 0x28 -&gt; 2 dots at Y10 and Y12<br xmlns="http://www.w3.org/1999/xhtml" />D5 - 80 (LO) = 0x45 -&gt; 3 dots at Y14, Y17, and Y20<br xmlns="http://www.w3.org/1999/xhtml" />90 - 80 (LO) = 0x10 -&gt; 1 dot at Y25<br xmlns="http://www.w3.org/1999/xhtml" />End of line</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">26 84 96 22</td>
+                    <td class="BodyE-Column1-Body1">0x26<br xmlns="http://www.w3.org/1999/xhtml" />84<br xmlns="http://www.w3.org/1999/xhtml" />96<br xmlns="http://www.w3.org/1999/xhtml" />0x22</td>
+                    <td class="BodyD-Column1-Body1">Transition white<br xmlns="http://www.w3.org/1999/xhtml" />84 - 80 (LO) = 4 white<br xmlns="http://www.w3.org/1999/xhtml" />96 - 80 (LO) = 22 black<br xmlns="http://www.w3.org/1999/xhtml" />End of line</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">22</td>
+                    <td class="BodyE-Column1-Body1">0X22</td>
+                    <td class="BodyD-Column1-Body1">End of Line</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">26 8D 84 22</td>
+                    <td class="BodyE-Column1-Body1">0x26<br xmlns="http://www.w3.org/1999/xhtml" />8D<br xmlns="http://www.w3.org/1999/xhtml" />84<br xmlns="http://www.w3.org/1999/xhtml" />0x22</td>
+                    <td class="BodyD-Column1-Body1">Transition white<br xmlns="http://www.w3.org/1999/xhtml" />8D - 80 (LO) = 13 white<br xmlns="http://www.w3.org/1999/xhtml" />84 - 80 (LO) = 4 black<br xmlns="http://www.w3.org/1999/xhtml" />End of line</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">24 82</td>
+                    <td class="BodyE-Column1-Body1">0x24<br xmlns="http://www.w3.org/1999/xhtml" />82</td>
+                    <td class="BodyD-Column1-Body1">Repeat last line<br xmlns="http://www.w3.org/1999/xhtml" />82 - 80 (LO) = 2 times</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">25 88 22</td>
+                    <td class="BodyE-Column1-Body1">0x25<br xmlns="http://www.w3.org/1999/xhtml" />88<br xmlns="http://www.w3.org/1999/xhtml" />0x22</td>
+                    <td class="BodyD-Column1-Body1">Transition black<br xmlns="http://www.w3.org/1999/xhtml" />89 - 80 (LO) = 9 black<br xmlns="http://www.w3.org/1999/xhtml" />End of line</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">21 93 43 C2</td>
+                    <td class="BodyE-Column1-Body1">0x21<br xmlns="http://www.w3.org/1999/xhtml" />93<br xmlns="http://www.w3.org/1999/xhtml" />43<br xmlns="http://www.w3.org/1999/xhtml" />C2</td>
+                    <td class="BodyD-Column1-Body1">Change origin<br xmlns="http://www.w3.org/1999/xhtml" />93 - 80 (LO) = 0x13 -&gt; X19<br xmlns="http://www.w3.org/1999/xhtml" />43 - 40 (HI) = 0x03<br xmlns="http://www.w3.org/1999/xhtml" />C2 - 80 (LO) = 0x42<br xmlns="http://www.w3.org/1999/xhtml" />      (0x03 *0x80) + 0x42 = 1C2 -&gt; Y450</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyE-Column1-Body1">25 43 C2</td>
+                    <td class="BodyE-Column1-Body1">0x25<br xmlns="http://www.w3.org/1999/xhtml" />43<br xmlns="http://www.w3.org/1999/xhtml" />C2</td>
+                    <td class="BodyD-Column1-Body1">Transition black<br xmlns="http://www.w3.org/1999/xhtml" />43 - 40 (HI) = 0x03<br xmlns="http://www.w3.org/1999/xhtml" />C2 - 80 (LO) = 0x42<br xmlns="http://www.w3.org/1999/xhtml" />      (0x03 * 080) + 0x42 = 1C2 -&gt; Y450</td>
+                </tr>
+                <tr class="Body-Body1">
+                    <td class="BodyB-Column1-Body1">28</td>
+                    <td class="BodyB-Column1-Body1">0x28</td>
+                    <td class="BodyA-Column1-Body1">End of bitmap</td>
+                </tr>
+            </tbody>
+        </table> <![CDATA[   
+
+  ]]><p class="Footer">IPL Command Reference Manual, P/N 937-028-003<br />© 2012–2014 Intermec by Honeywell. All rights reserved.<br />Send feedback about this manual to <a href="mailto:TechnicalCommunications@intermec.com?subject=Feedback on IPL Command Reference Manual">TechnicalCommunications@intermec.com</a>.</p></body>
+</html>

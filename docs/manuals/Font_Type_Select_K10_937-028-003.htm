@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html xmlns:MadCap="http://www.madcapsoftware.com/Schemas/MadCap.xsd" lang="en-us" xml:lang="en-us" data-mc-search-type="Stem" data-mc-help-system-file-name="Default.xml" data-mc-path-to-help-system="../" data-mc-target-type="WebHelp2" data-mc-runtime-file-type="Topic" data-mc-preload-images="false" data-mc-in-preview-mode="false" data-mc-medium="non-print" data-mc-toc-path="Command Formats and Syntax|Program Mode Commands|Interpretive Field Editing Commands">
+    <!-- saved from url=(0016)http://localhost -->
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" /><title>Font Type, Select</title>
+        <link href="Resources/TableStyles/TableBasic.css" rel="stylesheet" />
+        <style>/*<![CDATA[*/
+span.hcp1
+{
+	font-family: "Times New Roman";
+	font-size: 7.0pt;
+}
+span.hcp2
+{
+	font-style: italic;
+}
+span.hcp3
+{
+	font-family: "Times New Roman";
+	font-size: 7.0pt;
+	font-style: italic;
+}
+tr.hcp4
+{
+	background-color: #e5e5e5;
+}
+td.hcp5
+{
+	border-top-style: solid;
+	border-top-width: 1 px;
+	border-top-color: #c0c0c0;
+	border-left-style: solid;
+	border-left-width: 1 px;
+	border-left-color: #c0c0c0;
+	background-color: #e5e5e5;
+}
+td.hcp6
+{
+	border-top-style: solid;
+	border-top-width: 1 px;
+	border-top-color: #c0c0c0;
+	background-color: #e5e5e5;
+}
+td.hcp7
+{
+	border-top-style: solid;
+	border-top-width: 1 px;
+	border-top-color: #c0c0c0;
+	border-right-style: solid;
+	border-right-width: 1 px;
+	border-right-color: #c0c0c0;
+	background-color: #e5e5e5;
+}
+td.hcp8
+{
+	border-left-style: solid;
+	border-left-width: 1 px;
+	border-left-color: #c0c0c0;
+}
+td.hcp9
+{
+	border-right-style: solid;
+	border-right-width: 1 px;
+	border-right-color: #c0c0c0;
+}
+td.hcp10
+{
+	border-left-style: solid;
+	border-left-width: 1 px;
+	border-left-color: #c0c0c0;
+	background-color: #e5e5e5;
+}
+td.hcp11
+{
+	background-color: #e5e5e5;
+}
+td.hcp12
+{
+	border-right-style: solid;
+	border-right-width: 1 px;
+	border-right-color: #c0c0c0;
+	background-color: #e5e5e5;
+}
+td.hcp13
+{
+	border-left-style: solid;
+	border-left-width: 1 px;
+	border-left-color: #c0c0c0;
+	border-bottom-style: solid;
+	border-bottom-width: 1 px;
+	border-bottom-color: #c0c0c0;
+	background-color: #e5e5e5;
+}
+td.hcp14
+{
+	border-bottom-style: solid;
+	border-bottom-width: 1 px;
+	border-bottom-color: #c0c0c0;
+	background-color: #e5e5e5;
+}
+td.hcp15
+{
+	border-right-style: solid;
+	border-right-width: 1 px;
+	border-right-color: #c0c0c0;
+	border-bottom-style: solid;
+	border-bottom-width: 1 px;
+	border-bottom-color: #c0c0c0;
+	background-color: #e5e5e5;
+}
+
+/*]]>*/</style>
+        <link href="../Skins/Default/Stylesheets/Slideshow.css" rel="stylesheet" />
+        <link href="../Skins/Default/Stylesheets/TextEffects.css" rel="stylesheet" />
+        <link href="../Skins/Default/Stylesheets/Topic.css" rel="stylesheet" />
+        <link href="Resources/Stylesheets/ITCOnlineHelp.css" rel="stylesheet" />
+        <script src="../Resources/Scripts/custom.modernizr.js">
+        </script>
+        <script src="../Resources/Scripts/jquery.min.js">
+        </script>
+        <script src="../Resources/Scripts/foundation.min.js">
+        </script>
+        <script src="../Resources/Scripts/plugins.min.js">
+        </script>
+        <script src="../Resources/Scripts/require.min.js">
+        </script>
+        <script src="../Resources/Scripts/require.config.js">
+        </script>
+        <script src="../Resources/Scripts/MadCapAll.js">
+        </script>
+    </head>
+    <body>
+        <h2 xmlns="http://www.w3.org/1999/xhtml">Font Type, Select</h2>
+        <h3 xmlns="http://www.w3.org/1999/xhtml">Purpose</h3>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">Selects a font type for human-readable and interpretive fields.</p>
+        <h3 class="BodyText" xmlns="http://www.w3.org/1999/xhtml">Supported Printers</h3>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">All</p>
+        <h3 xmlns="http://www.w3.org/1999/xhtml">Syntax</h3>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml">c<i>n</i>[,<i>m</i>][,<i>p</i>]</p>
+        <h3 xmlns="http://www.w3.org/1999/xhtml">Parameters</h3>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml"><i xmlns="http://www.w3.org/1999/xhtml">n</i>&#160;</p>
+        <p class="ListItemImage" xmlns="http://www.w3.org/1999/xhtml">ID number of the font to be uploaded:</p>
+        <table style="margin-top: 0.1in;margin-bottom: 0.2in;border-spacing: 0px;border-spacing: 0px;mc-table-style: url('Resources/TableStyles/TableBasic.css');" cellspacing="0" class="TableStyle-TableBasic" xmlns="http://www.w3.org/1999/xhtml">
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <col class="Column-Column1" />
+            <thead xmlns="">
+                <tr class="Head-Header1">
+                    <th class="HeadE-Column1-Header1" xmlns="http://www.w3.org/1999/xhtml"><i xmlns="http://www.w3.org/1999/xhtml">n</i>
+                    </th>
+                    <th class="HeadE-Column1-Header1" xmlns="http://www.w3.org/1999/xhtml">Font Name</th>
+                    <th class="HeadD-Column1-Header1" xmlns="http://www.w3.org/1999/xhtml">Mapped to Monotype TrueType Fonts
+</th>
+                </tr>
+            </thead>
+            <tbody xmlns="">
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">0</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">7 x 9 Standard (86XX font)</td>
+                    <td class="BodyD-Column1-Body1">IPLFONT0
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">1</td>
+                    <td colspan="1" rowspan="1" style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">7 x 11 OCR (86XX font)</td>
+                    <td class="BodyD-Column1-Body1">IPLFONT1</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">2</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">10 x 14 Standard (86XX font)</td>
+                    <td class="BodyD-Column1-Body1">IPLFONT2</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">3 - 6</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">User-defined fonts</td>
+                    <td class="BodyD-Column1-Body1">&#160;</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">7</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">5 x 7 Standard (86XX font)</td>
+                    <td class="BodyD-Column1-Body1">IPLFONT7</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">8 - 19</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">User-defined fonts</td>
+                    <td class="BodyD-Column1-Body1">&#160;</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">20</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">8 point monospace</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">21</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">12 point monospace</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">22</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">20 point monospace</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">23</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">OCR A</td>
+                    <td class="BodyD-Column1-Body1">OCR A</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">24</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">OCR B size 2</td>
+                    <td class="BodyD-Column1-Body1">OCR B</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">25</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Swiss Mono 721 standard outline font</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">26</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Swiss Mono 721 bold outline font</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono Bold
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">28</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Dutch Roman 801 proportional outline font</td>
+                    <td class="BodyD-Column1-Body1">CG Times
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">30</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">6 point monospace bold</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono Bold
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">31</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">8 point monospace bold</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono Bold
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">32</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">10 point monospace standard</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono </td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">33</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">10 point monospace bold</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono Bold
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">34</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">12 point monospace bold</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono Bold
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">35</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">16 point monospace standard</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono </td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">36</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">16 point monospace bold</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono Bold
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">37</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">20 point monospace bold</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono Bold
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">38</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">24 point monospace standard</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono </td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">39</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">24 point monospace bold</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono Bold
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">40</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">30 point monospace bold</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono Bold
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">41</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">36 point monospace bold</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono Bold
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">50</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Kanji outline font</td>
+                    <td class="BodyD-Column1-Body1">TBMinPro-Light
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">51</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Kanji monospace outline font</td>
+                    <td class="BodyD-Column1-Body1">TBMinPro-Light
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">52</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Katakana 12 x 16 bitmap</td>
+                    <td class="BodyD-Column1-Body1">TBMinPro-Light
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">53</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Katakana 16 x 24 bitmap</td>
+                    <td class="BodyD-Column1-Body1">TBMinPro-Light
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">54</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Katakana 24 x 36 bitmap</td>
+                    <td class="BodyD-Column1-Body1">TBMinPro-Light
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">55</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Kanji 16 x 16 bitmap</td>
+                    <td class="BodyD-Column1-Body1">TBMinPro-Light
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">56</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Kanji 24 x 24 bitmap</td>
+                    <td class="BodyD-Column1-Body1">TBMinPro-Light
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">57</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Kanji</td>
+                    <td class="BodyD-Column1-Body1">TBMinPro-Light
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">58</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Korean</td>
+                    <td class="BodyD-Column1-Body1">HYGoThic-Medium
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">59</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Traditional Chinese</td>
+                    <td class="BodyD-Column1-Body1">MSung HK Medium
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">60</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Simplified Chinese</td>
+                    <td class="BodyD-Column1-Body1">MSungPRC Medium
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">61</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Swiss 721</td>
+                    <td class="BodyD-Column1-Body1">Univers </td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">62</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Swiss 721 bold</td>
+                    <td class="BodyD-Column1-Body1">Univers Bold
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">63</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Swiss 721 bold condensed</td>
+                    <td class="BodyD-Column1-Body1">Univers Condensed Bold
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">64</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Prestige bold</td>
+                    <td class="BodyD-Column1-Body1">Andale Mono Bold
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">65</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Zurich extra condensed</td>
+                    <td class="BodyD-Column1-Body1">Univers Extra Condensed</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">66</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Dutch 801 bold</td>
+                    <td class="BodyD-Column1-Body1">CG Times Bold</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">67</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Century Schoolbook</td>
+                    <td class="BodyD-Column1-Body1">Century Schoolbook Roman
+</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">68</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyE-Column1-Body1">Futura light</td>
+                    <td class="BodyD-Column1-Body1">Univers</td>
+                </tr>
+                <tr style="height: 22px;" valign="top" class="Body-Body1" xmlns="http://www.w3.org/1999/xhtml">
+                    <td style="background-color: Transparent;padding-left: 0px;border-left-style: none;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyB-Column1-Body1">69</td>
+                    <td style="background-color: Transparent;padding-left: 0px;border-right-style: none;border-bottom-color: #e5e5e5;border-bottom-style: Solid;border-bottom-width: 1px;padding-right: 20px;" class="BodyB-Column1-Body1">Letter Gothic</td>
+                    <td class="BodyA-Column1-Body1">Letter Gothic</td>
+                </tr>
+            </tbody>
+        </table>
+        <p class="Note" xmlns="http://www.w3.org/1999/xhtml">Fonts 50 to 60 are downloadable Asian fonts. 3 to 6 and 8 to 19 are user-defined fonts. The other fonts are resident in the printer.</p>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml"><i>m</i>
+        </p>
+        <p class="ListItemImage" xmlns="http://www.w3.org/1999/xhtml">Intercharacter gap (space between characters). Default is 0. Range is -199 to 399.</p>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml"><i xmlns="http://www.w3.org/1999/xhtml">p</i>
+        </p>
+        <p class="ListItemImage" xmlns="http://www.w3.org/1999/xhtml">Name of the font (if the font does not have an ID number). </p>
+        <h3 xmlns="http://www.w3.org/1999/xhtml">See Also</h3>
+        <p class="BodyText" xmlns="http://www.w3.org/1999/xhtml"><a href="Printer_Language_Select.htm#Printer_Language_Table" xmlns="http://www.w3.org/1999/xhtml">Printer Language, Select</a>
+        </p>
+        <p class="Footer">IPL Command Reference Manual, P/N 937-028-003<br />© 2012–2014 Intermec by Honeywell. All rights reserved.<br />Send feedback about this manual to <a href="mailto:TechnicalCommunications@intermec.com?subject=Feedback on IPL Command Reference Manual">TechnicalCommunications@intermec.com</a>.</p>
+    </body>
+</html>
