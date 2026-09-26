@@ -23,6 +23,8 @@ import {
     listLibrary, saveSharedSource, listSharedSources,
 } from '../services/libraryStore';
 import { memoryFontBackend, setFontBackend, installFontFile } from '../services/fontStore';
+import { memoryTargetBackend, setPrintTargetBackend, savePrintTarget } from '../services/printTargets';
+import { memoryQueueBackend, setPrintQueueBackend, createPrintJob } from '../services/printQueue';
 import type { LibraryBackend } from '../services/libraryStore';
 import type { DataSource, Design } from '../types';
 
@@ -57,24 +59,78 @@ const strictBackend = (inner: LibraryBackend): { backend: LibraryBackend; violat
     };
 };
 
+/**
+ * The Fase 6 stores are held to the same contract. Their memory backends are
+ * Maps exactly like libraryStore's, so a record written without the declared
+ * key would store and read back perfectly while the real IndexedDB threw —
+ * the blind spot this file exists to close, not to leave open for new stores.
+ *
+ * Every write method of every backend goes through `guard`, so a store added
+ * later is covered by adding one line here rather than by remembering to.
+ */
+let violations: string[] = [];
+
+const guard = <A extends unknown[]>(store: string, write: (...args: A) => Promise<void>) =>
+    async (...args: A): Promise<void> => {
+        const record = args[0] as Record<string, unknown> | null | undefined;
+        const keyPath = keyPathFor(store);
+        if (!keyPath) violations.push(`${store} is not in SCHEMA at all`);
+        else if (record == null || record[keyPath] === undefined) {
+            violations.push(`${store} (keyPath "${keyPath}") got a record without it`);
+        }
+        await write(...args);
+    };
+
+const strictLibrary = (): LibraryBackend => {
+    const inner = memoryBackend();
+    return {
+        ...inner,
+        put: guard('designs', inner.put),
+        putSource: guard('sources', inner.putSource),
+        putRecovery: guard('recovery', inner.putRecovery),
+    };
+};
+
+const strictTargets = () => {
+    const inner = memoryTargetBackend();
+    return { ...inner, put: guard('targets', inner.put) };
+};
+
+const strictQueue = () => {
+    const inner = memoryQueueBackend();
+    return { ...inner, putJob: guard('printJobs', inner.putJob), putLog: guard('printLog', inner.putLog) };
+};
+
 let strict: ReturnType<typeof strictBackend>;
+let targets: ReturnType<typeof strictTargets>;
+let queue: ReturnType<typeof strictQueue>;
 
 beforeEach(() => {
-    strict = strictBackend(memoryBackend());
+    violations = [];
+    strict = strictBackend(strictLibrary());
+    targets = strictTargets();
+    queue = strictQueue();
     setLibraryBackend(strict.backend);
     setFontBackend(memoryFontBackend());
+    setPrintTargetBackend(targets);
+    setPrintQueueBackend(queue);
     localStorage.clear();
 });
 
 describe('the declared schema', () => {
     it('keys every store by a field its records actually carry', () => {
-        // Pinned literally: this list is the contract the two modules share,
-        // and the bug was a silent divergence between two copies of it.
+        // Pinned literally: this list is the contract the modules share, and
+        // the bug was a silent divergence between two copies of it. Fase 6
+        // added the three print stores — all keyed by an id, since two targets
+        // may share a host and a log entry is addressed by nothing else.
         expect(SCHEMA).toEqual([
             { name: 'designs', keyPath: 'name' },
             { name: 'sources', keyPath: 'name' },
             { name: 'fonts', keyPath: 'name' },
             { name: 'recovery', keyPath: 'slot' },
+            { name: 'targets', keyPath: 'id' },
+            { name: 'printJobs', keyPath: 'id' },
+            { name: 'printLog', keyPath: 'id' },
         ]);
     });
 
@@ -86,14 +142,14 @@ describe('the declared schema', () => {
 describe('every write satisfies the schema', () => {
     it('a saved design carries the `name` its store is keyed by', async () => {
         await saveLibraryRecord(design('Invoice'), { now: 1 });
-        expect(strict.violations).toEqual([]);
+        expect(violations).toEqual([]);
         expect((await listLibrary())[0].name).toBe('Invoice');
     });
 
     it('a shared source carries `name`', async () => {
         const source: DataSource = { id: 's1', name: 'Stock', type: 'variable', sampleData: 'x' };
         await saveSharedSource('Stock', source, 1);
-        expect(strict.violations).toEqual([]);
+        expect(violations).toEqual([]);
         expect(await listSharedSources()).toHaveLength(1);
     });
 
@@ -101,8 +157,24 @@ describe('every write satisfies the schema', () => {
         // Against the shipped bug this is the assertion that fires: the record
         // has no `name`, and the store was created keyed by `name`.
         expect(await writeRecovery(design('Invoice'), 1234)).toBe(true);
-        expect(strict.violations).toEqual([]);
+        expect(violations).toEqual([]);
         expect((await readRecovery())?.slot).toBe('current');
+    });
+
+    it('Fase 6: a saved printer target carries the `id` its store is keyed by', async () => {
+        await savePrintTarget({ name: 'Line 1', host: '10.0.0.5', port: '9100', language: 'ipl', dpi: 203 });
+        expect(violations).toEqual([]);
+    });
+
+    it('Fase 6: a queued print job carries `id`, and so does every log entry it writes', async () => {
+        // A record store keyed by `id` whose record has no id is exactly the
+        // `recovery` failure again, one store over.
+        await createPrintJob(design('Invoice'), {
+            recordFrom: 1, recordTo: 1, copies: 1, collation: 'collated',
+            target: { id: 't1', name: 'Line 1', host: '10.0.0.5', port: '9100', language: 'ipl', dpi: 203 },
+            now: 1,
+        });
+        expect(violations).toEqual([]);
     });
 });
 

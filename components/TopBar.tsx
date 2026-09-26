@@ -39,6 +39,8 @@ export const TopBar: React.FC<{
   onExportImage: (kind: 'png' | 'pdf' | 'zip') => void;
   exportingImage: 'png' | 'pdf' | 'zip' | null;
   onViewIpl: () => void;
+  /** Fase 6: sheet preview, print queue and print log. */
+  onPrintCenter: () => void;
   savedDesigns: string[];
   workspaceState: WorkspaceState;
   setWorkspaceState: React.Dispatch<React.SetStateAction<WorkspaceState>>;
@@ -97,11 +99,12 @@ export const TopBar: React.FC<{
     };
 
   return (
-    // The three groups need ~1640px together. Without the x-scroll the header's
+    // The three groups need ~1790px together (measured in the browser; the
+    // Fase 6 Print Center button added 36px). Without the x-scroll the header's
     // overflow was clipped by the page's `overflow-hidden`, so on a 1440px
-    // laptop the PDF/ZIP/View IPL/Help buttons could not be reached at all.
-    // Flex items keep their min-content width, so the bar scrolls rather than
-    // crushing the buttons; at wide widths nothing changes.
+    // laptop the PDF/ZIP/View IPL/Print/Help buttons could not be reached at
+    // all. Flex items keep their min-content width, so the bar scrolls rather
+    // than crushing the buttons; at wide widths nothing changes.
     <header className="bg-gray-800 border-b border-gray-700 shadow-md p-2 flex items-center justify-between z-10 flex-shrink-0 h-14 overflow-x-auto overflow-y-hidden">
       <div className="flex items-center gap-2">
         <h1 className="text-lg font-bold text-blue-400 pl-2">IPL Designer</h1>
@@ -219,6 +222,9 @@ export const TopBar: React.FC<{
         <IconButton icon={props.exportingImage === 'pdf' ? 'hourglass_top' : 'picture_as_pdf'} onClick={() => props.onExportImage('pdf')} disabled={!!props.exportingImage} tooltip={props.exportingImage === 'pdf' ? 'Rendering…' : 'Export PDF (one page per label)'} className="text-gray-300"/>
         <IconButton icon={props.exportingImage === 'zip' ? 'hourglass_top' : 'folder_zip'} onClick={() => props.onExportImage('zip')} disabled={!!props.exportingImage} tooltip={props.exportingImage === 'zip' ? 'Rendering…' : 'Export ZIP of PNGs (one per label)'} className="text-gray-300"/>
         <IconButton icon="code" onClick={props.onViewIpl} tooltip="View/Import IPL" className="text-gray-300"/>
+        {/* Fase 6: the sheet, the job queue and the print log. Kept next to
+            View IPL because both answer "what will actually come out". */}
+        <IconButton icon="print" onClick={props.onPrintCenter} tooltip="Print Center (sheet preview, queue, log)" className="text-gray-300"/>
         <div className="h-6 border-l border-gray-600"></div>
         <IconButton icon="help_outline" onClick={props.onHelp} tooltip="Help & Shortcuts" className="text-gray-300"/>
       </div>

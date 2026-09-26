@@ -7,6 +7,7 @@ import { HelpModal } from './components/HelpModal';
 import { IPLViewerModal } from './components/IPLViewerModal';
 import { TemplateGallery } from './components/TemplateGallery';
 import { StartScreen } from './components/StartScreen';
+import { PrintCenter } from './components/PrintCenter';
 import { createDefaultDesign, type LabelTemplate } from './services/templates';
 import { DialogHost } from './components/DialogHost';
 import { requestConfirm, notify } from './services/uiDialogs';
@@ -663,6 +664,7 @@ export default function App() {
     const [showTemplates, setShowTemplates] = useState(false);
     const [showIplViewer, setShowIplViewer] = useState(false);
     const [showLibrary, setShowLibrary] = useState(false);
+    const [showPrintCenter, setShowPrintCenter] = useState(false);
     // Bumped after every save/delete so an open library grid re-reads storage.
     const [libraryRevision, setLibraryRevision] = useState(0);
 
@@ -1140,6 +1142,7 @@ export default function App() {
               onImportDesign={appActions.onImportDesign}
               onHelp={() => setShowHelp(true)}
               onViewIpl={() => setShowIplViewer(true)}
+              onPrintCenter={() => setShowPrintCenter(true)}
               workspaceState={workspaceState}
               setWorkspaceState={setWorkspaceState}
               onZoomToFit={appActions.onZoomToFit}
@@ -1180,6 +1183,10 @@ export default function App() {
                 onOpen={name => void appActions.onLoad(name)}
             />}
             {showIplViewer && <IPLViewerModal onClose={() => setShowIplViewer(false)} onImportDesign={appActions.onImportDesign} />}
+            {/* The job snapshots the SCREEN (intermediate ?? present), the same
+                honesty rule Ctrl+S and the image exports follow: what is queued
+                is what the user is looking at, not the last saved version. */}
+            {showPrintCenter && <PrintCenter design={activeDesign} onClose={() => setShowPrintCenter(false)} />}
         </div>
     );
 }

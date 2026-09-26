@@ -21,8 +21,12 @@
 // whatever records it holds.
 
 const DB_NAME = 'ipl-designer';
-/** Version 5 repairs a `recovery` store keyed by anything but `slot`. */
-const DB_VERSION = 5;
+/**
+ * Version 5 repairs a `recovery` store keyed by anything but `slot`.
+ * Version 6 adds the Fase 6 print stores (targets, printJobs, printLog) —
+ * purely additive, so an existing database keeps every record it holds.
+ */
+const DB_VERSION = 6;
 
 /**
  * Every store this database owns, with the key path it must have. Adding one
@@ -37,6 +41,12 @@ export const SCHEMA: readonly { name: string; keyPath: string }[] = [
     { name: 'sources', keyPath: 'name' },
     { name: 'fonts', keyPath: 'name' },
     { name: 'recovery', keyPath: 'slot' },
+    // Fase 6. Keyed by a generated id rather than by name: two printer targets
+    // may legitimately share a host, and a log entry is never addressed by
+    // anything but its own identity.
+    { name: 'targets', keyPath: 'id' },
+    { name: 'printJobs', keyPath: 'id' },
+    { name: 'printLog', keyPath: 'id' },
 ];
 
 /** The key path a store's records must carry, or undefined if unknown. */

@@ -269,17 +269,24 @@ export interface LabelFile {
     design: Design;
 }
 
-/** FNV-1a 32-bit over the canonical JSON. Short on purpose: it catches
- *  truncation and accidental edits, it is not a security control. */
-export const designChecksum = (design: Design): string => {
-    const json = JSON.stringify(design);
+/**
+ * FNV-1a 32-bit over a string, lowercase hex, zero-padded to 8. Short on
+ * purpose: it catches truncation and accidental edits, it is not a security
+ * control. Shared with the Fase 6 print log, which hashes the bytes sent to a
+ * printer — one implementation, so two hashes of the same text can never
+ * disagree about what "the same" means.
+ */
+export const fnv1aHex = (input: string): string => {
     let hash = 0x811c9dc5;
-    for (let i = 0; i < json.length; i++) {
-        hash ^= json.charCodeAt(i);
+    for (let i = 0; i < input.length; i++) {
+        hash ^= input.charCodeAt(i);
         hash = Math.imul(hash, 0x01000193);
     }
     return (hash >>> 0).toString(16).padStart(8, '0');
 };
+
+/** FNV-1a over the canonical JSON of a design. */
+export const designChecksum = (design: Design): string => fnv1aHex(JSON.stringify(design));
 
 export const serializeLabelFile = (design: Design): string =>
     JSON.stringify({ labelFileVersion: LABEL_FILE_VERSION, checksum: designChecksum(design), design } satisfies LabelFile, null, 2);

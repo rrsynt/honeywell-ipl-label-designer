@@ -95,13 +95,57 @@ const groupValueForRow = (groupId: number, design: Design, row?: any[], batch?: 
     return groupSuppressionValue(groupId, design);
 };
 
-const dataOrSuppressed = (field: TextField | BarcodeField, data: string, design: Design, resolved?: string, row?: any[], batch?: BatchData): string => {
+/**
+ * WHICH rule hides this field on this label, or null when it prints.
+ *
+ * The one implementation of "is it suppressed". It returns the reason rather
+ * than a boolean so a caller can say why (the generator's suppression warnings
+ * do), but the point is that the batch loop and the sheet preview's marker ask
+ * THIS question. A second copy of the rule would eventually drift, and the
+ * drift would be discovered on printed media.
+ */
+const suppressionReasonFor = (
+    field: TextField | BarcodeField,
+    design: Design,
+    resolved?: string,
+    row?: any[],
+    batch?: BatchData,
+): 'group' | 'field' | null => {
     // A group's condition hides every member. Judged on the row when there is
     // one, so the whole group vanishes together and per label.
     const groupCondition = field.groupId !== undefined ? design.groupSuppress?.[field.groupId] : undefined;
-    if (groupCondition && isSuppressed(groupCondition, groupValueForRow(field.groupId as number, design, row, batch)).suppress) return '';
-    return field.suppress && isSuppressed(field.suppress, resolved ?? suppressionValueFor(field, design)).suppress ? '' : data;
+    if (groupCondition && isSuppressed(groupCondition, groupValueForRow(field.groupId as number, design, row, batch)).suppress) return 'group';
+    if (field.suppress && isSuppressed(field.suppress, resolved ?? suppressionValueFor(field, design)).suppress) return 'field';
+    return null;
 };
+
+/** The mapped cell of a batch row for one field, or undefined when the row
+ *  has no column for it (unmapped, or a ragged row). Shared with the
+ *  suppression predicate so both read the same cell. */
+export const rowCellFor = (batch: BatchData, fieldId: number, row: any[]): string | undefined => {
+    const col = batch.mappings[fieldId];
+    return col !== undefined && col >= 0 && col < row.length ? String(row[col] ?? '') : undefined;
+};
+
+const dataOrSuppressed = (field: TextField | BarcodeField, data: string, design: Design, resolved?: string, row?: any[], batch?: BatchData): string =>
+    suppressionReasonFor(field, design, resolved, row, batch) ? '' : data;
+
+/**
+ * Fase 6: the fields this batch row prints no ink for. Same test the print
+ * block uses, in the same order, so the sheet preview's marker cannot claim a
+ * field was dropped while the stream still carries its data (or the reverse).
+ * Fields without per-label data (shapes, images, lines) are not listed: their
+ * suppression is expressed as a whole conditional FORMAT, not as blank data.
+ */
+export const suppressedFieldIdsForRow = (
+    design: Design,
+    fields: (TextField | BarcodeField)[],
+    row: any[],
+    batch: BatchData,
+): number[] =>
+    fields
+        .filter(field => suppressionReasonFor(field, design, rowCellFor(batch, field.id, row), row, batch) !== null)
+        .map(field => field.id);
 
 /**
  * Which stored format this label prints. Format 1 is the base; a conditional
@@ -692,8 +736,7 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
                 return f !== undefined && (formatOf(f) === 0 || formatOf(f) === formatId - 1);
             });
             const dataForPrintBlock = idsForFormat.map(id => {
-                const col = batchData.mappings[id];
-                const cell = col !== undefined && col >= 0 && col < row.length ? String(row[col] ?? '') : undefined;
+                const cell = rowCellFor(batchData, id, row);
                 const raw = dataOrSuppressed(fieldById.get(id)!, cell ?? (dataByField.get(id) ?? ''), design, cell, row, batchData);
                 const field = fieldById.get(id)!;
                 const data = field.type === 'text'
