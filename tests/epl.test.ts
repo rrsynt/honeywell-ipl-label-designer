@@ -329,7 +329,10 @@ describe('EPL as a printer language', () => {
     });
 
     it('still refuses a language it does not speak', () => {
-        expect(validateTarget({ name: 'x', host: 'h', port: '9100', language: 'dpl' as never, dpi: 203 }).error).toMatch(/IPL, ZPL or EPL/);
+        // The message names every language the app does speak, so it grows as
+        // languages are added — matching the prefix keeps this about the
+        // REFUSAL rather than the list.
+        expect(validateTarget({ name: 'x', host: 'h', port: '9100', language: 'dpl' as never, dpi: 203 }).error).toMatch(/^Language must be IPL/);
     });
 
     it('REFUSES a record range, exactly as ZPL does', () => {

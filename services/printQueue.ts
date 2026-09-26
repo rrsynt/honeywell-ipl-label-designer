@@ -22,6 +22,7 @@ import type { BatchData } from './iplGenerator';
 import { generateIPL } from './iplGenerator';
 import { generateZPL } from './zpl/zplGenerator';
 import { generateEPL } from './epl/eplGenerator';
+import { generateTSPL } from './tspl/tsplGenerator';
 import { sendIplViaBridge, type BridgeResult } from './bridgeSend';
 import { getPrintServerUrl, sendChunkViaPrintServer } from './printRemoteBackend';
 import { requestToPromise, storeOf } from './designerDb';
@@ -270,7 +271,10 @@ export interface NewJobOptions {
  */
 export const jobSendabilityError = (design: Design, target: Pick<JobTarget, 'language'>): string | null => {
     if (target.language !== 'ipl' && designHasRecords(design)) {
-        const name = target.language === 'epl' ? 'EPL' : 'ZPL';
+        // Every non-IPL language here prints ONE label per stream with the copy
+        // count inside it (^PQ, P, PRINT), so a record range would send the
+        // first record and silently drop the rest.
+        const name = target.language.toUpperCase();
         return `${name} output prints one label per stream, so a record range cannot be sent to a ${name} printer. Pick an IPL target, or export the records as images instead.`;
     }
     return null;
@@ -401,16 +405,20 @@ export const jobChunks = (job: PrintJob): { records: number[]; batch?: BatchData
 export const renderJobChunk = async (job: PrintJob, chunkIndex: number, chunks = jobChunks(job)): Promise<string> => {
     const chunk = chunks[chunkIndex];
     if (!chunk) return '';
-    if (job.target.language === 'zpl' || job.target.language === 'epl') {
+    if (job.target.language !== 'ipl') {
         // jobSendabilityError already refused a record range on these, so this
         // is the single-label case: the copy count travels inside the stream
-        // (^PQ for ZPL, P for EPL), applied to a COPY of the snapshot so the
-        // stored job keeps the design the user made.
+        // (^PQ, P, PRINT), applied to a COPY of the snapshot so the stored job
+        // keeps the design the user made.
         const design: Design = {
             ...job.design,
             printerSettings: { ...job.design.printerSettings, quantity: Math.max(1, job.copies) },
         };
-        return job.target.language === 'epl' ? generateEPL(design).epl : generateZPL(design).zpl;
+        switch (job.target.language) {
+            case 'epl': return generateEPL(design).epl;
+            case 'tspl': return generateTSPL(design).tspl;
+            default: return generateZPL(design).zpl;
+        }
     }
     if (chunk.batch) return generateIPL(job.design, chunk.batch);
     // Single-record IPL: the copies live inside the stream as <RS>n, so the

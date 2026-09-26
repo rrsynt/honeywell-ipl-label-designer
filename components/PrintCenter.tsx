@@ -499,6 +499,7 @@ const PrinterTargetEditor: React.FC<{ targets: PrintTarget[]; onChanged: () => P
                             <option value="ipl">IPL</option>
                             <option value="zpl">ZPL</option>
                             <option value="epl">EPL</option>
+                            <option value="tspl">TSPL</option>
                         </select>
                         <select value={String(draft.dpi)} onChange={e => setDraft({ ...draft, dpi: parseInt(e.target.value) as 203 | 300 | 406 })} className={inputClasses} aria-label="Printer dpi">
                             {[203, 300, 406].map(d => <option key={d} value={d}>{d} dpi</option>)}

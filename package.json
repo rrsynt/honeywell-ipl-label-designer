@@ -17,7 +17,8 @@
     "db-server": "node tools/db-server.mjs",
     "crosscheck": "node tools/labelary-crosscheck.mjs",
     "zpl": "node tools/ipl2zpl.mjs",
-    "crosscheck:epl": "node tools/epl-crosscheck.mjs"
+    "crosscheck:epl": "node tools/epl-crosscheck.mjs",
+    "crosscheck:tspl": "node tools/tspl-crosscheck.mjs"
   },
   "dependencies": {
     "bwip-js": "^4.11.4",

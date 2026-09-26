@@ -1,0 +1,390 @@
+// TSPL (TSC Printer Language): the parser, the generator, and the places the
+// language reaches into the rest of the app.
+//
+// Every table here is pinned to the **TSPL/TSPL2 Programming Manual** (TSC
+// Auto ID, Copyright 2014). That matters more for TSPL than for the others:
+// its barcode types are NAMES ("128", "EAN13", "CODA"), not the numbers EPL
+// uses, so a table written from memory would put the wrong symbology on every
+// barcode — exactly the mistake EPL's first pass made.
+//
+// Two TSPL-specific hazards this pins down:
+//   * Rotation is CLOCKWISE (manual p. 77) while the IR quadrant is
+//     counter-clockwise, so the value is negated in BOTH directions. 0 and 180
+//     are their own inverses, which is why a one-case test would miss it.
+//   * The escape is neither ZPL's doubling nor EPL's backslash-quote: a quote
+//     and a backslash are each written as a backslash with a bracket (p. 77),
+//     and a backslash with two digits is a DECIMAL ASCII code.
+//
+// There is NO independent oracle for TSPL — see tools/tspl-crosscheck.mjs.
+
+import { describe, it, expect } from 'vitest';
+import { parseTSPL, tokenizeTspl, unescapeTspl, TSPL_FONT_SIZES } from '../services/tspl/tsplParser';
+import { generateTSPL, escapeTsplData } from '../services/tspl/tsplGenerator';
+import { jobSendabilityError, renderJobChunk, type PrintJob } from '../services/printQueue';
+import { validateTarget } from '../services/printTargets';
+import type { Design } from '../types';
+
+/** A single backslash. Writing these in a TS literal is how three attempts at
+ *  the escape tests got the runtime string wrong, so they are built explicitly. */
+const BS = String.fromCharCode(92);
+type Rotation = 0 | 90 | 180 | 270;
+
+// --- tokenizer --------------------------------------------------------------------
+
+describe('TSPL tokenizer', () => {
+    it('does not split a parameter on a comma inside the quoted payload', () => {
+        const [cmd] = tokenizeTspl('TEXT 10,10,"2",0,1,1,"SMITH, JOHN"');
+        expect(cmd.name).toBe('TEXT');
+        expect(cmd.quoted).toEqual(['2', 'SMITH, JOHN']);
+    });
+
+    it('keeps an escaped quote inside the payload', () => {
+        // A quote in the data is written \<bracket>, so BOTH quote marks need
+        // one. An earlier version unescaped while still hunting for the closing
+        // quote, which turned the escape back into a real delimiter and
+        // truncated the field.
+        const [cmd] = tokenizeTspl(`TEXT 10,10,"2",0,1,1,"say ${BS}[hi${BS}["`);
+        expect(cmd.quoted).toEqual(['2', 'say "hi"']);
+    });
+
+    it('reads the quoted code type of a BARCODE', () => {
+        const [cmd] = tokenizeTspl('BARCODE 10,50,"128",100,1,0,2,2,"12345"');
+        expect(cmd.quoted).toEqual(['128', '12345']);
+    });
+
+    it('ignores a comment after the command', () => {
+        const cmds = tokenizeTspl('CLS ; clear the buffer\nPRINT 1,1');
+        expect(cmds.map(c => c.name)).toEqual(['CLS', 'PRINT']);
+    });
+});
+
+describe('TSPL escapes', () => {
+    it('prints a quote and a backslash from their bracket escapes', () => {
+        // Manual p. 77: to print a double quote enter <bs>[ , for a backslash <bs>]
+        expect(unescapeTspl(`say ${BS}[hi${BS}[`)).toBe('say "hi"');
+        expect(unescapeTspl(`back${BS}]slash`)).toBe(`back${BS}slash`);
+    });
+
+    it('reads a backslash with two digits as a DECIMAL ASCII code', () => {
+        expect(unescapeTspl(`${BS}65${BS}66`)).toBe('AB'); // 65=A, 66=B
+    });
+});
+
+// --- the parser -------------------------------------------------------------------
+
+describe('TSPL parser', () => {
+    // The manual's own worked example (p. 47) — the closest thing to ground
+    // truth this language has here.
+    const manualSample = [
+        'SIZE 50 mm,25 mm',
+        'GAP 3 mm,0',
+        'DIRECTION 1',
+        'CLS',
+        'BOX 60,60,610,210,4',
+        'PRINT 1,1',
+    ].join('\n');
+
+    it('parses the manual example and takes the label size from SIZE', () => {
+        const label = parseTSPL(manualSample);
+        expect(label.widthDots).toBe(400);  // 50mm at 203dpi (8 dots/mm)
+        expect(label.heightDots).toBe(200); // 25mm
+        expect(label.elements.map(e => e.kind)).toEqual(['box']);
+        expect(label.issues.filter(i => i.level === 'error')).toHaveLength(0);
+    });
+
+    it('reads BOX as two corners, in either order', () => {
+        const box = parseTSPL('CLS\nBOX 60,60,610,210,4').elements[0] as any;
+        expect([box.kind, box.ox, box.oy, box.widthDots, box.heightDots, box.thicknessDots]).toEqual(['box', 60, 60, 550, 150, 4]);
+        const flipped = parseTSPL('CLS\nBOX 610,210,60,60,4').elements[0] as any;
+        expect([flipped.ox, flipped.oy, flipped.widthDots, flipped.heightDots]).toEqual([60, 60, 550, 150]);
+    });
+
+    it('reads the BOX corner radius when given', () => {
+        expect((parseTSPL('CLS\nBOX 10,10,110,110,2,20').elements[0] as any).radiusDots).toBe(20);
+    });
+
+    it('reads BAR as a line, oriented by which side is longer', () => {
+        const h = parseTSPL('CLS\nBAR 250,20,100,5').elements[0] as any;
+        expect([h.kind, h.lengthDots, h.thicknessDots, h.f]).toEqual(['line', 100, 5, 0]);
+        const v = parseTSPL('CLS\nBAR 250,20,5,100').elements[0] as any;
+        expect([v.lengthDots, v.thicknessDots, v.f]).toEqual([100, 5, 1]);
+    });
+
+    it('NEGATES the rotation, because TSPL turns CLOCKWISE and the IR does not', () => {
+        // Manual p. 77: "90: degrees, in clockwise direction". The IR's f1 is
+        // counter-clockwise, so 90 clockwise is f3. Carrying the value across
+        // unchanged would mirror every rotated field — and 0/180 look identical
+        // either way, which is what makes this easy to ship broken.
+        const at = (deg: number) => (parseTSPL(`CLS\nTEXT 10,10,"2",${deg},1,1,"X"`).elements[0] as any).f;
+        expect(at(0)).toBe(0);
+        expect(at(90)).toBe(3);   // NOT 1
+        expect(at(180)).toBe(2);
+        expect(at(270)).toBe(1);  // NOT 3
+    });
+
+    it('pins the resident font table from the manual', () => {
+        expect(TSPL_FONT_SIZES['1']).toEqual({ width: 8, height: 12 });
+        expect(TSPL_FONT_SIZES['2']).toEqual({ width: 12, height: 20 });
+        expect(TSPL_FONT_SIZES['3']).toEqual({ width: 16, height: 24 });
+        expect(TSPL_FONT_SIZES['4']).toEqual({ width: 24, height: 32 });
+        expect(TSPL_FONT_SIZES['5']).toEqual({ width: 32, height: 48 });
+        expect(TSPL_FONT_SIZES['8']).toEqual({ width: 14, height: 25 });
+    });
+
+    it('warns about a downloaded font rather than guessing at it', () => {
+        const label = parseTSPL('CLS\nTEXT 10,10,"ROMAN.TTF",0,1,1,"X"');
+        expect(label.elements).toHaveLength(1);
+        expect(label.issues.some(i => i.code === 'tspl-font-download')).toBe(true);
+    });
+
+    it('maps the barcode TYPES BY NAME, which is what TSPL uses', () => {
+        // Not numbers like EPL. A from-memory table would be wrong here.
+        const symOf = (type: string, data = '12345') =>
+            (parseTSPL(`CLS\nBARCODE 10,50,"${type}",100,1,0,2,2,"${data}"`).elements[0] as any)?.symbology;
+        expect(symOf('128')).toBe('6');
+        expect(symOf('128M')).toBe('6');
+        expect(symOf('EAN128')).toBe('6');
+        expect(symOf('25')).toBe('2');
+        expect(symOf('25S')).toBe('3');
+        expect(symOf('39')).toBe('0');
+        expect(symOf('93')).toBe('1');
+        expect(symOf('CODA')).toBe('4');
+        expect(symOf('11')).toBe('5');
+        expect(symOf('POST')).toBe('11');
+    });
+
+    it('carries the EAN/UPC variant the type names', () => {
+        const verOf = (type: string, data: string) =>
+            (parseTSPL(`CLS\nBARCODE 10,50,"${type}",100,1,0,2,2,"${data}"`).elements[0] as any)?.eanUpcVersion;
+        expect(verOf('EAN13', '1234567890128')).toBe(2);
+        expect(verOf('EAN8', '12345670')).toBe(1);
+        expect(verOf('UPCA', '012345678905')).toBe(3);
+        expect(verOf('UPCE', '1234567')).toBe(4);
+    });
+
+    it('marks 39C as Code 39 with a host check digit', () => {
+        expect((parseTSPL('CLS\nBARCODE 10,50,"39C",100,1,0,2,2,"12345"').elements[0] as any).code39Mode).toBe('2');
+    });
+
+    it('reads the human-readable flag as below-or-nothing', () => {
+        // TSPL: 0 none, 1 left, 2 center, 3 right — all BELOW the bar.
+        const hriOf = (v: number) => (parseTSPL(`CLS\nBARCODE 10,50,"128",100,${v},0,2,2,"12345"`).elements[0] as any).hri;
+        expect(hriOf(0)).toBe(0);
+        expect(hriOf(1)).toBe(1);
+        expect(hriOf(2)).toBe(1);
+        expect(hriOf(3)).toBe(1);
+    });
+
+    it('names a known-but-unencodable type', () => {
+        const label = parseTSPL('CLS\nBARCODE 10,50,"MSI",100,1,0,2,2,"12345"');
+        expect(label.elements).toHaveLength(0);
+        expect(label.issues.find(i => i.code === 'tspl-barcode-unencoded')?.message).toMatch(/MSI/);
+    });
+
+    it('notes that an add-on variant draws only the main symbol', () => {
+        const label = parseTSPL('CLS\nBARCODE 10,50,"EAN13+5",100,1,0,2,2,"1234567890128"');
+        expect(label.elements).toHaveLength(1);
+        expect(label.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(true);
+    });
+
+    it('reports 2D and bitmap commands by name', () => {
+        const label = parseTSPL('CLS\nQRCODE 10,10,L,4,A,0,"x"\nPUTBMP 10,10,"a.bmp"');
+        expect(label.issues.some(i => i.code === 'tspl-qrcode-unsupported')).toBe(true);
+        expect(label.issues.some(i => i.code === 'tspl-bitmap-unsupported')).toBe(true);
+    });
+
+    it('says nothing about ordinary printer settings', () => {
+        expect(parseTSPL('SIZE 50 mm,25 mm\nGAP 3 mm,0\nSPEED 4\nDENSITY 8\nCLS\nPRINT 1,1').issues).toHaveLength(0);
+    });
+
+    it('reads the print count into the settings', () => {
+        expect(parseTSPL('CLS\nPRINT 3,1').settings.quantity).toBe(3);
+    });
+
+    it('warns that DIRECTION turns the whole label', () => {
+        expect(parseTSPL('DIRECTION 1\nCLS').issues.some(i => i.code === 'tspl-direction')).toBe(true);
+    });
+});
+
+// --- the generator ----------------------------------------------------------------
+
+const design = (fields: unknown[], over: Partial<Design> = {}): Design => ({
+    ...over,
+    name: 'TSPL test',
+    labelSettings: { width: 100, height: 50, columns: 1, rows: 1, unit: 'mm', orientation: 'portrait' },
+    printerSettings: { model: 'TTP-244', dpi: 203, quantity: 2, mediaType: 'direct-thermal', mediaSenseMode: 'gap', printSpeed: 6, darkness: 10 },
+    fields: fields as Design['fields'],
+    dataSources: over.dataSources ?? [],
+    nextId: 99,
+    guides: { horizontal: [], vertical: [] },
+} as unknown as Design);
+
+const textField = (over: Record<string, unknown> = {}) => ({
+    id: 1, type: 'text' as const, name: 'T', x: 10, y: 10, rotation: 0 as Rotation,
+    dataSource: { type: 'fixed' as const, data: 'HELLO' },
+    font: '0', fontSize: 12, h_mag: 1, w_mag: 1, ...over,
+});
+const barcodeField = (over: Record<string, unknown> = {}) => ({
+    id: 2, type: 'barcode' as const, name: 'B', x: 10, y: 30, rotation: 0 as Rotation,
+    dataSource: { type: 'fixed' as const, data: '12345' },
+    symbology: '0', humanReadable: 'below', h_mag: 60, w_mag: 2, ...over,
+});
+const lines = (fields: unknown[]) => generateTSPL(design(fields)).tspl.split('\n');
+
+describe('TSPL generator', () => {
+    it('opens with SIZE/GAP/CLS and closes with PRINT <copies>', () => {
+        const out = lines([textField()]);
+        expect(out[0]).toMatch(/^SIZE /);
+        expect(out[1]).toBe('GAP 3 mm,0');
+        expect(out[2]).toBe('CLS');
+        expect(out[out.length - 1]).toBe('PRINT 2,1');
+    });
+
+    it('emits TEXT with the TSPL font for the design font', () => {
+        const t = lines([textField()]).find(l => l.startsWith('TEXT'))!;
+        expect(t).toContain('"HELLO"');
+        expect(t.split(',')[2]).toBe('"1"'); // design font '0' -> TSPL font 1
+    });
+
+    it('emits BARCODE with the type NAME, not a number', () => {
+        const b = lines([barcodeField()]).find(l => l.startsWith('BARCODE'))!;
+        expect(b.split(',')[2]).toBe('"39"');
+        expect(b).toContain('"12345"');
+    });
+
+    it('picks the EAN/UPC name from the DATA LENGTH', () => {
+        const typeOf = (data: string) => lines([barcodeField({ symbology: '7', dataSource: { type: 'fixed', data } })])
+            .find(l => l.startsWith('BARCODE'))!.split(',')[2];
+        expect(typeOf('1234567890128')).toBe('"EAN13"');
+        expect(typeOf('12345670')).toBe('"EAN8"');
+        expect(typeOf('012345678905')).toBe('"UPCA"');
+        expect(typeOf('1234567')).toBe('"UPCE"');
+    });
+
+    it('skips an EAN/UPC of a length TSPL does not know, and says which', () => {
+        const { tspl, warnings } = generateTSPL(design([barcodeField({ symbology: '7', dataSource: { type: 'fixed', data: '123' } })]));
+        expect(tspl.split('\n').some(l => l.startsWith('BARCODE'))).toBe(false);
+        expect(warnings.some(w => /digits/.test(w))).toBe(true);
+    });
+
+    it('NEGATES the rotation on the way out, the inverse of the parser', () => {
+        const rotOf = (r: Rotation) => Number(lines([textField({ rotation: r })]).find(l => l.startsWith('TEXT'))!.split(',')[3]);
+        expect(rotOf(0)).toBe(0);
+        expect(rotOf(90)).toBe(270);
+        expect(rotOf(180)).toBe(180);
+        expect(rotOf(270)).toBe(90);
+    });
+
+    it('warns that "above" HRI prints below, and still prints it', () => {
+        const { tspl, warnings } = generateTSPL(design([barcodeField({ humanReadable: 'above' })]));
+        // TSPL's non-zero human-readable values are all below-the-bar alignments,
+        // so emitting 0 would DROP the line — moving it is the lesser evil.
+        expect(Number(tspl.split('\n').find(l => l.startsWith('BARCODE'))!.split(',')[4])).toBe(1);
+        expect(warnings.some(w => /above/.test(w) && /below/.test(w))).toBe(true);
+    });
+
+    it('emits no HRI when none was asked for', () => {
+        expect(lines([barcodeField({ humanReadable: 'none' })]).find(l => l.startsWith('BARCODE'))!.split(',')[4]).toBe('0');
+    });
+
+    it('emits BOX with the FAR CORNER', () => {
+        const p = lines([{ id: 3, type: 'box', name: 'X', x: 5, y: 5, rotation: 0 as Rotation, width: 20, height: 10, thickness: 0.5 }])
+            .find(l => l.startsWith('BOX'))!.slice(4).split(',').map(Number);
+        expect(p[2] - p[0]).toBe(160); // 20mm at 203dpi
+        expect(p[3] - p[1]).toBe(80);
+    });
+
+    it('KEEPS the corner radius, which TSPL boxes support', () => {
+        // Unlike EPL, where a rounded box has to be warned about instead.
+        const box = lines([{ id: 3, type: 'box', name: 'X', x: 5, y: 5, rotation: 0 as Rotation, width: 20, height: 10, thickness: 0.5, cornerRadius: 3 }])
+            .find(l => l.startsWith('BOX'))!;
+        expect(box.split(',')).toHaveLength(6);
+        expect(Number(box.split(',')[5])).toBeGreaterThan(0);
+    });
+
+    it('emits BAR with the length on the axis the line runs along', () => {
+        const lineField = (rot: Rotation) => ({ id: 4, type: 'line', name: 'L', x: 5, y: 40, rotation: rot, length: 40, thickness: 0.5 });
+        const h = lines([lineField(0)]).find(l => l.startsWith('BAR'))!.slice(4).split(',').map(Number);
+        expect(h[2]).toBeGreaterThan(h[3]);
+        const v = lines([lineField(90)]).find(l => l.startsWith('BAR'))!.slice(4).split(',').map(Number);
+        expect(v[3]).toBeGreaterThan(v[2]);
+    });
+
+    it('names an unsupported field type instead of dropping it silently', () => {
+        const { tspl, warnings } = generateTSPL(design([{ id: 5, type: 'image', name: 'Logo', x: 1, y: 1, rotation: 0 as Rotation, width: 10, height: 10, data: '' }]));
+        expect(warnings.some(w => /Logo/.test(w))).toBe(true);
+        expect(tspl).toContain('PRINT 2,1'); // the rest of the label still prints
+    });
+
+    it('names an unsupported symbology', () => {
+        expect(generateTSPL(design([barcodeField({ symbology: '18', name: 'QR' })])).warnings.some(w => /QR/.test(w))).toBe(true);
+    });
+
+    it('escapes a quote and a backslash the TSPL way, and the parser undoes it', () => {
+        expect(escapeTsplData('say "hi"')).toBe(`say ${BS}[hi${BS}[`);
+        expect(escapeTsplData(`back${BS}slash`)).toBe(`back${BS}]slash`);
+        const { tspl } = generateTSPL(design([textField({ dataSource: { type: 'fixed', data: `a"b${BS}c` } })]));
+        expect((parseTSPL(tspl).elements[0] as any).source.data).toBe(`a"b${BS}c`);
+    });
+
+    it('ROUND TRIP: what it emits, the parser reads back as the same elements', () => {
+        const { tspl } = generateTSPL(design([
+            textField(), barcodeField(),
+            { id: 3, type: 'box', name: 'X', x: 5, y: 5, rotation: 0 as Rotation, width: 20, height: 10, thickness: 0.5 },
+            { id: 4, type: 'line', name: 'L', x: 5, y: 40, rotation: 0 as Rotation, length: 40, thickness: 0.5 },
+        ]));
+        const label = parseTSPL(tspl);
+        expect(label.issues.filter(i => i.level === 'error')).toHaveLength(0);
+        expect(label.elements.map(e => e.kind)).toEqual(['text', 'barcode', 'box', 'line']);
+        expect((label.elements[1] as any).symbology).toBe('0'); // Code 39, back again
+        expect(label.widthDots).toBeGreaterThan(0);             // SIZE reached the label
+    });
+});
+
+// --- where TSPL reaches into the rest of the app -----------------------------------
+
+describe('TSPL as a printer language', () => {
+    it('is accepted by the printer-target form', () => {
+        const { target, error } = validateTarget({ name: 'Line 1', host: '10.0.0.5', port: '9100', language: 'tspl' as never, dpi: 203 });
+        expect(error).toBeNull();
+        expect(target?.language).toBe('tspl');
+    });
+
+    it('REFUSES a record range, exactly as ZPL and EPL do', () => {
+        // PRINT carries the copies, so a table-backed design would send one
+        // record and drop the rest. The design needs a field LINKED to the
+        // table AND named after a column: an unmapped table is not a job, and
+        // a job with no records has nothing to refuse.
+        const tableDesign = design([{
+            ...textField({ name: 'SKU', dataSource: { type: 'linked', sourceId: 's1' } }),
+        }], {
+            dataSources: [{
+                id: 's1', name: 'Table', type: 'table', columns: ['SKU'],
+                rows: [{ SKU: 'A' }, { SKU: 'B' }], query: { filters: [], combine: 'and' },
+            }],
+        } as unknown as Partial<Design>);
+        expect(jobSendabilityError(tableDesign, { language: 'tspl' })).toMatch(/TSPL.*record range/i);
+        expect(jobSendabilityError(tableDesign, { language: 'ipl' })).toBeNull();
+        expect(jobSendabilityError(design([textField()]), { language: 'tspl' })).toBeNull();
+    });
+
+    it('renders TSPL for a TSPL target — NOT IPL', () => {
+        // The silent hazard: a branch that falls through to generateIPL would
+        // send IPL commands to a TSC printer.
+        const job = {
+            id: 'j1', createdAt: 1, updatedAt: 1, designName: 'D', designChecksum: 'x',
+            design: design([textField()]),
+            recordFrom: 1, recordTo: 1, copies: 3, collation: 'collated',
+            target: { id: 't', name: 'T', host: 'h', port: '9100', language: 'tspl', dpi: 203 },
+            labels: 3, chunkCount: 1, sentChunks: 0, status: 'queued',
+        } as unknown as PrintJob;
+
+        return renderJobChunk(job, 0).then(stream => {
+            expect(stream.startsWith('SIZE ')).toBe(true);   // TSPL opens with SIZE
+            expect(stream).toContain('TEXT ');
+            expect(stream).not.toContain('<STX>');            // definitely not IPL
+            expect(stream).not.toContain('^XA');              // and not ZPL
+            expect(stream.split('\n').pop()).toBe('PRINT 3,1');
+        });
+    });
+});

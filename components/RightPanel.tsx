@@ -6,6 +6,7 @@ import { PRINTER_MODELS, UNPRINTABLE_MARGIN_MM } from '../constants';
 import { generateIPL, fontSubstitutions, suppressionWarnings, type FontSubstitution } from '../services/iplGenerator';
 import { generateZPL } from '../services/zpl/zplGenerator';
 import { generateEPL } from '../services/epl/eplGenerator';
+import { generateTSPL } from '../services/tspl/tsplGenerator';
 import { parseCsv, exportableVariableFields, planCsvJob, MAX_JOB_ROWS, decodeCsvText, MAX_CSV_FILE_BYTES } from '../services/csvJob';
 import { CsvRowPreview } from './CsvRowPreview';
 import { sendIplViaBridge } from '../services/bridgeSend';
@@ -235,6 +236,7 @@ const PrinterSettingsEditor: React.FC<{ settings: Design['printerSettings']; dis
                     <option value="ipl">IPL (Honeywell)</option>
                     <option value="zpl">ZPL (Zebra)</option>
                     <option value="epl">EPL (Eltron/Zebra desktop)</option>
+                    <option value="tspl">TSPL (TSC)</option>
                 </select>
             </PropInput>
             <PropInput label="Printer Model" fullWidth>
@@ -1143,10 +1145,11 @@ export const RightPanel: React.FC<{ activeDesign: Design; selectedFieldIds: numb
             // default — and is the explicit fallback, not just "everything else",
             // so a language added later cannot silently emit IPL here.
             const language = activeDesign.printerSettings.language ?? 'ipl';
-            if (language === 'zpl' || language === 'epl') {
-                const { stream, warnings } = language === 'epl'
-                    ? (() => { const r = generateEPL(activeDesign); return { stream: r.epl, warnings: r.warnings }; })()
-                    : (() => { const r = generateZPL(activeDesign); return { stream: r.zpl, warnings: r.warnings }; })();
+            if (language !== 'ipl') {
+                const { stream, warnings } =
+                    language === 'epl' ? (() => { const r = generateEPL(activeDesign); return { stream: r.epl, warnings: r.warnings }; })()
+                        : language === 'tspl' ? (() => { const r = generateTSPL(activeDesign); return { stream: r.tspl, warnings: r.warnings }; })()
+                            : (() => { const r = generateZPL(activeDesign); return { stream: r.zpl, warnings: r.warnings }; })();
                 setIplCode(stream);
                 setZplWarnings(warnings);
             } else {

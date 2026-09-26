@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import type { Design, PrinterSettings } from '../types';
+import type { Design, PrinterLanguage, PrinterSettings } from '../types';
 import { parseIPL } from '../services/iplParser';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
 import { parseZPL } from '../services/zpl/zplParser';
 import { parseEPL } from '../services/epl/eplParser';
+import { parseTSPL } from '../services/tspl/tsplParser';
 import { computeLabelExtent, renderLabel } from '../services/ipl/renderer';
 import { ensureBarcodesReady } from '../services/ipl/barcodes';
 import type { ViewerIssue } from '../services/ipl/types';
@@ -112,7 +113,7 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
     const [sendPort, setSendPort] = useState(() => getPrinterTarget().port);
     const [bridgeStatus, setBridgeStatus] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle');
     /** Set when the user corrects the detected language. Null = trust detection. */
-    const [langOverride, setLangOverride] = useState<'ipl' | 'zpl' | 'epl' | null>(null);
+    const [langOverride, setLangOverride] = useState<PrinterLanguage | null>(null);
     const [sendState, setSendState] = useState<{ busy: boolean; ok?: boolean; msg?: string }>({ busy: false });
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -206,15 +207,23 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
     // issue list until the user edits the text.
     //
     // ZPL starts with ^XA and IPL with <STX>, so those two are recognised from
-    // a sigil. EPL has NONE — it is bare `N`, `A50,30,...` — so its rule must be
-    // stricter or it would swallow ordinary text: a line that is exactly `N`,
-    // AND at least one line shaped like an EPL command with numeric parameters.
-    // Either half alone is not enough (`N` is a plausible text line, and `A`
-    // and `B` are ordinary letters). A stream that is none of the three falls
-    // through to the IPL parser, whose "no frames found" error is the most
-    // useful of the three messages.
-    const detectedLanguage = useMemo<'ipl' | 'zpl' | 'epl'>(() => {
+    // a sigil. EPL and TSPL have NONE, so their rules must be stricter or they
+    // would swallow ordinary text or each other:
+    //
+    //   EPL  — a line that is exactly `N`, AND a line shaped like an EPL
+    //          command with numeric parameters.
+    //   TSPL — a line that is exactly `CLS`, AND a line shaped like TSPL's
+    //          `TEXT x,y,"font",…` or `BARCODE x,y,"type",…`. The quoted
+    //          parameter is what separates it from EPL, which never quotes a
+    //          type name.
+    //
+    // Either half alone is not enough (`N` and `CLS` are plausible text lines;
+    // `A`, `B` and `TEXT` are ordinary words). A stream that is none of them
+    // falls through to the IPL parser, whose "no frames found" error is the
+    // most useful of the messages.
+    const detectedLanguage = useMemo<PrinterLanguage>(() => {
         if (/^\s*\^XA/i.test(debouncedCode)) return 'zpl';
+        if (/^\s*CLS\s*$/mi.test(debouncedCode) && /^(?:TEXT\s+\d+,\d+,\s*"|BARCODE\s+\d+,\d+,\s*"|SIZE\s+)/mi.test(debouncedCode)) return 'tspl';
         if (/^\s*N\s*$/m.test(debouncedCode) && /^(?:A\d+,\d+,|B\d+,\d+,|LO\d+,|LW\d+,|q\d+\s*$|Q\d+,)/m.test(debouncedCode)) return 'epl';
         return 'ipl';
     }, [debouncedCode]);
@@ -225,6 +234,7 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
     const label = useMemo(
         () => (language === 'zpl' ? parseZPL(debouncedCode)
             : language === 'epl' ? parseEPL(debouncedCode)
+            : language === 'tspl' ? parseTSPL(debouncedCode)
             : parseViewerIPL(debouncedCode)),
         [debouncedCode, language, bwipReady],
     );
@@ -615,13 +625,14 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                                 {/* Which language the text was read as. Shown, not
                                     assumed: detection is a guess and a wrong one
                                     would otherwise render the wrong label silently. */}
-                                <select value={language} onChange={e => setLangOverride(e.target.value as 'ipl' | 'zpl' | 'epl')}
+                                <select value={language} onChange={e => setLangOverride(e.target.value as PrinterLanguage)}
                                     aria-label="Source language"
                                     title={langOverride ? "Language chosen by hand" : "Detected from the stream"}
                                     className="flex-shrink-0 bg-gray-700 text-gray-200 text-[11px] rounded px-1 py-0.5 outline-none">
                                     <option value="ipl">IPL</option>
                                     <option value="zpl">ZPL</option>
                                     <option value="epl">EPL</option>
+                                    <option value="tspl">TSPL</option>
                                 </select>
                                 <span className="flex-shrink-0">Source</span>
                                 {langOverride && langOverride !== detectedLanguage && (

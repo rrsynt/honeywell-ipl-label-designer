@@ -53,6 +53,7 @@ npm run build        # produksi (bwip-js & jspdf lazy-loaded)
 | Capture stream | `npm run bridge -- --listen=9100` | Bridge jadi fake printer; buka http://localhost:9181/capture |
 | Crosscheck Labelary | `npm run crosscheck -- samples/product.ipl` | IPL ke ZPL ke PNG render Zebra untuk perbandingan visual |
 | Konversi ZPL | `npm run zpl -- samples/product.ipl` | Tulis samples/product.zpl |
+| Crosscheck TSPL | `npm run crosscheck:tspl -- samples/product.tspl` | **Tidak ada oracle independen untuk TSPL** — Labelary hanya menerima ZPL sebagai input, dan engine Labelize mem-parse ZPL/EPL saja. Perintah ini melaporkan pembacaan parser kita per elemen, untuk dicek manusia terhadap manual TSC dan printer sungguhan. Lebih lemah daripada crosscheck EPL, dan disebut apa adanya. |
 | Crosscheck EPL | `npm run crosscheck:epl -- samples/product.epl` | Render EPL lewat engine **Labelize** (independen, MIT) dan tulis PNG di sebelahnya. Gunanya bukan identitas pixel, tapi **kesesuaian layout**: parser dan generator kita bisa sepakat satu sama lain tapi sama-sama salah membaca spec — hanya implementasi lain yang bisa menangkap itu. |
 | Print server bersama | `npm run print-server` | Satu proses LAN memegang antrean, daftar printer dan log untuk semua stasiun. Alamatnya diisi di Print Center (mis. `http://192.168.1.10:9183`); kosong berarti antrean tetap di komputer ini. Karena server ini yang menulis ke soket printer, ia tahu pasti chunk mana yang sudah tercetak — peringatan "retry bisa cetak dua kali" hilang untuk antrean yang lewat sini. |
 | Database langsung | `npm run db-server` | Ambil baris dari SQL Server sebagai sumber data tabel. Alamatnya diisi di tab Data (mis. `http://192.168.1.10:9184`), lalu tombol **From database…** menjalankan query tersimpan. Connection string tinggal di berkas query di server dan tidak pernah dikirim ke browser; klien hanya memilih nama query, tidak pernah mengirim SQL. Barisnya disimpan di dalam design, jadi membuka design lama tidak butuh database. |
@@ -62,7 +63,7 @@ npm run build        # produksi (bwip-js & jspdf lazy-loaded)
 - `services/iplGenerator.ts`, `services/iplParser.ts` - generator & parser sisi designer (round-trip)
 - `services/canvasDrawer.ts`, `services/geometry.ts` - renderer editor canvas
 - `services/ipl/` - pipeline viewer (independen dari model Design)
-- `services/zpl/`, `services/epl/` - bahasa printer lain: parser + generator,
+- `services/zpl/`, `services/epl/`, `services/tspl/` - bahasa printer lain: parser + generator,
   keduanya subset yang melaporkan apa yang tidak bisa digambar lewat peringatan
   bernama, bukan menghilangkannya diam-diam
   - `tokenizer.ts` - framing STX/ETX dual-notasi
