@@ -14,7 +14,8 @@ import { requestConfirm, notify } from './services/uiDialogs';
 import { ContextMenu } from './components/ContextMenu';
 import type { ContextMenuOption } from './components/ContextMenu';
 import { getSavedDesigns, saveDesign, loadDesign, deleteDesign } from './services/designManager';
-import { getLibraryRecord, saveLibraryRecord, deleteLibraryRecord, migrateLegacyLibrary, serializeLabelFile, parseLabelFile, writeRecovery, readRecovery, clearRecovery, designChecksum } from './services/libraryStore';
+import { getLibraryRecord, saveLibraryRecord, deleteLibraryRecord, migrateLegacyLibrary, serializeLabelFile, parseLabelFile, writeRecovery, readRecovery, clearRecovery, designChecksum, memoryBackend, indexedDbBackend, setLibraryBackend } from './services/libraryStore';
+import { getLibraryServerUrl, remoteBackend } from './services/libraryRemoteBackend';
 import { loadInstalledFonts } from './services/fontStore';
 import { getAxisAlignedBoundingBox } from './services/geometry';
 import { expandIdsWithGroups } from './services/dragMath';
@@ -668,6 +669,18 @@ export default function App() {
     // Bumped after every save/delete so an open library grid re-reads storage.
     const [libraryRevision, setLibraryRevision] = useState(0);
 
+    // A shared library was chosen in an earlier session. Applied BEFORE the
+    // migration below, which writes into whatever backend is current — pointed
+    // at a server, the old local designs would otherwise be copied onto it.
+    // Recovery stays on the local backend: an autosave is unfinished work and
+    // must not surface on every other station.
+    useEffect(() => {
+        const serverUrl = getLibraryServerUrl();
+        if (!serverUrl) return;
+        const hasIndexedDb = typeof indexedDB !== 'undefined' && indexedDB !== null;
+        setLibraryBackend(remoteBackend({ serverUrl, local: hasIndexedDb ? indexedDbBackend() : memoryBackend() }));
+    }, []);
+
     // One-time move of designs saved by older builds (localStorage, ~5 MB cap)
     // into the IndexedDB library. Once per browser; a failure here must not
     // block the editor, the old storage is still readable.
@@ -1177,6 +1190,7 @@ export default function App() {
             {showTemplates && <TemplateGallery onClose={() => setShowTemplates(false)} onPick={t => void appActions.onPickTemplate(t)} />}
             {showLibrary && <StartScreen
                 revision={libraryRevision}
+                onRevision={() => setLibraryRevision(r => r + 1)}
                 onClose={() => setShowLibrary(false)}
                 onNew={() => { setShowLibrary(false); void appActions.onNew(); }}
                 onTemplates={() => { setShowLibrary(false); setShowTemplates(true); }}

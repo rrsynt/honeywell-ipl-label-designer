@@ -5,7 +5,8 @@
 // which name was chosen.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { listLibrary, type LibraryMeta } from '../services/libraryStore';
+import { indexedDbBackend, listLibrary, memoryBackend, setLibraryBackend, type LibraryMeta } from '../services/libraryStore';
+import { getLibraryServerUrl, pingLibraryServer, remoteBackend, setLibraryServerUrl } from '../services/libraryRemoteBackend';
 
 const formatSize = (m: LibraryMeta): string => {
     const mm = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
@@ -25,11 +26,18 @@ export const StartScreen: React.FC<{
     onOpen: (name: string) => void;
     /** Bumped by the parent after a save/delete so the grid re-reads storage. */
     revision: number;
-}> = ({ onClose, onNew, onTemplates, onOpen, revision }) => {
+    /** The parent bumps `revision` — this screen can't, it doesn't own the state. */
+    onRevision: () => void;
+}> = ({ onClose, onNew, onTemplates, onOpen, revision, onRevision }) => {
     const [records, setRecords] = useState<LibraryMeta[] | null>(null);
     const [failed, setFailed] = useState(false);
     const [query, setQuery] = useState('');
     const [tag, setTag] = useState<string | null>(null);
+    // The shared library. What is stored and what the field shows are kept
+    // apart: the field is edited freely, and only "Use" commits it.
+    const [serverUrl, setServerUrl] = useState(() => getLibraryServerUrl());
+    const [serverDraft, setServerDraft] = useState(serverUrl);
+    const [serverState, setServerState] = useState<{ text: string; ok: boolean } | null>(null);
 
     useEffect(() => {
         let live = true;
@@ -44,6 +52,36 @@ export const StartScreen: React.FC<{
         for (const r of records ?? []) for (const t of r.tags) all.add(t);
         return [...all].sort();
     }, [records]);
+
+    // Point the library at a shared server, or back at this browser. The grid
+    // re-reads because `revision` changes; a server that does not answer
+    // leaves the grid showing the failure the list already renders.
+    const applyServer = async () => {
+        let clean = '';
+        try {
+            clean = setLibraryServerUrl(serverDraft);
+        } catch (e) {
+            setServerState({ text: e instanceof Error ? e.message : String(e), ok: false });
+            return;
+        }
+        if (clean === '') {
+            const hasIndexedDb = typeof indexedDB !== 'undefined' && indexedDB !== null;
+            setLibraryBackend(hasIndexedDb ? indexedDbBackend() : memoryBackend());
+        } else {
+            const hasIndexedDb = typeof indexedDB !== 'undefined' && indexedDB !== null;
+            setLibraryBackend(remoteBackend({ serverUrl: clean, local: hasIndexedDb ? indexedDbBackend() : memoryBackend() }));
+        }
+        setServerUrl(clean);
+        setServerDraft(clean);
+        setRecords(null);
+        setFailed(false);
+        onRevision();
+        if (clean === '') { setServerState({ text: 'Designs stay on this computer.', ok: true }); return; }
+        const up = await pingLibraryServer(clean);
+        setServerState(up
+            ? { text: 'Connected. Designs are shared from this server.', ok: true }
+            : { text: 'Saved, but the server did not answer. Start it with: node tools/library-server.mjs', ok: false });
+    };
 
     const shown = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -78,6 +116,27 @@ export const StartScreen: React.FC<{
                         className="w-56 text-sm p-1.5 bg-gray-700 rounded-md border border-gray-600 focus:ring-1 focus:ring-blue-500 outline-none"
                     />
                 </div>
+
+                <div className="flex items-center gap-2 mb-4">
+                    <span className="material-icons text-gray-400 text-base" title="Share this library with other computers">lan</span>
+                    <input
+                        value={serverDraft}
+                        onChange={e => setServerDraft(e.target.value)}
+                        placeholder="Shared server, e.g. http://192.168.1.10:9182"
+                        aria-label="Shared library server"
+                        className="flex-1 text-sm p-1.5 bg-gray-700 rounded-md border border-gray-600 focus:ring-1 focus:ring-blue-500 outline-none"
+                    />
+                    <button onClick={() => void applyServer()}
+                        className="px-3 py-1.5 text-sm rounded-md bg-gray-700 hover:bg-gray-600 text-white">
+                        {serverDraft.trim() === '' ? 'Keep local' : 'Use server'}
+                    </button>
+                    {serverUrl !== '' && (
+                        <span className="text-[11px] text-blue-300 whitespace-nowrap">shared</span>
+                    )}
+                </div>
+                {serverState && (
+                    <p className={`text-xs mb-3 -mt-2 ${serverState.ok ? 'text-green-400' : 'text-red-400'}`}>{serverState.text}</p>
+                )}
 
                 {tags.length > 0 && (
                     <div className="flex items-center gap-1.5 mb-3 flex-wrap">

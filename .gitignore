@@ -30,4 +30,8 @@ testdata/golden/diffs/
 *.crosscheck.zpl
 *.crosscheck.png
 
+# Shared library server data (tools/library-server.mjs). Designs saved here are
+# the shop's, not the repository's.
+library-data/
+
 .vercel
