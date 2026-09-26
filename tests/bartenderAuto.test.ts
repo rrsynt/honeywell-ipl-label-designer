@@ -224,5 +224,83 @@ for (const c of CASES) {
             }
             expect(misses, misses.join('\n')).toEqual([]);
         }, 60000);
+
+        // A mirror is invisible to everything above: ink totals are unchanged
+        // by a flip, and a centroid barely moves. This is the only check that
+        // asks WHERE the ink is, so it is the only one that would have caught
+        // the Direct Graphics row-order bug — measured, it stayed green with
+        // that bug reintroduced. The row profile is compared after normalising
+        // both images to their own ink boxes, so BarTender's stock offsets do
+        // not matter, only the arrangement.
+        it('matches the export\'s row profile, not just its ink totals', async () => {
+            const extent = computeLabelExtent(label, 203);
+            const rotated = c.rotation % 2 === 1;
+            const ours = newRealCanvas(
+                rotated ? extent.heightDots : extent.widthDots,
+                rotated ? extent.widthDots : extent.heightDots);
+            renderLabel(ours as unknown as HTMLCanvasElement, label, extent,
+                { dpi: 203, pxPerDot: 1, quality: 1, rotation: c.rotation });
+
+            const img = await loadImage(c.png);
+            const cellW = Math.floor(img.width / c.grid[0]), cellH = Math.floor(img.height / c.grid[1]);
+            const exp = newRealCanvas(cellW, cellH);
+            exp.getContext('2d').drawImage(img, 0, 0, cellW, cellH, 0, 0, cellW, cellH);
+
+            const profile = (cv: typeof exp) => {
+                const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+                const rows = new Array<number>(cv.height).fill(0);
+                let y0 = cv.height, y1 = -1;
+                for (let y = 0; y < cv.height; y++) {
+                    let n = 0;
+                    for (let x = 0; x < cv.width; x++) {
+                        const o = (y * cv.width + x) * 4;
+                        if (d[o + 3] > 0 && d[o] < 100 && d[o + 1] < 100 && d[o + 2] < 100) n++;
+                    }
+                    rows[y] = n;
+                    if (n > 0) { if (y < y0) y0 = y; if (y > y1) y1 = y; }
+                }
+                return { rows, y0, y1 };
+            };
+
+            // Resample each profile to a fixed number of bins over its own ink
+            // span, so the two are comparable despite different canvas heights.
+            const BINS = 200;
+            const normalise = (p: ReturnType<typeof profile>) => {
+                const h = p.y1 - p.y0 + 1;
+                const out = new Array<number>(BINS).fill(0);
+                const cnt = new Array<number>(BINS).fill(0);
+                for (let i = 0; i < h; i++) {
+                    const bin = Math.min(BINS - 1, Math.floor(i / h * BINS));
+                    out[bin] += p.rows[p.y0 + i]; cnt[bin]++;
+                }
+                return out.map((v, i) => (cnt[i] ? v / cnt[i] : 0));
+            };
+
+            const a = normalise(profile(ours as never));
+            const b = normalise(profile(exp as never));
+            const ma = a.reduce((s, v) => s + v, 0) / BINS;
+            const mb = b.reduce((s, v) => s + v, 0) / BINS;
+            let num = 0, da = 0, db = 0;
+            for (let i = 0; i < BINS; i++) {
+                const x = a[i] - ma, y = b[i] - mb;
+                num += x * y; da += x * x; db += y * y;
+            }
+            const r = num / Math.sqrt(da * db);
+
+            // Thresholds are measured, not chosen. Running this check with and
+            // without the row-order fix (2026-09-27):
+            //
+            //   parity-base    bug 0.185   fixed 0.440
+            //   bartender-auto bug ~0.29   fixed 0.351
+            //
+            // parity-base flips nearly the whole label because BarTender
+            // rasterizes ALL of its text to Direct Graphics; bartender-auto
+            // carries only 4 graphics among other vector content, so its signal
+            // is weaker. 0.30 clears the bug's worst (0.185) with margin and
+            // sits below both fixed values — the margin that matters is on the
+            // bug side, and this threshold only has to separate the two.
+            expect(r, `row-profile correlation ${r.toFixed(3)} against ${c.name}`)
+                .toBeGreaterThan(0.30);
+        }, 60000);
     });
 }

@@ -363,6 +363,11 @@ export class IPLViewerParser {
         // extent (text/line heights need the renderer's font metrics, which
         // would be a circular import — the approximation is acceptable since
         // the max-originY floor below keeps every DG on-label).
+        //
+        // Deliberately NOT <SI>W. That is the printhead-width axis while the DG
+        // origin's Y runs along the feed (length) axis; the two are independent,
+        // and in `bartender-parity-base.ipl` W388 coexists with origin Y604, so
+        // taking W as the height would put every graphic at a negative y.
         let hBase = this.printer.label.heightDots ?? 0;
         if (!hBase) {
             for (const el of this.printer.label.elements) {

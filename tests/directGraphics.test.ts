@@ -96,6 +96,9 @@ describe('Direct Graphics Mode (BarTender shapes)', () => {
         expect(gfx.map(g => g.ox)).toEqual([24, 105, 220]);
         // No <SI>L; the fallback height is max(content extent 784, max
         // originY 791) = 791, so top-down y = 791 - 791 + minBit = minBit.
+        // The box anchor is unchanged by the bit-order fix: that reverses the
+        // rows INSIDE the box (directGraphicVisualBox keeps minBit as the top
+        // edge for the same reason).
         expect(gfx.map(g => g.oy)).toEqual([49, 4, 10]);
         // Arrow (dg0): ink bits 49..165 -> height 117, columns 24..93 -> width 70.
         expect(gfx[0].widthDots).toBe(70);
@@ -125,19 +128,54 @@ describe('Direct Graphics Mode (BarTender shapes)', () => {
         expect(gfx[2].widthDots).toBeGreaterThan(1);
     });
 
-    it('directGraphicToBitmap: manual worked example places bits downward from origin', () => {
-        // PRM p.263: a graphic at X0,Y450 loads "up to Y425" — bit i sits at
-        // bottom-up Y = 450 - i. On a 450-tall label that is top-down y = i,
-        // so bit 0 is the TOP row. 26 columns, one ink bit each at bit 0.
-        const bytes = [0x21, 0x80, 0x43, 0xc2]; // origin [0,450]
-        for (let c = 0; c < 26; c++) bytes.push(0x25, 0x81, 0x22); // 1 black dot, end-of-line
-        bytes.push(0x28);
+    // Direct Graphics bit order. PRM Appendix E ("Using Direct Graphics
+    // Commands") says each column "loads from the bottom to the top", and the
+    // column it decodes places the payload's LAST set bit nearest the origin,
+    // so the bit index runs AWAY from the origin and the bitmap rows must be
+    // reversed relative to the data. Getting this backwards mirrors every
+    // rasterized graphic vertically — invisible to any test that counts ink or
+    // uses a single-row bitmap, which is exactly how it survived 1185 green
+    // tests until a sample appeared whose whole text BarTender rasterizes.
+    it('directGraphicToBitmap: bit index runs away from the origin', () => {
+        // One graphic, two columns, deliberately ASYMMETRIC: column 0 inks only
+        // bit 0, column 1 inks only bit 5. Bit 5 is the furthest along the
+        // axis, so it is the TOP row and bit 0 is the BOTTOM row.
+        const bytes = [
+            0x21, 0x80, 0x80,       // origin [0, 0]
+            0x25, 0x81, 0x22,       // column 0: 1 black dot (bit 0), end-of-line
+            0x26, 0x85, 0x81, 0x22, // column 1: 5 white, 1 black (bit 5), end-of-line
+            0x28,
+        ];
         const [dg] = extractDirectGraphics([String.fromCharCode(...bytes)]);
-        const { bitmap, offsetX, offsetY } = directGraphicToBitmap(dg, 450);
-        expect(offsetX).toBe(0);
-        expect(offsetY).toBe(0);
-        expect(bitmap.length).toBe(1);
-        expect(bitmap[0].filter(v => v).length).toBe(26);
+        const { bitmap } = directGraphicToBitmap(dg, 10);
+
+        // Rows are the data's bit axis, reversed: row 0 is bit 5, row 5 is bit 0.
+        expect(bitmap.length).toBe(6);
+        expect(bitmap[0]).toEqual([0, 1]);
+        expect(bitmap[5]).toEqual([1, 0]);
+        // A reversal leaves the ink count untouched - asserting it here would
+        // make this test pass on the mirrored render too.
+        expect(bitmap.flat().filter(v => v).length).toBe(2);
+    });
+
+    it('directGraphicToBitmap: a 3-row stack keeps its top-to-bottom order', () => {
+        // Three columns, each inking a different bit, so the whole picture is
+        // vertically asymmetric and a mirror is unmistakable.
+        const bytes = [
+            0x21, 0x80, 0x80,
+            0x25, 0x81, 0x22,             // col 0: 1 black           -> bit 0
+            0x26, 0x83, 0x81, 0x22,       // col 1: 3 white, 1 black  -> bit 3
+            0x26, 0x85, 0x81, 0x22,       // col 2: 5 white, 1 black  -> bit 5
+            0x28,
+        ];
+        const [dg] = extractDirectGraphics([String.fromCharCode(...bytes)]);
+        const { bitmap } = directGraphicToBitmap(dg, 10);
+        const rowsWithInk = bitmap.map((r, i) => (r.some(v => v) ? i : -1)).filter(i => i >= 0);
+        // bit 5 -> row 0, bit 3 -> row 2, bit 0 -> row 5
+        expect(rowsWithInk).toEqual([0, 2, 5]);
+        // column index is NOT reversed: col 0 stays on the left.
+        expect(bitmap[0][0]).toBe(0);
+        expect(bitmap[0][2]).toBe(1);
     });
 
     it('warns when Direct Graphics mode never ends, and still decodes the partial', () => {

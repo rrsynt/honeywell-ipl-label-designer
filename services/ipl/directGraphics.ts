@@ -233,6 +233,11 @@ const inkBounds = (dg: DirectGraphic) => {
  * Computes the VISUAL bounding box of a decoded graphic on the label, given
  * the label height in dots (PRM Appendix E: the origin's Y is measured from
  * the label's BOTTOM edge; see directGraphicToBitmap for the full transform).
+ *
+ * Unchanged by the bit-order correction there: that flips the ink WITHIN this
+ * box, so the two stay in step. The pairing matters — changing the row order
+ * without keeping this box would slide every graphic by its own bit extent
+ * instead of mirroring it in place.
  */
 export const directGraphicVisualBox = (dg: DirectGraphic, labelHeightDots: number): { x: number; y: number; w: number; h: number } => {
     const { minCol, maxCol, minBit, maxBit } = inkBounds(dg);
@@ -252,12 +257,20 @@ export const directGraphicVisualBox = (dg: DirectGraphic, labelHeightDots: numbe
  * (X,Y) is in bottom-up coordinates — Y counts from the label's bottom edge
  * (the manual's worked example loads a graphic from Y450 down to Y425, and a
  * line from Y450 down to Y0). Columns advance rightward from origin X; bit i
- * of a column sits at bottom-up Y = originY - i, i.e. top-down
- * y = labelHeightDots - originY + i (bits grow DOWNWARD on the label).
+ * of a column sits at bottom-up Y = originY + i, i.e. top-down
+ * y = labelHeightDots - originY - i (bits grow UPWARD on the label).
+ *
+ * The manual says "loads from the bottom to the top" and its own byte example
+ * agrees: for the column at origin X0,Y450 the decoded dot positions are
+ * Y4, Y10/Y12, Y14/Y17/Y20, Y25 — the payload's LAST set bit (bit 25) is the
+ * one closest to the origin, so bit index increases away from the origin, not
+ * toward it. Rendering bit 0 at the top mirrored every rasterized BarTender
+ * text object vertically; `parity-base` rasterizes all its text to Direct
+ * Graphics, so the whole label rendered upside down.
  */
 export const directGraphicToBitmap = (dg: DirectGraphic, labelHeightDots: number): Bitmap2D => {
     const box = directGraphicVisualBox(dg, labelHeightDots);
-    const { minBit } = inkBounds(dg);
+    const { maxBit } = inkBounds(dg);
     const bm: number[][] = [];
     if (box.w <= 0 || box.h <= 0) return { bitmap: bm, offsetX: box.x, offsetY: box.y };
     for (let y = 0; y < box.h; y++) bm.push(new Array(box.w).fill(0));
@@ -266,7 +279,7 @@ export const directGraphicToBitmap = (dg: DirectGraphic, labelHeightDots: number
         if (!strip) continue;
         for (let i = 0; i < strip.length; i++) {
             if (!strip[i]) continue;
-            bm[i - minBit][s - box.x] = 1;
+            bm[maxBit - i][s - box.x] = 1;
         }
     }
     return { bitmap: bm, offsetX: box.x, offsetY: box.y };

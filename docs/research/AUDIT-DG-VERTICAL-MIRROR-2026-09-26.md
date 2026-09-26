@@ -193,7 +193,55 @@ Round-trip `decode → reverse → encode` juga diverifikasi lossless
 (`roundtripDiff=0` untuk seluruh 9 graphic di ketiga sampel), jadi perbaikan
 baris tidak akan merusak jalur encode.
 
-## KOREKSI 2026-09-27 — ada DUA cacat, bukan satu
+## KOREKSI KEDUA 2026-09-27 — hanya SATU cacat; "Defect B" terbantah
+
+Sesi 2026-09-27 memperbaiki dan memverifikasi. Bagian KOREKSI di bawah
+menyimpulkan ada dua cacat dan merekomendasikan `hBase` diambil dari `<SI>W`.
+**Rekomendasi itu salah dan sudah dibatalkan** — jangan dikerjakan.
+
+**Kenapa `<SI>W` tidak mungkin jadi tinggi label di sini.** DG origin Y bersifat
+bottom-up terhadap tinggi label, dan di `bartender-parity-base.ipl`
+`<SI>W388` berdampingan dengan **origin Y604**. Kalau W dipakai sebagai tinggi,
+`y = 388 - 604` = **−216**: setiap graphic jatuh di luar label. Dua sumbu itu
+independen — W adalah sumbu lebar printhead, origin Y berjalan di sumbu panjang
+(feed). Angka 352 pada matriks 2×2 di bagian bawah bukan "tinggi yang salah",
+melainkan **content extent yang benar** untuk stream tanpa `<SI>L`.
+
+**Cacat B di bagian bawah juga turun dari premis yang sama** dan karena itu
+gugur. Yang benar-benar terjadi pada `+ minBit`: itu bukan salah tinggi, tapi
+salah **anchor**. Ditelusuri lebih lanjut, kedua bentuk (`+ minBit` dan
+`- maxBit`) sama-sama menghasilkan render yang terbaca; yang membedakan hanya
+pergeseran beberapa dot. Perbaikan yang mendarat **tidak menyentuh** rumus itu.
+
+**Yang mendarat: satu baris.** `directGraphics.ts` membalik urutan baris bitmap
+(`bm[maxBit - i]` menggantikan `bm[i - minBit]`), persis resep "Perbaikan
+terbukti benar" di dokumen ini. Kotak visualnya **sengaja tidak diubah**: ia dan
+urutan baris harus sepakat, dan karena pembalikan terjadi DI DALAM kotak, kotak
+yang sama tetap benar. `hBase` juga tidak diubah.
+
+**Bukti.** Baris pertama "PARITY BASE" kini terbaca tegak (render kita vs preview
+BarTender, dan vs golden tes1 lama yang teksnya tercermin). Angka:
+profil-baris r = **0.440** dengan perbaikan vs **0.185** tanpa — dan tes
+`bartender-parity-base` yang baru gagal pada 0.185, lulus pada 0.440, jadi
+ambangnya memisahkan keduanya alih-alih memuji yang bagus.
+
+**Pelajaran yang lebih berguna daripada perbaikannya.** Matriks 2×2 di bawah
+dihitung dari **profil baris atas render yang sudah di-skala ke kotak tinta
+sendiri**, dan itu membuat dua variabel terlihat saling mengimbangi padahal yang
+berubah hanya satu. Ketika sebuah eksperimen 2×2 menunjukkan dua faktor
+"keduanya menyumbang", periksa dulu apakah salah satu faktor sebenarnya hanya
+menggeser skala normalisasi — bukan mengubah letak.
+
+**Penjaga yang benar-benar menangkap kelas bug ini.** Diuji dengan bug
+dikembalikan: `bartenderGeometry`, `bartenderSweep`, dan `bartenderAuto` (versi
+lama, berbasis centroid + rasio tinta) **semuanya tetap hijau**. Yang menangkap:
+(a) tes DG asimetris yang mengklaim POSISI baris, (b) pin golden
+`bartenderGoldenPair` (golden tes1/tes2 diperbarui — teks tercermin → tegak),
+(c) penjaga profil-baris baru di `bartenderAuto.test.ts`.
+
+---
+
+## KOREKSI 2026-09-27 — ada DUA cacat, bukan satu (SEBAGIAN TERBANTAH — lihat di atas)
 
 Audit di atas menemukan cerminnya tetapi **mengaitkan seluruh selisihnya pada
 satu penyebab**. Eksperimen 2×2 (cermin × sumber tinggi label) menunjukkan ada
