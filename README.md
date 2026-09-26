@@ -53,6 +53,7 @@ npm run build        # produksi (bwip-js & jspdf lazy-loaded)
 | Crosscheck Labelary | `npm run crosscheck -- samples/product.ipl` | IPL ke ZPL ke PNG render Zebra untuk perbandingan visual |
 | Konversi ZPL | `npm run zpl -- samples/product.ipl` | Tulis samples/product.zpl |
 | Print server bersama | `npm run print-server` | Satu proses LAN memegang antrean, daftar printer dan log untuk semua stasiun. Alamatnya diisi di Print Center (mis. `http://192.168.1.10:9183`); kosong berarti antrean tetap di komputer ini. Karena server ini yang menulis ke soket printer, ia tahu pasti chunk mana yang sudah tercetak — peringatan "retry bisa cetak dua kali" hilang untuk antrean yang lewat sini. |
+| Database langsung | `npm run db-server` | Ambil baris dari SQL Server sebagai sumber data tabel. Alamatnya diisi di tab Data (mis. `http://192.168.1.10:9184`), lalu tombol **From database…** menjalankan query tersimpan. Connection string tinggal di berkas query di server dan tidak pernah dikirim ke browser; klien hanya memilih nama query, tidak pernah mengirim SQL. Barisnya disimpan di dalam design, jadi membuka design lama tidak butuh database. |
 
 ## Struktur
 
@@ -66,7 +67,8 @@ npm run build        # produksi (bwip-js & jspdf lazy-loaded)
   - `renderer.ts` - painter canvas (rotasi anchor, font, HRI)
 - `components/IPLViewerModal.tsx` - UI viewer (live parse, issues, export, send)
 - `tools/` - ipl-bridge.mjs (HTTP ke TCP), library-server.mjs & print-server.mjs
-  (berbagi perpustakaan desain dan antrean cetak antar PC), ipl2zpl.mjs,
+  (berbagi perpustakaan desain dan antrean cetak antar PC), db-server.mjs
+  (+ query-sqlserver.ps1 — baris dari SQL Server), ipl2zpl.mjs,
   labelary-crosscheck.mjs
 - `samples/` - contoh stream IPL; `docs/` - panduan simulator
 - `tests/` - vitest: round-trip, viewer, fidelity, validator, sampel

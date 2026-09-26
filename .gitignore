@@ -38,4 +38,8 @@ library-data/
 # list and the log are the shop's, not the repository's.
 print-data/
 
+# Database server data (tools/db-server.mjs). The stored queries carry the
+# connection strings, so this MUST never be committed.
+db-data/
+
 .vercel

@@ -14,6 +14,7 @@
     "bridge": "node tools/ipl-bridge.mjs",
     "library": "node tools/library-server.mjs",
     "print-server": "node tools/print-server.mjs",
+    "db-server": "node tools/db-server.mjs",
     "crosscheck": "node tools/labelary-crosscheck.mjs",
     "zpl": "node tools/ipl2zpl.mjs"
   },

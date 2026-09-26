@@ -17,6 +17,7 @@ import type { WorkbookSheet } from '../services/xlsxImport';
 import type { TableDataSource, DataQuery } from '../types';
 import { requestConfirm, notify } from '../services/uiDialogs';
 import { listSharedSources, saveSharedSource, importSharedSource, deleteSharedSource } from '../services/libraryStore';
+import { getDbServerUrl, setDbServerUrl, pingDbServer, listSavedQueries, runSavedQuery, type SavedQuerySummary } from '../services/dbSource';
 import type { SourceSummary } from '../services/libraryStore';
 
 const PropInput: React.FC<{ label: string; children: React.ReactNode; fullWidth?: boolean }> = ({ label, children, fullWidth }) => (
@@ -308,6 +309,11 @@ const DataSourcePanel: React.FC<{
     const handleAddCounter = () => addSource(newCounter(nextSourceName('Counter', dataSources)));
     const handleAddTable = () => addSource(newTable(nextSourceName('Table', dataSources)));
 
+    // Fase 7: rows pulled straight from a database. The address is read from
+    // storage on render so the button's disabled state follows it.
+    const [dbOpen, setDbOpen] = useState(false);
+    const [dbServer, setDbServer] = useState(() => getDbServerUrl());
+
     // The shared library is read on demand, not watched: it only changes when
     // this panel writes to it, and each write bumps `sharedTick` to re-read.
     const [shared, setShared] = useState<SourceSummary[] | null>(null);
@@ -358,6 +364,27 @@ const DataSourcePanel: React.FC<{
                 <button onClick={handleAddCounter} className="flex-1 px-2 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-md" title="Add a counter data source">+ Counter</button>
                 <button onClick={handleAddTable} className="flex-1 px-2 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-md" title="Add a table of rows stored in the design">+ Table</button>
             </div>
+            {dbServer === '' ? (
+                <DatabaseServerRow value={dbServer} onApplied={clean => setDbServer(clean)} />
+            ) : (
+                <div className="flex items-center gap-1.5 mb-3">
+                    <button onClick={() => setDbOpen(true)}
+                        className="flex-1 px-2 py-1 text-xs font-semibold bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-md flex items-center justify-center gap-1"
+                        title={`Load rows by running a query saved on ${dbServer}`}>
+                        <span className="material-icons text-sm">storage</span>From database…
+                    </button>
+                    <button onClick={() => { setDbOpen(false); setDbServer(''); setDbServerUrl(''); }}
+                        className="px-1.5 py-1 text-[10px] text-gray-500 hover:text-gray-300" title="Stop using a database server">✕</button>
+                </div>
+            )}
+            {dbOpen && dbServer !== '' && (
+                <DatabaseQueryPicker
+                    server={dbServer}
+                    sources={dataSources}
+                    onClose={() => setDbOpen(false)}
+                    onLoaded={source => { addSource(source); setDbOpen(false); }}
+                />
+            )}
             {dataSources.length === 0 && (
                 <p className="text-xs text-gray-600 italic">None yet — add one above, then set a field's Data Source to "Linked to Variable".</p>
             )}
@@ -800,6 +827,141 @@ const QueryEditor: React.FC<{
                     className={inputClasses + ' w-14'} />
                 <span className={matchedRows === 0 ? 'text-amber-400' : 'text-gray-400'}>{matchedRows} match{matchedRows === 1 ? '' : 'es'}</span>
             </div>
+        </div>
+    );
+};
+
+/**
+ * Where the database server lives, asked once. Shown only while no address is
+ * set, so a station that never uses a database never sees it.
+ */
+const DatabaseServerRow: React.FC<{ value: string; onApplied: (clean: string) => void }> = ({ value, onApplied }) => {
+    const [draft, setDraft] = useState(value);
+    const [state, setState] = useState<{ text: string; ok: boolean } | null>(null);
+
+    const apply = async () => {
+        let clean = '';
+        try {
+            clean = setDbServerUrl(draft);
+        } catch (e) {
+            setState({ text: e instanceof Error ? e.message : String(e), ok: false });
+            return;
+        }
+        if (clean === '') { onApplied(''); setState(null); return; }
+        const up = await pingDbServer(clean);
+        onApplied(clean);
+        setState(up
+            ? { text: `Connected to ${clean}.`, ok: true }
+            : { text: `Saved, but no answer from ${clean}. Start it with: node tools/db-server.mjs`, ok: false });
+    };
+
+    return (
+        <div className="mb-3">
+            <div className="flex items-center gap-1.5">
+                <span className="material-icons text-gray-400 text-base" title="Import rows from a database">storage</span>
+                <input
+                    value={draft}
+                    onChange={e => setDraft(e.target.value)}
+                    placeholder="Database server, e.g. http://192.168.1.10:9184"
+                    aria-label="Database server"
+                    className="flex-1 text-xs p-1.5 bg-gray-900 border border-gray-600 rounded-md outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+                <button onClick={() => void apply()} className="px-2 py-1.5 text-xs rounded-md bg-gray-700 hover:bg-gray-600 text-white">Use</button>
+            </div>
+            {state && <p className={`mt-1 text-[10px] ${state.ok ? 'text-emerald-400' : 'text-amber-400'}`}>{state.text}</p>}
+        </div>
+    );
+};
+
+/**
+ * Pick a query saved on the database server and turn its rows into a table
+ * source.
+ *
+ * The address is the server's, and so is the SQL: this picks a NAME. The
+ * connection string never reaches the browser, and neither does the query
+ * text — which is the shape the plan asked for, and why a bug here cannot
+ * become a dropped table.
+ */
+const DatabaseQueryPicker: React.FC<{
+    server: string;
+    sources: DataSource[];
+    onClose: () => void;
+    onLoaded: (source: TableDataSource) => void;
+}> = ({ server, sources, onClose, onLoaded }) => {
+    const [queries, setQueries] = useState<SavedQuerySummary[] | null>(null);
+    const [failed, setFailed] = useState<string | null>(null);
+    const [busyId, setBusyId] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        let alive = true;
+        listSavedQueries(server)
+            .then(list => { if (alive) setQueries(list); })
+            .catch(e => { if (alive) setFailed(e instanceof Error ? e.message : String(e)); });
+        return () => { alive = false; };
+    }, [server]);
+
+    const load = async (query: SavedQuerySummary) => {
+        setBusyId(query.id);
+        setError(null);
+        try {
+            const result = await runSavedQuery(query.id, server);
+            if (result.columns.length === 0) {
+                setError(`"${query.name}" returned no columns — check the query on the server.`);
+                return;
+            }
+            // The same upfront confirm the CSV importer uses: past the cap the
+            // job would print a subset, and saying so before it happens is the
+            // difference between a surprise and a decision.
+            if (result.truncated) {
+                const proceed = await requestConfirm({
+                    title: 'More rows than a job prints',
+                    message: `"${query.name}" returned more than ${MAX_JOB_ROWS} rows; only the first ${MAX_JOB_ROWS} are kept, and the rest will not print. Continue?`,
+                    confirmLabel: 'Import rows',
+                });
+                if (!proceed) return;
+            }
+            onLoaded({
+                ...newTable(nextSourceName(query.name, sources)),
+                columns: result.columns,
+                rows: result.rows,
+            });
+            notify(`"${query.name}" — ${result.rowCount} row(s) loaded.`, 'info');
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setBusyId(null);
+        }
+    };
+
+    return (
+        <div className="mb-3 rounded-md border border-gray-700 bg-gray-900/60 p-2">
+            <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] uppercase font-bold text-gray-500">Run a saved query</span>
+                <button onClick={onClose} className="text-[10px] text-gray-500 hover:text-gray-300">close</button>
+            </div>
+            {failed && <p className="text-[11px] text-amber-400">{failed}</p>}
+            {queries === null && !failed && <p className="text-[11px] text-gray-500">Loading…</p>}
+            {queries !== null && queries.length === 0 && (
+                <p className="text-[11px] text-gray-500">
+                    No queries saved on {server}. Add one with <code className="text-gray-400">PUT /queries/&lt;id&gt;</code>, or drop a JSON file in its queries folder.
+                </p>
+            )}
+            <div className="space-y-1">
+                {(queries ?? []).map(q => (
+                    <div key={q.id} className="flex items-center gap-1.5">
+                        <span className="flex-1 text-xs text-gray-300 truncate" title={`${q.provider}${q.database ? ` · ${q.database}` : ''}${q.description ? ` — ${q.description}` : ''}`}>{q.name}</span>
+                        <button onClick={() => void load(q)} disabled={busyId !== null}
+                            className="px-1.5 py-0.5 text-[10px] font-semibold bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white rounded">
+                            {busyId === q.id ? 'Running…' : 'Run'}
+                        </button>
+                    </div>
+                ))}
+            </div>
+            {/* Rows are stored in the design, so printing later needs no
+                database. Pulling again is an explicit choice. */}
+            <p className="mt-1.5 text-[10px] text-gray-500">The rows are stored in the design — printing a saved design does not need the database.</p>
+            {error && <p className="mt-1 text-[11px] text-red-400">{error}</p>}
         </div>
     );
 };
