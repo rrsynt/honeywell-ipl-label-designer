@@ -34,4 +34,8 @@ testdata/golden/diffs/
 # the shop's, not the repository's.
 library-data/
 
+# Shared print server data (tools/print-server.mjs). The queue, the printer
+# list and the log are the shop's, not the repository's.
+print-data/
+
 .vercel

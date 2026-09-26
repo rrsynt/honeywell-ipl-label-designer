@@ -22,6 +22,7 @@ import type { BatchData } from './iplGenerator';
 import { generateIPL } from './iplGenerator';
 import { generateZPL } from './zpl/zplGenerator';
 import { sendIplViaBridge, type BridgeResult } from './bridgeSend';
+import { getPrintServerUrl, sendChunkViaPrintServer } from './printRemoteBackend';
 import { requestToPromise, storeOf } from './designerDb';
 import { designChecksum } from './libraryStore';
 import { designJobPlan, designRecordCount, designHasRecords } from './printRecords';
@@ -90,6 +91,14 @@ export interface PrintLogEntry {
     streamHash: string;
     ok: boolean;
     error?: string;
+    /**
+     * The shared print server's accepted-chunk count for this job at the
+     * moment of this attempt, when the attempt went through one. Set means the
+     * server ANSWERED, so a failure carrying it is authoritative: the chunk did
+     * not print, and `ambiguousChunk` must stop calling it uncertain. Absent
+     * means the attempt went through the bridge and nothing is known.
+     */
+    accepted?: number;
 }
 
 // --- persistence -------------------------------------------------------------
@@ -213,19 +222,26 @@ export const prunePrintJobs = async (): Promise<number> => {
 };
 
 /**
- * The chunk whose fate is genuinely unknown: it was POSTed and the bridge
+ * The chunk whose fate is genuinely unknown: it was POSTed and the transport
  * reported a failure, but the bytes may have flushed before the failure was
  * noticed (services/bridgeSend.ts aborts its fetch on a 15 s timeout while the
  * bridge may already be forwarding). Derived from the LOG rather than stored
  * on the job, because the log entry is written for every attempt — so this
  * answer survives a reload and covers retries of retries.
  *
- * Returns the chunk index the last failed attempt was on, with the label count
- * it carried, or null when nothing is ambiguous.
+ * A failure WITH `accepted` is not ambiguous and is skipped. That field is
+ * written only when the shared print server answered, and it answers only
+ * after its own socket flushed: so a refusal carrying it is proof the chunk
+ * never reached the media. This is the whole reason Fase 7's server exists —
+ * routed through it, the warning stops being necessary instead of merely
+ * honest.
+ *
+ * Returns the chunk index the last AMBIGUOUS failed attempt was on, with the
+ * label count it carried, or null when nothing is ambiguous.
  */
 export const ambiguousChunk = async (jobId: string): Promise<{ chunkIndex: number; labels: number } | null> => {
     const failed = (await backend.listLog())
-        .filter(entry => entry.jobId === jobId && !entry.ok)
+        .filter(entry => entry.jobId === jobId && !entry.ok && entry.accepted === undefined)
         .sort((a, b) => b.at - a.at)[0];
     return failed ? { chunkIndex: failed.chunkIndex, labels: failed.labels } : null;
 };
@@ -332,10 +348,31 @@ export const cancelPrintJob = async (id: string): Promise<PrintJob | null> => {
 
 // --- running a job -----------------------------------------------------------
 
+/**
+ * The transport a run uses unless a caller injects one.
+ *
+ * With a shared print server configured, a chunk goes to the SERVER and the
+ * server owns the socket — that is the point of it, and it is what makes the
+ * acknowledgement exact. With none, the local bridge carries the stream
+ * exactly as before, and the result carries no `accepted`, so the retry
+ * caution stays honest rather than quietly dropping.
+ */
+const defaultSend = (stream: string, opts: { host: string; port: string; jobId?: string; seq?: number }): Promise<BridgeResult> => {
+    const serverUrl = getPrintServerUrl();
+    if (serverUrl && opts.jobId !== undefined && opts.seq !== undefined) {
+        return sendChunkViaPrintServer(stream, { jobId: opts.jobId, seq: opts.seq, serverUrl });
+    }
+    return sendIplViaBridge(stream, { host: opts.host, port: opts.port });
+};
+
 export interface RunJobDeps {
     /** Renders one chunk's stream. Injectable so tests need no canvas/barcodes. */
     render: (job: PrintJob, chunkIndex: number, labels: number) => Promise<string>;
-    send: (stream: string, opts: { host: string; port: string }) => Promise<BridgeResult>;
+    /**
+     * Posts one chunk. `jobId`/`seq` are what a shared print server needs to
+     * acknowledge it (services/printRemoteBackend.ts); the bridge ignores them.
+     */
+    send: (stream: string, opts: { host: string; port: string; jobId?: string; seq?: number }) => Promise<BridgeResult>;
     now?: () => number;
 }
 
@@ -398,7 +435,11 @@ export const runPrintJob = async (
     onProgress?: (job: PrintJob) => void,
 ): Promise<PrintJob> => {
     const now = deps.now ?? (() => Date.now());
-    const send = deps.send ?? ((stream, opts) => sendIplViaBridge(stream, opts));
+    // The default transport IS the shared server whenever one is configured —
+    // that is what makes "Send" on a station print through the shop's queue
+    // instead of straight out of the browser. Without a server the bridge is
+    // still what carries the stream, unchanged.
+    const send = deps.send ?? defaultSend;
     const render = deps.render ?? ((j, index) => renderJobChunk(j, index, jobChunks(j)));
 
     // Claim the job before touching the printer. `sentChunks` comes from the
@@ -450,7 +491,7 @@ export const runPrintJob = async (
 
         const bytes = utf8Bytes(stream);
         const hash = streamHash(stream);
-        const result = await send(stream, { host: current.target.host, port: current.target.port });
+        const result = await send(stream, { host: current.target.host, port: current.target.port, jobId: current.id, seq: index });
 
         await backend.putLog({
             id: nextId('l'),
@@ -468,6 +509,7 @@ export const runPrintJob = async (
             streamHash: hash,
             ok: result.ok,
             error: result.ok ? undefined : (result.error ?? 'Send failed.'),
+            accepted: result.accepted,
         });
 
         if (!result.ok) {

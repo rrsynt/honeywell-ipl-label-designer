@@ -20,6 +20,15 @@ export interface BridgeResult {
     written?: number;
     /** Human-readable failure reason (bridge error or unreachable hint). */
     error?: string;
+    /**
+     * How many chunks the shared print server (services/printRemoteBackend.ts)
+     * has flushed for this job. Present ONLY when the server answered, which
+     * makes it facts rather than a guess: a failure that carries `accepted`
+     * means the chunk definitively did NOT print, and the queue may drop its
+     * retry caution. A transport failure leaves it undefined — the chunk's
+     * fate is then unknown, exactly as with the bridge.
+     */
+    accepted?: number;
 }
 
 const UNREACHABLE = 'Bridge unreachable. Start it with: node tools/ipl-bridge.mjs';

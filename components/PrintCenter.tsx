@@ -28,10 +28,21 @@ import {
     savePrintTarget, validateTarget, type PrintTarget,
 } from '../services/printTargets';
 import { pingBridge } from '../services/bridgeSend';
+import { applyPrintServerUrl, getPrintServerUrl, pingPrintServer } from '../services/printRemoteBackend';
 import { notify, requestConfirm } from '../services/uiDialogs';
 import { PRINTER_MODELS } from '../constants';
 
 const inputClasses = 'w-full text-xs p-1.5 bg-gray-900 border border-gray-600 rounded-md outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500';
+
+/**
+ * A run that stopped talking this long ago is not running any more. The
+ * runner rewrites its job on every chunk, so silence past this is a dead tab,
+ * not a slow printer.
+ */
+const RUN_STALE_MS = 60_000;
+
+const isRunStale = (job: PrintJob): boolean =>
+    job.status === 'sending' && Date.now() - (job.updatedAt ?? 0) > RUN_STALE_MS;
 
 const STATUS_STYLE: Record<PrintJobStatus, string> = {
     queued: 'bg-gray-600/40 text-gray-300',
@@ -63,28 +74,98 @@ export const PrintCenter: React.FC<{ design: Design; onClose: () => void }> = ({
     const [busy, setBusy] = useState(false);
     const [revision, setRevision] = useState(0);
     const runningRef = useRef(false);
+    const [serverUrl, setServerUrl] = useState(() => getPrintServerUrl());
+    const [serverDraft, setServerDraft] = useState(() => getPrintServerUrl());
+    const [serverState, setServerState] = useState<{ text: string; ok: boolean } | null>(null);
+    const sharing = serverUrl !== '';
 
     const refresh = useCallback(async () => {
-        const [nextTargets, nextJobs, nextLog] = await Promise.all([listPrintTargets(), listPrintJobs(), listPrintLog()]);
-        setTargets(nextTargets);
-        setJobs(nextJobs);
-        setLog(nextLog);
-        // Keep the current selection unless it is gone — re-picking the first
-        // target on every refresh would silently move a half-configured job to
-        // a different printer.
-        setTargetId(id => (id && nextTargets.some(t => t.id === id) ? id : (nextTargets[0]?.id ?? '')));
-    }, []);
+        // A queue on a server that is down must not blank the panel: the
+        // error surfaces through `serverState`, and the lists keep what they
+        // last showed instead of throwing into the void.
+        try {
+            const [nextTargets, nextJobs, nextLog] = await Promise.all([listPrintTargets(), listPrintJobs(), listPrintLog()]);
+            setTargets(nextTargets);
+            setJobs(nextJobs);
+            setLog(nextLog);
+            // Keep the current selection unless it is gone — re-picking the
+            // first target on every refresh would silently move a
+            // half-configured job to a different printer.
+            setTargetId(id => (id && nextTargets.some(t => t.id === id) ? id : (nextTargets[0]?.id ?? '')));
+        } catch (e) {
+            if (sharing) {
+                setServerState({ text: e instanceof Error ? e.message : String(e), ok: false });
+                return;
+            }
+            throw e;
+        }
+    }, [sharing]);
+
+    /**
+     * Point the queue at a shared print server, or back at this browser.
+     * The backend swap and the "empty means local" rule live in the service,
+     * so this and the app's startup effect cannot drift apart.
+     */
+    const applyServer = async () => {
+        let clean = '';
+        try {
+            clean = applyPrintServerUrl(serverDraft);
+        } catch (e) {
+            setServerState({ text: e instanceof Error ? e.message : String(e), ok: false });
+            return;
+        }
+        setServerUrl(clean);
+        setServerDraft(clean);
+        setTargets([]);
+        setJobs([]);
+        setLog([]);
+        setTargetId('');
+        setRevision(r => r + 1); // re-read the queue we just switched to
+        if (clean === '') {
+            setServerState({ text: 'The queue and the printer list stay on this computer.', ok: true });
+            return;
+        }
+        const up = await pingPrintServer(clean);
+        setServerState(up
+            ? { text: 'Connected. The queue and the printer list are shared from this server.', ok: true }
+            : { text: `Saved, but no answer from ${clean}. Start it with: node tools/print-server.mjs`, ok: false });
+    };
 
     useEffect(() => {
         void (async () => {
             // A job left mid-send by a closed tab must become retryable before
             // the list is shown, or it reads as "still printing" forever.
-            await recoverInterruptedJobs().catch(() => 0);
-            await migrateLegacyTarget().catch(() => false);
+            //
+            // NOT on a shared queue, which is the one place recovery stops
+            // being safe: "the process that was sending is gone" becomes false
+            // when the sender is another station, and this would flip a live
+            // job to failed and clear its run token. A stale job is recoverable
+            // by hand instead — Cancel, then Send.
+            if (!sharing) await recoverInterruptedJobs().catch(() => 0);
+            // Adding this browser's legacy printer to a SHARED list would put
+            // one station's machine on everyone's picker, so the migration
+            // stays local too.
+            if (!sharing) await migrateLegacyTarget().catch(() => false);
             await refresh();
         })();
-        void pingBridge().then(setBridgeOk);
-    }, [refresh]);
+    }, [refresh, sharing, revision]);
+
+    // Status of the thing that actually carries the stream: the shared server
+    // when the queue is on it, the local bridge otherwise.
+    useEffect(() => {
+        let live = true;
+        if (sharing) {
+            void pingPrintServer(serverUrl).then(ok => {
+                if (!live) return;
+                setServerState(ok
+                    ? { text: 'Connected. The queue and the printer list are shared from this server.', ok: true }
+                    : { text: `No answer from ${serverUrl}. Start it with: node tools/print-server.mjs`, ok: false });
+            });
+        } else {
+            void pingBridge().then(ok => { if (live) setBridgeOk(ok); });
+        }
+        return () => { live = false; };
+    }, [sharing, serverUrl, revision]);
 
     useEffect(() => { setTo(String(recordCount)); }, [recordCount]);
 
@@ -170,14 +251,42 @@ export const PrintCenter: React.FC<{ design: Design; onClose: () => void }> = ({
                         <span className="text-xs font-normal text-gray-400 ml-2">{design.name}</span>
                     </h2>
                     <div className="flex items-center gap-2">
-                        <span className={`text-xs flex items-center gap-1.5 ${bridgeOk === null ? 'text-gray-400' : bridgeOk ? 'text-emerald-400' : 'text-amber-400'}`}
-                            title={bridgeOk === false ? 'Start it with: node tools/ipl-bridge.mjs' : 'Local bridge reachable'}>
-                            <span className={`w-2 h-2 rounded-full ${bridgeOk === null ? 'bg-gray-600' : bridgeOk ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                            {bridgeOk === null ? 'Bridge…' : bridgeOk ? 'Bridge up' : 'Bridge down'}
-                        </span>
+                        {sharing ? (
+                            <span className={`text-xs flex items-center gap-1.5 ${serverState === null ? 'text-gray-400' : serverState.ok ? 'text-emerald-400' : 'text-amber-400'}`}
+                                title={serverUrl}>
+                                <span className={`w-2 h-2 rounded-full ${serverState === null ? 'bg-gray-600' : serverState.ok ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                                {serverState === null ? 'Server…' : serverState.ok ? 'Server up' : 'Server down'}
+                            </span>
+                        ) : (
+                            <span className={`text-xs flex items-center gap-1.5 ${bridgeOk === null ? 'text-gray-400' : bridgeOk ? 'text-emerald-400' : 'text-amber-400'}`}
+                                title={bridgeOk === false ? 'Start it with: node tools/ipl-bridge.mjs' : 'Local bridge reachable'}>
+                                <span className={`w-2 h-2 rounded-full ${bridgeOk === null ? 'bg-gray-600' : bridgeOk ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                                {bridgeOk === null ? 'Bridge…' : bridgeOk ? 'Bridge up' : 'Bridge down'}
+                            </span>
+                        )}
                         <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-700" aria-label="Close"><span className="material-icons">close</span></button>
                     </div>
                 </div>
+
+                {/* Share the queue with the shop. Same shape as the library's
+                    row on the Designs screen, because it is the same idea. */}
+                <div className="flex items-center gap-2 px-5 py-2 border-b border-gray-700 flex-shrink-0">
+                    <span className="material-icons text-gray-400 text-base" title="Share the queue with other computers">lan</span>
+                    <input
+                        value={serverDraft}
+                        onChange={e => setServerDraft(e.target.value)}
+                        placeholder="Shared print server, e.g. http://192.168.1.10:9183"
+                        aria-label="Shared print server"
+                        className="flex-1 text-xs p-1.5 bg-gray-900 border border-gray-600 rounded-md outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    />
+                    <button onClick={() => void applyServer()} className="px-3 py-1.5 text-xs rounded-md bg-gray-700 hover:bg-gray-600 text-white">
+                        {serverDraft.trim() === '' ? 'Keep local' : 'Use server'}
+                    </button>
+                    {sharing && <span className="text-[11px] text-blue-300 whitespace-nowrap">shared</span>}
+                </div>
+                {sharing && serverState && (
+                    <p className={`px-5 py-1 text-[11px] flex-shrink-0 ${serverState.ok ? 'text-emerald-400' : 'text-amber-400'}`}>{serverState.text}</p>
+                )}
 
                 <div className="flex bg-gray-900/50 flex-shrink-0">
                     {(['sheet', 'jobs', 'log'] as const).map(name => (
@@ -283,7 +392,12 @@ export const PrintCenter: React.FC<{ design: Design; onClose: () => void }> = ({
                                     </div>
                                     {job.lastError && <div className="text-[11px] text-red-400 mt-1">{job.lastError}</div>}
                                     <div className="flex items-center gap-2 mt-2">
-                                        <button onClick={() => void send(job)} disabled={busy || job.status === 'sent' || job.status === 'sending'}
+                                        {/* A job 'sending' right now is either this tab or another
+                                            station. Only a run that has gone SILENT is sendable — an
+                                            unconditional enable would let two stations push the same
+                                            chunks at the same printer. */}
+                                        <button onClick={() => void send(job)} disabled={busy || job.status === 'sent' || (job.status === 'sending' && !isRunStale(job))}
+                                            title={job.status === 'sending' && !isRunStale(job) ? 'This job is being sent right now. It can be sent again if the run goes quiet.' : undefined}
                                             className="text-xs px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:cursor-not-allowed">
                                             {job.status === 'failed' ? 'Retry' : job.sentChunks > 0 ? 'Resume' : 'Send'}
                                         </button>

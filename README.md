@@ -52,6 +52,7 @@ npm run build        # produksi (bwip-js & jspdf lazy-loaded)
 | Capture stream | `npm run bridge -- --listen=9100` | Bridge jadi fake printer; buka http://localhost:9181/capture |
 | Crosscheck Labelary | `npm run crosscheck -- samples/product.ipl` | IPL ke ZPL ke PNG render Zebra untuk perbandingan visual |
 | Konversi ZPL | `npm run zpl -- samples/product.ipl` | Tulis samples/product.zpl |
+| Print server bersama | `npm run print-server` | Satu proses LAN memegang antrean, daftar printer dan log untuk semua stasiun. Alamatnya diisi di Print Center (mis. `http://192.168.1.10:9183`); kosong berarti antrean tetap di komputer ini. Karena server ini yang menulis ke soket printer, ia tahu pasti chunk mana yang sudah tercetak — peringatan "retry bisa cetak dua kali" hilang untuk antrean yang lewat sini. |
 
 ## Struktur
 
@@ -64,7 +65,9 @@ npm run build        # produksi (bwip-js & jspdf lazy-loaded)
   - `graphics.ts` - codec raster graphic IPL (6-bit packing)
   - `renderer.ts` - painter canvas (rotasi anchor, font, HRI)
 - `components/IPLViewerModal.tsx` - UI viewer (live parse, issues, export, send)
-- `tools/` - ipl-bridge.mjs (HTTP ke TCP), ipl2zpl.mjs, labelary-crosscheck.mjs
+- `tools/` - ipl-bridge.mjs (HTTP ke TCP), library-server.mjs & print-server.mjs
+  (berbagi perpustakaan desain dan antrean cetak antar PC), ipl2zpl.mjs,
+  labelary-crosscheck.mjs
 - `samples/` - contoh stream IPL; `docs/` - panduan simulator
 - `tests/` - vitest: round-trip, viewer, fidelity, validator, sampel
 

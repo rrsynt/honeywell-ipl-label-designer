@@ -16,6 +16,7 @@ import type { ContextMenuOption } from './components/ContextMenu';
 import { getSavedDesigns, saveDesign, loadDesign, deleteDesign } from './services/designManager';
 import { getLibraryRecord, saveLibraryRecord, deleteLibraryRecord, migrateLegacyLibrary, serializeLabelFile, parseLabelFile, writeRecovery, readRecovery, clearRecovery, designChecksum, memoryBackend, indexedDbBackend, setLibraryBackend } from './services/libraryStore';
 import { getLibraryServerUrl, remoteBackend } from './services/libraryRemoteBackend';
+import { applyPrintServerUrl, getPrintServerUrl } from './services/printRemoteBackend';
 import { loadInstalledFonts } from './services/fontStore';
 import { getAxisAlignedBoundingBox } from './services/geometry';
 import { expandIdsWithGroups } from './services/dragMath';
@@ -679,6 +680,16 @@ export default function App() {
         if (!serverUrl) return;
         const hasIndexedDb = typeof indexedDB !== 'undefined' && indexedDB !== null;
         setLibraryBackend(remoteBackend({ serverUrl, local: hasIndexedDb ? indexedDbBackend() : memoryBackend() }));
+    }, []);
+
+    // The same for the print queue: a shared server chosen in an earlier
+    // session must be in place before anything reads or writes a job, or the
+    // Print Center would show this browser's queue while the shop's sits on
+    // the server.
+    useEffect(() => {
+        const serverUrl = getPrintServerUrl();
+        if (!serverUrl) return;
+        applyPrintServerUrl(serverUrl);
     }, []);
 
     // One-time move of designs saved by older builds (localStorage, ~5 MB cap)

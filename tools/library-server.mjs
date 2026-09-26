@@ -38,6 +38,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 const opt = name => {
@@ -254,7 +255,10 @@ export const handleLibraryRequest = (req, res) => {
     sendJson(res, 405, { ok: false, error: `unsupported method ${req.method}` });
 };
 
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+// fileURLToPath, not `new URL(...).pathname`: a pathname keeps percent-encoding,
+// so a checkout under a directory with a space (or any escaped character)
+// compares unequal and the CLI silently exits having listened on nothing.
+const isMain = !!process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isMain) {
     const server = http.createServer(handleLibraryRequest);
