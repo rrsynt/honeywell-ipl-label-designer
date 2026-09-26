@@ -177,6 +177,30 @@ describe('EPL parser', () => {
         expect((parseEPL('N\nA10,10,0,2,1,1,R,"INV"').elements[0] as any).reverse).toBe(true);
     });
 
+    it('draws the three 2D symbols EPL2 defines, by their type letter', () => {
+        // Manual pp. 3-20 / 3-25 / 3-29: p3 is D=Data Matrix, M=MaxiCode,
+        // P=PDF417. There is NO QR in EPL2 — not an omission here but a fact of
+        // the language, whose contents list only those three.
+        const byLetter = (letter: string) =>
+            (parseEPL(`N
+b10,20,${letter},"DATA"`).elements[0] as any)?.symbology;
+        expect(byLetter('D')).toBe('17');
+        expect(byLetter('M')).toBe('14');
+        expect(byLetter('P')).toBe('12');
+    });
+
+    it('reads the letter-prefixed optional parameters of a 2D symbol', () => {
+        // p4-p7 carry their own prefix (c columns, r rows, h module size,
+        // v inverse) rather than being positional.
+        expect((parseEPL('N\nb10,20,D,h7,"DATA"').elements[0] as any).moduleDots).toBe(7);
+    });
+
+    it('names an unknown 2D type, and says EPL has no QR at all', () => {
+        const label = parseEPL('N\nb10,20,Z,"DATA"');
+        expect(label.elements).toHaveLength(0);
+        expect(label.issues.find(i => i.code === 'epl-2d-unsupported')?.message).toMatch(/no QR code/i);
+    });
+
     it('reports the commands outside the subset by name', () => {
         const label = parseEPL('N\nGW10,10,20,5\nb10,10,Q,"x"\nLS50,200,20,400');
         expect(label.issues.some(i => i.code === 'epl-gw-unsupported')).toBe(true);
@@ -286,6 +310,22 @@ describe('EPL generator', () => {
         expect(h[2]).toBeGreaterThan(h[3]);
         const v = eplLines([line(90)]).find(l => l.startsWith('LO'))!.slice(2).split(',').map(Number);
         expect(v[3]).toBeGreaterThan(v[2]);
+    });
+
+    it('emits the b command for the 2D symbols EPL has', () => {
+        const twoD = (symbology: string) => generateEPL(withFields([
+            barcodeField({ symbology, name: 'C', dataSource: { type: 'fixed', data: 'DATA' } }),
+        ])).epl.split('\n').find(l => l.startsWith('b'))!;
+        expect(twoD('17').split(',')[2]).toBe('D');   // Data Matrix
+        expect(twoD('14').split(',')[2]).toBe('M');   // MaxiCode
+        expect(twoD('12').split(',')[2]).toBe('P');   // PDF417
+        expect(twoD('17')).toContain('"DATA"');
+    });
+
+    it('refuses a QR code BY NAME, because EPL2 has none', () => {
+        const { epl, warnings } = generateEPL(withFields([barcodeField({ symbology: '18', name: 'QR' })]));
+        expect(epl.split('\n').some(l => l.startsWith('b'))).toBe(false);
+        expect(warnings.some(w => /QR/.test(w) && /does not have/.test(w))).toBe(true);
     });
 
     it('names an unsupported field type instead of dropping it silently', () => {

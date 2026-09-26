@@ -187,10 +187,21 @@ describe('TSPL parser', () => {
         expect(label.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(true);
     });
 
-    it('reports 2D and bitmap commands by name', () => {
-        const label = parseTSPL('CLS\nQRCODE 10,10,L,4,A,0,"x"\nPUTBMP 10,10,"a.bmp"');
-        expect(label.issues.some(i => i.code === 'tspl-qrcode-unsupported')).toBe(true);
-        expect(label.issues.some(i => i.code === 'tspl-bitmap-unsupported')).toBe(true);
+    it('draws QRCODE and PDF417, and reports the 2D it still cannot', () => {
+        const qr = parseTSPL('CLS\nQRCODE 10,10,L,4,A,0,"x"');
+        expect(qr.elements).toHaveLength(1);
+        expect((qr.elements[0] as any).symbology).toBe('18');
+        expect(qr.issues.filter(i => i.level === 'error')).toHaveLength(0);
+
+        const pdf = parseTSPL('CLS\nPDF417 10,10,200,100,0,"x"');
+        expect((pdf.elements[0] as any).symbology).toBe('12');
+
+        // MAXICODE and AZTEC are in the language but not in this viewer yet,
+        // and a bitmap is still a bitmap.
+        const rest = parseTSPL('CLS\nMAXICODE 110,100,2,300,840,06810,7317,"x"\nAZTEC 10,10,3,"x"\nPUTBMP 10,10,"a.bmp"');
+        expect(rest.issues.some(i => i.code === 'tspl-maxicode-unsupported')).toBe(true);
+        expect(rest.issues.some(i => i.code === 'tspl-aztec-unsupported')).toBe(true);
+        expect(rest.issues.some(i => i.code === 'tspl-bitmap-unsupported')).toBe(true);
     });
 
     it('says nothing about ordinary printer settings', () => {
@@ -316,8 +327,22 @@ describe('TSPL generator', () => {
         expect(tspl).toContain('PRINT 2,1'); // the rest of the label still prints
     });
 
-    it('names an unsupported symbology', () => {
-        expect(generateTSPL(design([barcodeField({ symbology: '18', name: 'QR' })])).warnings.some(w => /QR/.test(w))).toBe(true);
+    it('emits QRCODE and PDF417 for the 2D symbols TSPL has', () => {
+        const qr = lines([barcodeField({ symbology: '18', name: 'QR', qrEcl: 'Q', w_mag: 4 })])
+            .find(l => l.startsWith('QRCODE'))!;
+        expect(qr.split(',')[2]).toBe('Q');   // the error-correction level reached it
+        expect(qr).toContain(',4,');   // and the cell width
+        expect(qr).toContain('"12345"');
+        const pdf = lines([barcodeField({ symbology: '12', name: 'PDF', h_mag: 100 })])
+            .find(l => l.startsWith('PDF417'))!;
+        expect(pdf).toContain('"12345"');
+    });
+
+    it('names a 2D symbol TSPL does NOT have, rather than dropping it', () => {
+        // TSPL has QRCODE, PDF417, MAXICODE and AZTEC — no DataMatrix.
+        const { tspl, warnings } = generateTSPL(design([barcodeField({ symbology: '17', name: 'DM' })]));
+        expect(tspl.split('\n').some(l => l.startsWith('BARCODE') || l.startsWith('QRCODE'))).toBe(false);
+        expect(warnings.some(w => /Data Matrix/.test(w))).toBe(true);
     });
 
     it('escapes a quote and a backslash the TSPL way, and the parser undoes it', () => {

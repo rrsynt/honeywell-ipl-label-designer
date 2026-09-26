@@ -126,6 +126,9 @@ const TSPL_KNOWN_UNENCODED: Record<string, string> = {
     DPL: 'Deutsche Post Leitcode',
 };
 
+/** TSPL's QR error-correction letters onto the IR's c18,m2 values. */
+const TSPL_QR_ECL: Record<string, string> = { L: 'L', M: 'M', Q: 'Q', H: 'H' };
+
 /**
  * Commands that are printer settings or jobs, not geometry.
  *
@@ -238,12 +241,24 @@ export const tokenizeTspl = (source: string): TsplCommand[] => {
             params += ch;
             i++;
         }
+        // The command name is the leading token, up to the first whitespace —
+        // NOT a run of letters. TSPL names may contain digits (`PDF417`), so a
+        // letters-only rule read that line as a command called "PDF" with a
+        // parameter "417 10,10,…" and drew nothing. Every TSPL command in the
+        // manual is written with a space before its parameters, which is what
+        // makes "up to the first space" the right rule here (EPL needs the
+        // opposite, because its names never carry digits).
         const head = params.trim();
-        const match = /^([A-Za-z]+)\s*([\s\S]*)$/.exec(head);
-        if (!match) { out.push({ name: '', params: '', quoted, raw: line }); continue; }
+        const space = head.search(/\s/);
+        const name = space < 0 ? head : head.slice(0, space);
+        const rest = space < 0 ? '' : head.slice(space);
+        if (name === '' || !/^[A-Za-z][A-Za-z0-9]*$/.test(name)) {
+            out.push({ name: '', params: '', quoted, raw: line });
+            continue;
+        }
         out.push({
-            name: match[1].toUpperCase(),
-            params: match[2].trim().replace(/^,|,$/g, '').trim(),
+            name: name.toUpperCase(),
+            params: rest.trim().replace(/^,|,$/g, '').trim(),
             quoted,
             raw: line,
         });
@@ -493,6 +508,71 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 break;
             }
 
+            case 'QRCODE': {
+                // QRCODE x,y,ECC Level,cell width,mode,rotation,
+                //        [justification,][model,][mask,][area,] "content"
+                // (manual p. 65). ECC is L/M/Q/H, cell width 1-10, mode A/M.
+                if (p.length < 6) {
+                    issue('warning', 'tspl-qrcode-params', `QRCODE needs x,y,ECC,cell width,mode,rotation. Found ${p.length}. Skipped.`, 'QRCODE');
+                    break;
+                }
+                const ecc = (p[2] ?? 'M').trim().toUpperCase();
+                const content = p[p.length - 1] ?? '';
+                if (content === '') {
+                    issue('warning', 'tspl-qrcode-empty', 'A QR code with no data prints nothing.', 'QRCODE');
+                    break;
+                }
+                const f = quadrantFromClockwise(p[5]);
+                const el: BarcodeElement = {
+                    kind: 'barcode', id: nextId++,
+                    ox: num(p[0], 0), oy: num(p[1], 0), f,
+                    symbology: '18',   // the IR's QR id
+                    // QR is a matrix: its size comes from the cell count and the
+                    // cell width, not from a bar height. The IR measures matrix
+                    // symbols from moduleDots, so a nominal height keeps the
+                    // anchor sane without pretending to know the grid size.
+                    heightDots: Math.max(1, Math.trunc(num(p[3], 3))) * 21,
+                    moduleDots: Math.max(1, Math.trunc(num(p[3], 3))),
+                    ratio: 1,
+                    hri: 0,            // QR never carries a human-readable line
+                    source: { type: 'fixed', data: content },
+                    ...(TSPL_QR_ECL[ecc] ? { qrEcl: TSPL_QR_ECL[ecc] } : {}),
+                };
+                if (!TSPL_QR_ECL[ecc]) {
+                    issue('info', 'tspl-qr-ecc', `QR error-correction level "${ecc}" is not L/M/Q/H. The encoder's default is used.`, 'QRCODE');
+                }
+                elements.push(place(el));
+                break;
+            }
+
+            case 'PDF417': {
+                // PDF417 x,y,width,height,rotate,[option], "content"
+                // (manual p. 56). The option block carries letter-prefixed
+                // settings (P/E/M/U/W/H/R/C/T/Lm) which this subset reads past.
+                if (p.length < 5) {
+                    issue('warning', 'tspl-pdf417-params', `PDF417 needs x,y,width,height,rotate. Found ${p.length}. Skipped.`, 'PDF417');
+                    break;
+                }
+                const content = p[p.length - 1] ?? '';
+                if (content === '') {
+                    issue('warning', 'tspl-pdf417-empty', 'A PDF417 with no data prints nothing.', 'PDF417');
+                    break;
+                }
+                const f = quadrantFromClockwise(p[4]);
+                const el: BarcodeElement = {
+                    kind: 'barcode', id: nextId++,
+                    ox: num(p[0], 0), oy: num(p[1], 0), f,
+                    symbology: '12',   // the IR's PDF417 id
+                    heightDots: Math.max(1, Math.trunc(num(p[3], 10))),
+                    moduleDots: Math.max(1, Math.trunc(num(p[2], 2) / 10) || 2),
+                    ratio: 1,
+                    hri: 0,
+                    source: { type: 'fixed', data: content },
+                };
+                elements.push(place(el));
+                break;
+            }
+
             case 'PRINT': {
                 // PRINT copies[,sets] (manual p. 24) — a job concern, but the
                 // viewer reads it so a preview can say how many labels.
@@ -509,10 +589,10 @@ export const parseTSPL = (code: string): ViewerLabel => {
 
             default: {
                 if (PRINTER_SETTINGS.has(cmd.name)) break;
-                if (cmd.name === 'QRCODE') {
-                    issue('info', 'tspl-qrcode-unsupported', 'TSPL 2D barcodes (QRCODE) are not part of this viewer yet.', 'QRCODE');
-                } else if (cmd.name === 'PDF417') {
-                    issue('info', 'tspl-pdf417-unsupported', 'TSPL PDF417 is not part of this viewer yet.', 'PDF417');
+                if (cmd.name === 'MAXICODE') {
+                    issue('info', 'tspl-maxicode-unsupported', 'TSPL MAXICODE is not part of this viewer yet.', 'MAXICODE');
+                } else if (cmd.name === 'AZTEC') {
+                    issue('info', 'tspl-aztec-unsupported', 'TSPL AZTEC is not part of this viewer yet.', 'AZTEC');
                 } else if (cmd.name === 'PUTBMP' || cmd.name === 'PUTPCX') {
                     issue('info', 'tspl-bitmap-unsupported', `TSPL graphics (${cmd.name}) are not part of this viewer yet.`, cmd.name);
                 } else if (cmd.name === 'BLOCK') {

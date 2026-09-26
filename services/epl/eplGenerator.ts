@@ -47,6 +47,16 @@ const EPL_FONT_FOR: Record<string, number> = {
     '1': 3,  // 7x11 OCR -> EPL 3 (12x20)
 };
 
+/**
+ * Design symbology -> the EPL `b` command's type LETTER (manual pp. 3-20,
+ * 3-25, 3-29). EPL2 defines exactly these three 2D symbols — there is no QR.
+ */
+const EPL_2D_LETTER: Record<string, string> = {
+    '17': 'D',   // Data Matrix
+    '14': 'M',   // MaxiCode
+    '12': 'P',   // PDF417
+};
+
 /** EAN/UPC variants, by the DATA LENGTH — which is how EPL's letters map. */
 const eplEanType = (data: string): string | null => {
     switch (data.replace(/\D/g, '').length) {
@@ -140,6 +150,20 @@ export const generateEPL = (design: Design): EplGenerateResult => {
         if (field.type === 'barcode') {
             const sym = field.symbology;
             const data = fieldData(field, design);
+
+            // 2D symbols go through the `b` command, whose p3 LETTER names the
+            // symbology (manual pp. 3-20 to 3-29). EPL2 has Data Matrix,
+            // MaxiCode and PDF417 — and NO QR CODE, so a QR design genuinely
+            // has no EPL representation and says so.
+            if (EPL_2D_LETTER[sym]) {
+                const moduleSize = Math.max(1, Math.round(field.w_mag ?? 5));
+                lines.push(`b${origin.x},${origin.y},${EPL_2D_LETTER[sym]},h${moduleSize},"${escapeEplData(data)}"`);
+                continue;
+            }
+            if (sym === '18') {
+                warnings.push(`"${field.name}" is a QR code, which EPL does not have: the language's 2D command covers Data Matrix, MaxiCode and PDF417 only. It was left off the label.`);
+                continue;
+            }
             // The IPL id '7' is "EAN/UPC" and the printer infers the variant
             // from the data length; EPL spells the variant out in its type
             // letter, so it is resolved the same way the printer would.

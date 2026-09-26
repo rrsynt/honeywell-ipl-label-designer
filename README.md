@@ -24,7 +24,10 @@ mirip ZPL Viewer / Labelary, tapi untuk printer Honeywell/Intermec.
 - Live parse saat mengetik — terima byte kontrol asli (0x02/0x1b) maupun notasi literal (`<STX>`/`<ESC>`);
   bahasa dideteksi dari stream (IPL/ZPL/EPL/TSPL) dan bisa diganti manual kalau tebakannya salah;
   DPL (Datamax) sengaja belum didukung — lihat docs/research/ROADMAP.md
-- Render: font bitmap/outline per DPI, barcode bwip-js dot-exact (20 symbology:
+- Render: font bitmap/outline per DPI, barcode bwip-js dot-exact; EPL dan TSPL
+  kini juga menggambar 2D (Data Matrix/MaxiCode/PDF417 di EPL, QR/PDF417 di TSPL)
+  sejauh yang bahasanya punya perintahnya — EPL2 memang tidak punya QR sama sekali
+- (20 symbology:
   Code 39/93/ITF/2of5/11/128+UCC, EAN/UPC+add-on, Codabar, HIBC 39/128, Code 16K,
   Code 49, POSTNET, Planet, PDF417, MicroPDF417, QR Code, Data Matrix, MaxiCode,
   RSS/GS1 DataBar), raster graphic G/U, rotasi 4 kuadran, HRI atas/bawah.

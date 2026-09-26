@@ -73,6 +73,22 @@ const TSPL_BARCODE_FOR: Record<string, string> = {
     '22': 'PLANET',
 };
 
+/**
+ * Design symbology -> the TSPL 2D command that draws it (manual pp. 56, 65).
+ * Only these two exist in the language.
+ */
+const TSPL_2D_COMMAND: Record<string, string> = {
+    '18': 'QRCODE',
+    '12': 'PDF417',
+};
+
+/** 2D symbols the design can hold but TSPL has no command for. Named so the
+ *  warning says WHICH symbol is missing. */
+const TSPL_2D_MISSING: Record<string, string> = {
+    '17': 'Data Matrix',
+    '14': 'MaxiCode',
+};
+
 /** EAN/UPC variants, by the DATA LENGTH — which is how TSPL's names map. */
 const tsplEanType = (data: string): string | null => {
     switch (data.replace(/\D/g, '').length) {
@@ -155,6 +171,29 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
         if (field.type === 'barcode') {
             const sym = field.symbology;
             const data = fieldData(field, design);
+
+            // The 2D symbols have their own commands, not the BARCODE type
+            // table (manual pp. 56, 65). TSPL carries QR and PDF417; DataMatrix
+            // and MaxiCode are NOT in the language, so those warn rather than
+            // emitting something a TSC printer would ignore.
+            if (TSPL_2D_COMMAND[sym]) {
+                const cmd = TSPL_2D_COMMAND[sym];
+                const cell = Math.max(1, Math.round(field.w_mag ?? 3));
+                if (cmd === 'QRCODE') {
+                    const ecc = field.qrEcl ?? 'M';
+                    lines.push(`QRCODE ${x},${y},${ecc},${cell},A,${rotation},"${escapeTsplData(data)}"`);
+                } else {
+                    const w = Math.max(1, dots(box.width));
+                    const h = Math.max(1, dots(box.height));
+                    lines.push(`PDF417 ${x},${y},${w},${h},${rotation},"${escapeTsplData(data)}"`);
+                }
+                continue;
+            }
+            if (TSPL_2D_MISSING[sym]) {
+                warnings.push(`"${field.name}" is a ${TSPL_2D_MISSING[sym]} symbol, which TSPL does not have: the language defines QRCODE, PDF417, MAXICODE and AZTEC, and this one is not among them. It was left off the label.`);
+                continue;
+            }
+
             // The IPL id '7' is "EAN/UPC" and the printer infers the variant
             // from the data length; TSPL spells the variant out in its name.
             const type = sym === '7' ? tsplEanType(data) : TSPL_BARCODE_FOR[sym];

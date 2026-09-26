@@ -492,6 +492,62 @@ export const parseEPL = (code: string): ViewerLabel => {
                 break;
             }
 
+            case 'b': {
+                // b p1,p2,p3,[,p4][,p5][,p6][,p7],"DATA" — the 2D bar code
+                // (manual p. 3-20/3-25/3-29). p3 is a LETTER naming the
+                // symbology, and the optional parameters after it carry their
+                // own prefix letter (c columns, r rows, h module size, v
+                // inverse) rather than being positional.
+                //
+                // EPL2 has Data Matrix, MaxiCode and PDF417 — and NO QR CODE.
+                // A QR design therefore has no EPL representation at all, which
+                // the generator reports rather than silently dropping.
+                if (p.length < 3) {
+                    issue('warning', 'epl-b-params', `b needs x,y,type. Found ${p.length}. Skipped.`, 'b');
+                    break;
+                }
+                const kind = (p[2] ?? '').trim().toUpperCase();
+                const data = cmd.data ?? '';
+                if (data === '') {
+                    issue('warning', 'epl-2d-empty', 'A 2D bar code with no data prints nothing.', 'b');
+                    break;
+                }
+                const map: Record<string, { symbology: string; note?: string }> = {
+                    D: { symbology: '17' },   // Data Matrix
+                    M: { symbology: '14' },   // MaxiCode
+                    P: { symbology: '12' },   // PDF417
+                };
+                const found = map[kind];
+                if (!found) {
+                    issue('info', 'epl-2d-unsupported',
+                        `EPL 2D type "${kind}" is not one this viewer knows. EPL2 defines D (Data Matrix), M (MaxiCode) and P (PDF417); there is no QR code in the language at all. Nothing is drawn for it.`, 'b');
+                    break;
+                }
+                // The optional parameters are letter-prefixed: read the ones
+                // this viewer can use, let the rest pass (they are printer
+                // preferences, not geometry).
+                const opt = (letter: string): string | undefined => {
+                    const hit = p.find(v => v.trim().toUpperCase().startsWith(letter.toUpperCase()));
+                    return hit ? hit.trim().slice(1) : undefined;
+                };
+                const moduleSize = Math.max(1, Math.trunc(num(opt('h'), 5)));
+                const el: BarcodeElement = {
+                    kind: 'barcode', id: nextId++,
+                    ox: num(p[0], 0) + refX, oy: num(p[1], 0) + refY, f: 0,
+                    symbology: found.symbology,
+                    // 2D symbols are measured from their module size, not a bar
+                    // height; a nominal extent keeps the anchor sane.
+                    heightDots: moduleSize * 21,
+                    moduleDots: moduleSize,
+                    ratio: 1,
+                    hri: 0,
+                    source: { type: 'fixed', data },
+                    ...(kind === 'M' ? { maxiMode: opt('m') ?? '' } : {}),
+                };
+                elements.push(place(el));
+                break;
+            }
+
             case 'q':
                 // Set Label Width (manual p. 3-89). Superseded by R: the manual
                 // says the reference point cancels a previously set width.
@@ -502,9 +558,7 @@ export const parseEPL = (code: string): ViewerLabel => {
                 // Everything else is a real EPL command this subset does not
                 // draw. Naming it is the difference between "not supported" and
                 // a field silently missing from the label.
-                if (cmd.name === 'b') {
-                    issue('info', 'epl-2d-unsupported', 'EPL 2D barcodes (b) are not part of this viewer yet. Nothing is drawn for it.', 'b');
-                } else if (cmd.name === 'LS') {
+                if (cmd.name === 'LS') {
                     issue('info', 'epl-ls-unsupported', 'Diagonal lines (LS) are not part of this viewer yet.', 'LS');
                 } else if (cmd.name === 'GW') {
                     issue('info', 'epl-gw-unsupported', 'Binary graphics (GW) are not part of this viewer yet.', 'GW');

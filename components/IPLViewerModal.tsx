@@ -20,6 +20,35 @@ import { getPrinterTarget, setPrinterTarget } from '../services/printerTarget';
 
 const DPI_OPTIONS: PrinterSettings['dpi'][] = [203, 300, 406];
 
+/**
+ * Which printer language a pasted stream is written in.
+ *
+ * ZPL starts with ^XA and IPL with <STX>, so those two are recognised from a
+ * sigil. EPL and TSPL have NONE — they are bare commands — so their rules have
+ * to be shaped instead, and they must not capture ordinary text or each other:
+ *
+ *   TSPL — `CLS` on its own line (the buffer clear; no other language here has
+ *          it) AND a command that opens an object.
+ *   EPL  — a line that IS an EPL command with numeric parameters. An earlier
+ *          rule ALSO required a bare `N`, which silently mis-detected any real
+ *          EPL file whose author left it out: `N` only clears the image buffer
+ *          and is routinely omitted, so a valid label fell through to the IPL
+ *          parser and reported nothing at all. Since `CLS` is handled above and
+ *          never appears in EPL, an EPL command on its own is unambiguous.
+ *
+ * A stream that is none of them falls through to the IPL parser, whose "no
+ * frames found" error is the most useful of the messages.
+ *
+ * Exported so the rule can be pinned by tests: it decides which parser reads
+ * every stream that enters the app, and a wrong answer renders the wrong label.
+ */
+export const detectSourceLanguage = (code: string): PrinterLanguage => {
+    if (/^\s*\^XA/i.test(code)) return 'zpl';
+    if (/^\s*CLS\s*$/mi.test(code) && /^(?:TEXT\s+\d+,\d+,\s*"|BARCODE\s+\d+,\d+,\s*"|SIZE\s+)/mi.test(code)) return 'tspl';
+    if (/^(?:A\d+,\d+,|B[0-9A-Za-z]*\d*,\d+,|LO\d+,|LW\d+,|X\d+,\d+,|b\d+,\d+,|q\d+\s*$|Q\d+,)/m.test(code)) return 'epl';
+    return 'ipl';
+};
+
 /** Upper bound for open-file payloads (captures are KB-scale; see loadFile). */
 const MAX_IPL_FILE_BYTES = 2 * 1024 * 1024;
 
@@ -221,12 +250,7 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
     // `A`, `B` and `TEXT` are ordinary words). A stream that is none of them
     // falls through to the IPL parser, whose "no frames found" error is the
     // most useful of the messages.
-    const detectedLanguage = useMemo<PrinterLanguage>(() => {
-        if (/^\s*\^XA/i.test(debouncedCode)) return 'zpl';
-        if (/^\s*CLS\s*$/mi.test(debouncedCode) && /^(?:TEXT\s+\d+,\d+,\s*"|BARCODE\s+\d+,\d+,\s*"|SIZE\s+)/mi.test(debouncedCode)) return 'tspl';
-        if (/^\s*N\s*$/m.test(debouncedCode) && /^(?:A\d+,\d+,|B\d+,\d+,|LO\d+,|LW\d+,|q\d+\s*$|Q\d+,)/m.test(debouncedCode)) return 'epl';
-        return 'ipl';
-    }, [debouncedCode]);
+    const detectedLanguage = useMemo(() => detectSourceLanguage(debouncedCode), [debouncedCode]);
     // A wrong guess is still possible, and a silently mis-rendered label is the
     // kind of failure this project refuses — so the language is shown and one
     // click away from correct.
