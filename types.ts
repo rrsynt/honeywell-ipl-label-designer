@@ -211,12 +211,20 @@ export interface PrinterSettings {
      */
     directGraphics?: boolean;
     /**
-     * Fase 5: which printer language the Code panel and the download button emit.
-     * Absent means IPL — every design saved before ZPL existed must keep
-     * producing IPL, and the canvas is unaffected either way.
+     * Which printer language the Code panel and the download button emit.
+     * Absent means IPL — every design saved before the others existed must
+     * keep producing IPL, and the canvas is unaffected either way.
      */
-    language?: 'ipl' | 'zpl';
+    language?: PrinterLanguage;
 }
+
+/**
+ * The printer languages this app speaks. ONE alias rather than an inline union
+ * at every site: a language added in one place and missed in another produces a
+ * target that silently emits the WRONG language, which is a ruined label rather
+ * than a type error.
+ */
+export type PrinterLanguage = 'ipl' | 'zpl' | 'epl';
 
 export interface DataSourceBase {
     id: string;

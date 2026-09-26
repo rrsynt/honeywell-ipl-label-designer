@@ -14,7 +14,7 @@
 //     refused with the reason, not sent with the records silently dropped.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { Design } from '../types';
+import type { Design, PrinterLanguage } from '../types';
 import { SheetPreview } from './SheetPreview';
 import { designHasRecords, designJobPlan, designRecordCount } from '../services/printRecords';
 import { printSequence, PRINT_CHUNK_LABELS } from '../services/printJob';
@@ -463,7 +463,7 @@ export const PrintCenter: React.FC<{ design: Design; onClose: () => void }> = ({
 /** Add/edit/remove saved printers. Kept inline: it is three fields and a list. */
 const PrinterTargetEditor: React.FC<{ targets: PrintTarget[]; onChanged: () => Promise<void> }> = ({ targets, onChanged }) => {
     const [open, setOpen] = useState(false);
-    const [draft, setDraft] = useState<{ id?: string; name: string; host: string; port: string; language: 'ipl' | 'zpl'; dpi: 203 | 300 | 406 }>(
+    const [draft, setDraft] = useState<{ id?: string; name: string; host: string; port: string; language: PrinterLanguage; dpi: 203 | 300 | 406 }>(
         { name: '', host: '', port: '9100', language: 'ipl', dpi: 203 },
     );
     const [error, setError] = useState<string | null>(null);
@@ -495,9 +495,10 @@ const PrinterTargetEditor: React.FC<{ targets: PrintTarget[]; onChanged: () => P
                         <input value={draft.port} onChange={e => setDraft({ ...draft, port: e.target.value })} placeholder="9100" inputMode="numeric" className={`${inputClasses} w-20`} aria-label="Printer port" />
                     </div>
                     <div className="flex gap-1.5">
-                        <select value={draft.language} onChange={e => setDraft({ ...draft, language: e.target.value as 'ipl' | 'zpl' })} className={inputClasses} aria-label="Printer language">
+                        <select value={draft.language} onChange={e => setDraft({ ...draft, language: e.target.value as PrinterLanguage })} className={inputClasses} aria-label="Printer language">
                             <option value="ipl">IPL</option>
                             <option value="zpl">ZPL</option>
+                            <option value="epl">EPL</option>
                         </select>
                         <select value={String(draft.dpi)} onChange={e => setDraft({ ...draft, dpi: parseInt(e.target.value) as 203 | 300 | 406 })} className={inputClasses} aria-label="Printer dpi">
                             {[203, 300, 406].map(d => <option key={d} value={d}>{d} dpi</option>)}

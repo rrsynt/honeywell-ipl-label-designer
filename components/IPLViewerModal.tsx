@@ -3,6 +3,7 @@ import type { Design, PrinterSettings } from '../types';
 import { parseIPL } from '../services/iplParser';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
 import { parseZPL } from '../services/zpl/zplParser';
+import { parseEPL } from '../services/epl/eplParser';
 import { computeLabelExtent, renderLabel } from '../services/ipl/renderer';
 import { ensureBarcodesReady } from '../services/ipl/barcodes';
 import type { ViewerIssue } from '../services/ipl/types';
@@ -110,6 +111,8 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
     const [sendHost, setSendHost] = useState(() => getPrinterTarget().host);
     const [sendPort, setSendPort] = useState(() => getPrinterTarget().port);
     const [bridgeStatus, setBridgeStatus] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle');
+    /** Set when the user corrects the detected language. Null = trust detection. */
+    const [langOverride, setLangOverride] = useState<'ipl' | 'zpl' | 'epl' | null>(null);
     const [sendState, setSendState] = useState<{ busy: boolean; ok?: boolean; msg?: string }>({ busy: false });
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -201,14 +204,32 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
     // once the encoder engine is up, so a stream parsed (or opened/shared)
     // before it finished loading would otherwise keep a stale, error-free
     // issue list until the user edits the text.
-    // ZPL starts with ^XA, IPL with <STX>. Detecting from the bytes means one paste
-    // box serves both languages; a stream that is neither falls through to the
-    // IPL parser, whose "no frames found" error is the more useful of the two.
+    //
+    // ZPL starts with ^XA and IPL with <STX>, so those two are recognised from
+    // a sigil. EPL has NONE — it is bare `N`, `A50,30,...` — so its rule must be
+    // stricter or it would swallow ordinary text: a line that is exactly `N`,
+    // AND at least one line shaped like an EPL command with numeric parameters.
+    // Either half alone is not enough (`N` is a plausible text line, and `A`
+    // and `B` are ordinary letters). A stream that is none of the three falls
+    // through to the IPL parser, whose "no frames found" error is the most
+    // useful of the three messages.
+    const detectedLanguage = useMemo<'ipl' | 'zpl' | 'epl'>(() => {
+        if (/^\s*\^XA/i.test(debouncedCode)) return 'zpl';
+        if (/^\s*N\s*$/m.test(debouncedCode) && /^(?:A\d+,\d+,|B\d+,\d+,|LO\d+,|LW\d+,|q\d+\s*$|Q\d+,)/m.test(debouncedCode)) return 'epl';
+        return 'ipl';
+    }, [debouncedCode]);
+    // A wrong guess is still possible, and a silently mis-rendered label is the
+    // kind of failure this project refuses — so the language is shown and one
+    // click away from correct.
+    const language = langOverride ?? detectedLanguage;
     const label = useMemo(
-        () => (/^\s*\^XA/i.test(debouncedCode) ? parseZPL(debouncedCode) : parseViewerIPL(debouncedCode)),
-        [debouncedCode, bwipReady],
+        () => (language === 'zpl' ? parseZPL(debouncedCode)
+            : language === 'epl' ? parseEPL(debouncedCode)
+            : parseViewerIPL(debouncedCode)),
+        [debouncedCode, language, bwipReady],
     );
-    const isZpl = useMemo(() => /^\s*\^XA/i.test(debouncedCode), [debouncedCode]);
+    // Importing a design back out of a stream is IPL-only.
+    const isZpl = language !== 'ipl';
     const totalLabels = totalLabelCount(label);
     const batch = Math.min(previewBatch, Math.max(0, totalLabels - 1));
     const previewLabel = useMemo(() => resolveLabelAtBatch(label, batch, dpi), [label, batch, dpi]);
@@ -591,7 +612,21 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                     <div className="w-[42%] flex flex-col min-h-0">
                         <div className="flex items-center justify-between gap-2 mb-2">
                             <label className="block text-xs font-medium text-gray-400 flex items-center gap-1.5 min-w-0">
-                                <span className="flex-shrink-0">IPL Source</span>
+                                {/* Which language the text was read as. Shown, not
+                                    assumed: detection is a guess and a wrong one
+                                    would otherwise render the wrong label silently. */}
+                                <select value={language} onChange={e => setLangOverride(e.target.value as 'ipl' | 'zpl' | 'epl')}
+                                    aria-label="Source language"
+                                    title={langOverride ? "Language chosen by hand" : "Detected from the stream"}
+                                    className="flex-shrink-0 bg-gray-700 text-gray-200 text-[11px] rounded px-1 py-0.5 outline-none">
+                                    <option value="ipl">IPL</option>
+                                    <option value="zpl">ZPL</option>
+                                    <option value="epl">EPL</option>
+                                </select>
+                                <span className="flex-shrink-0">Source</span>
+                                {langOverride && langOverride !== detectedLanguage && (
+                                    <span className="text-[10px] text-amber-400 flex-shrink-0" title={`The stream looks like ${detectedLanguage.toUpperCase()}`}>overridden</span>
+                                )}
                                 {openedFile && (
                                     <span className="text-[10px] text-gray-500 truncate" title={openedFile}>· {openedFile}</span>
                                 )}

@@ -36,7 +36,7 @@ describe('validateTarget', () => {
         for (const port of ['abc', '0', '65536', '91.5', '']) {
             expect(validateTarget({ ...valid, port }).error, port).toMatch(/port/i);
         }
-        expect(validateTarget({ ...valid, language: 'epl' as never }).error).toMatch(/language/i);
+        expect(validateTarget({ ...valid, language: 'dpl' as never }).error).toMatch(/language/i);
         expect(validateTarget({ ...valid, dpi: 600 as never }).error).toMatch(/dpi/i);
     });
 

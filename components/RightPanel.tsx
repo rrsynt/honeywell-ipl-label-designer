@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import type { Design, Field, DataSource } from '../types';
+import type { Design, Field, DataSource, PrinterLanguage } from '../types';
 import { FieldEditor } from './FieldEditor';
 import { CodePanel } from './CodePanel';
 import { PRINTER_MODELS, UNPRINTABLE_MARGIN_MM } from '../constants';
 import { generateIPL, fontSubstitutions, suppressionWarnings, type FontSubstitution } from '../services/iplGenerator';
 import { generateZPL } from '../services/zpl/zplGenerator';
+import { generateEPL } from '../services/epl/eplGenerator';
 import { parseCsv, exportableVariableFields, planCsvJob, MAX_JOB_ROWS, decodeCsvText, MAX_CSV_FILE_BYTES } from '../services/csvJob';
 import { CsvRowPreview } from './CsvRowPreview';
 import { sendIplViaBridge } from '../services/bridgeSend';
@@ -229,10 +230,11 @@ const PrinterSettingsEditor: React.FC<{ settings: Design['printerSettings']; dis
         <div className="grid grid-cols-2 gap-3">
             <PropInput label="Printer Language" fullWidth>
                 <select value={settings.language ?? 'ipl'} aria-label="Printer language"
-                    onChange={e => handleUpdate({ language: e.target.value as 'ipl' | 'zpl' })}
+                    onChange={e => handleUpdate({ language: e.target.value as PrinterLanguage })}
                     className={inputClasses} title="Language the Code panel and the download button emit. The canvas does not change.">
                     <option value="ipl">IPL (Honeywell)</option>
                     <option value="zpl">ZPL (Zebra)</option>
+                    <option value="epl">EPL (Eltron/Zebra desktop)</option>
                 </select>
             </PropInput>
             <PropInput label="Printer Model" fullWidth>
@@ -1135,12 +1137,17 @@ export const RightPanel: React.FC<{ activeDesign: Design; selectedFieldIds: numb
     
     useEffect(() => {
         if (activeTab === 'code') {
-            // ZPL is synchronous and lossy: fields it cannot represent come back as
-            // warnings, shown alongside the code so a missing barcode is announced
-            // rather than discovered at the printer. IPL stays the default.
-            if (activeDesign.printerSettings.language === 'zpl') {
-                const { zpl, warnings } = generateZPL(activeDesign);
-                setIplCode(zpl);
+            // ZPL and EPL are synchronous and lossy: fields they cannot represent
+            // come back as warnings, shown alongside the code so a missing barcode
+            // is announced rather than discovered at the printer. IPL stays the
+            // default — and is the explicit fallback, not just "everything else",
+            // so a language added later cannot silently emit IPL here.
+            const language = activeDesign.printerSettings.language ?? 'ipl';
+            if (language === 'zpl' || language === 'epl') {
+                const { stream, warnings } = language === 'epl'
+                    ? (() => { const r = generateEPL(activeDesign); return { stream: r.epl, warnings: r.warnings }; })()
+                    : (() => { const r = generateZPL(activeDesign); return { stream: r.zpl, warnings: r.warnings }; })();
+                setIplCode(stream);
                 setZplWarnings(warnings);
             } else {
                 setZplWarnings([]);

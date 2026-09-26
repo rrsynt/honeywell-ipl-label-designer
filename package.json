@@ -16,7 +16,8 @@
     "print-server": "node tools/print-server.mjs",
     "db-server": "node tools/db-server.mjs",
     "crosscheck": "node tools/labelary-crosscheck.mjs",
-    "zpl": "node tools/ipl2zpl.mjs"
+    "zpl": "node tools/ipl2zpl.mjs",
+    "crosscheck:epl": "node tools/epl-crosscheck.mjs"
   },
   "dependencies": {
     "bwip-js": "^4.11.4",
@@ -26,6 +27,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@goodboy008/labelize-wasm": "^1.6.0",
     "@napi-rs/canvas": "^1.0.8",
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.18",

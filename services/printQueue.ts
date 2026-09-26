@@ -17,10 +17,11 @@
 // media. Retrying is still the right default — but the UI must say that up to
 // one chunk can print twice, and nothing here claims otherwise.
 
-import type { Design } from '../types';
+import type { Design, PrinterLanguage } from '../types';
 import type { BatchData } from './iplGenerator';
 import { generateIPL } from './iplGenerator';
 import { generateZPL } from './zpl/zplGenerator';
+import { generateEPL } from './epl/eplGenerator';
 import { sendIplViaBridge, type BridgeResult } from './bridgeSend';
 import { getPrintServerUrl, sendChunkViaPrintServer } from './printRemoteBackend';
 import { requestToPromise, storeOf } from './designerDb';
@@ -36,7 +37,7 @@ export interface JobTarget {
     name: string;
     host: string;
     port: string;
-    language: 'ipl' | 'zpl';
+    language: PrinterLanguage;
     dpi: 203 | 300 | 406;
 }
 
@@ -262,15 +263,15 @@ export interface NewJobOptions {
 /**
  * Why this design cannot be sent to this target, or null when it can.
  *
- * The one real refusal: ZPL output has no per-record support
- * (services/zpl/zplGenerator.ts emits a single label and ^PQ for copies), so a
- * table-backed design pointed at a ZPL target would print ONE record and
- * silently drop the rest. Refusing is the only honest answer; the UI shows
- * this sentence next to the target picker.
+ * The one real refusal: ZPL and EPL both emit a SINGLE label per stream with
+ * the copy count inside it (^PQ and P), so a table-backed design pointed at
+ * either would print one record and silently drop the rest. Refusing is the
+ * only honest answer; the UI shows this sentence next to the target picker.
  */
 export const jobSendabilityError = (design: Design, target: Pick<JobTarget, 'language'>): string | null => {
-    if (target.language === 'zpl' && designHasRecords(design)) {
-        return 'ZPL output prints one label per stream, so a record range cannot be sent to a ZPL printer. Pick an IPL target, or export the records as images instead.';
+    if (target.language !== 'ipl' && designHasRecords(design)) {
+        const name = target.language === 'epl' ? 'EPL' : 'ZPL';
+        return `${name} output prints one label per stream, so a record range cannot be sent to a ${name} printer. Pick an IPL target, or export the records as images instead.`;
     }
     return null;
 };
@@ -400,15 +401,16 @@ export const jobChunks = (job: PrintJob): { records: number[]; batch?: BatchData
 export const renderJobChunk = async (job: PrintJob, chunkIndex: number, chunks = jobChunks(job)): Promise<string> => {
     const chunk = chunks[chunkIndex];
     if (!chunk) return '';
-    if (job.target.language === 'zpl') {
-        // jobSendabilityError already refused a record range on ZPL, so this is
-        // the single-label case: ^PQ carries the copies, applied to a COPY of
-        // the snapshot so the stored job keeps the design the user made.
+    if (job.target.language === 'zpl' || job.target.language === 'epl') {
+        // jobSendabilityError already refused a record range on these, so this
+        // is the single-label case: the copy count travels inside the stream
+        // (^PQ for ZPL, P for EPL), applied to a COPY of the snapshot so the
+        // stored job keeps the design the user made.
         const design: Design = {
             ...job.design,
             printerSettings: { ...job.design.printerSettings, quantity: Math.max(1, job.copies) },
         };
-        return generateZPL(design).zpl;
+        return job.target.language === 'epl' ? generateEPL(design).epl : generateZPL(design).zpl;
     }
     if (chunk.batch) return generateIPL(job.design, chunk.batch);
     // Single-record IPL: the copies live inside the stream as <RS>n, so the

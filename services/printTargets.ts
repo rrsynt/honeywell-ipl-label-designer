@@ -17,6 +17,7 @@
 
 import { requestToPromise, storeOf } from './designerDb';
 import { isValidPrinterPort, normalizeHost, DEFAULT_TARGET, getPrinterTarget, setPrinterTarget } from './printerTarget';
+import type { PrinterLanguage } from '../types';
 
 export interface PrintTarget {
     /** Generated, stable. Two targets may share a host, so name is not a key. */
@@ -25,7 +26,7 @@ export interface PrintTarget {
     host: string;
     port: string;
     /** Which language the stream for this machine must be generated in. */
-    language: 'ipl' | 'zpl';
+    language: PrinterLanguage;
     dpi: 203 | 300 | 406;
 }
 
@@ -61,7 +62,7 @@ export const validateTarget = (input: PrintTargetInput): TargetValidation => {
     if (!host) return bad('Printer host is empty.');
     const port = (input.port || '').trim();
     if (!isValidPrinterPort(port)) return bad(`Invalid port "${input.port}" — must be 1-65535.`);
-    if (input.language !== 'ipl' && input.language !== 'zpl') return bad('Language must be IPL or ZPL.');
+    if (input.language !== 'ipl' && input.language !== 'zpl' && input.language !== 'epl') return bad('Language must be IPL, ZPL or EPL.');
     if (![203, 300, 406].includes(input.dpi)) return bad('DPI must be 203, 300 or 406.');
     return { target: { name, host, port, language: input.language, dpi: input.dpi }, error: null };
 };
