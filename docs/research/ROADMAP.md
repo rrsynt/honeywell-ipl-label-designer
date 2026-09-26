@@ -159,6 +159,34 @@ Dokumentasi lengkap: [GOLDEN-TESTING.md](GOLDEN-TESTING.md).
   checklist kalibrasi visual di dokumen itu.
 - Tawarkan hasil ke penulis portakal & komunitas Labelize untuk uji silang.
 
+## DPL (Datamax) — DITUNDA, menunggu sumber (2026-09-26)
+DPL adalah satu-satunya bahasa dari daftar rencana induk yang **tidak dibangun**,
+dan alasannya bukan tingkat kesulitan melainkan tidak adanya bahan:
+
+- **Tidak ada manual resmi yang ditemukan.** Pencarian manual pemrograman DPL
+  (Datamax/Honeywell) tidak mengembalikan salinan publik. Ini yang membedakannya
+  dari TSPL, yang terselamatkan oleh manual TSC yang bisa diunduh.
+- **Tidak ada oracle independen.** API Labelary memang mengeluarkan DPL
+  (`Accept: application/dpl`), tapi keluarannya sebuah RASTER, bukan perintah:
+  percobaan mengembalikan satu blob biner ditambah `D11`, `1Y…`, `Q1`, `E` —
+  tanpa satu pun `1A` (teks) atau `1B` (barcode). Engine Labelize hanya punya
+  `zpl_parser.rs` + `epl_parser.rs` (dikonfirmasi dari daftar berkasnya).
+- **Sumber sekunder terlalu tipis.** Satu repositori VB.NET
+  (`BauerPh/LabelDesigner`, 2 bintang) memberi sintaks untuk 6 tipe barcode dari
+  puluhan, ditambah TEXT, BOX, LINE dan DataMatrix — tapi tidak ada tabel font,
+  perintah ukuran/gap, maupun tanggal.
+
+Kenapa tidak dikerjakan saja dengan sumber itu: EPL dan TSPL dua kali membuktikan
+bahwa tabel bahasa printer yang ditulis tanpa spec otoritatif **salah**. Pada EPL
+tabel huruf barcode-nya keliru total; pada TSPL tipenya ternyata nama, bukan
+angka. Menebak DPL akan menghasilkan label salah cetak tanpa ada yang tahu —
+persis kegagalan diam-diam yang proyek ini ada untuk mencegah.
+
+**Yang membuka DPL:** manual DPL resmi, atau contoh label `.dpl`/`.prn` nyata dari
+printer Datamax. Dengan itu, parser dan generator DPL mengikuti cetak biru yang
+sudah ada (`services/epl/`, `services/tspl/`) dan `PrinterLanguage` tinggal
+menerima nilai kelima.
+
 ## Keputusan teknologi
 | Peran | Pilihan | Alasan |
 |---|---|---|

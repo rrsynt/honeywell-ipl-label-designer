@@ -22,7 +22,8 @@ mirip ZPL Viewer / Labelary, tapi untuk printer Honeywell/Intermec.
 - IPL generator + parser round-trip (dijamin test), simpan/muat localStorage, ekspor JSON
 ### IPL Viewer
 - Live parse saat mengetik — terima byte kontrol asli (0x02/0x1b) maupun notasi literal (`<STX>`/`<ESC>`);
-  bahasa dideteksi dari stream (IPL/ZPL/EPL) dan bisa diganti manual kalau tebakannya salah
+  bahasa dideteksi dari stream (IPL/ZPL/EPL/TSPL) dan bisa diganti manual kalau tebakannya salah;
+  DPL (Datamax) sengaja belum didukung — lihat docs/research/ROADMAP.md
 - Render: font bitmap/outline per DPI, barcode bwip-js dot-exact (20 symbology:
   Code 39/93/ITF/2of5/11/128+UCC, EAN/UPC+add-on, Codabar, HIBC 39/128, Code 16K,
   Code 49, POSTNET, Planet, PDF417, MicroPDF417, QR Code, Data Matrix, MaxiCode,
