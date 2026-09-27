@@ -176,6 +176,18 @@ mengonfirmasi c20–c41 harus dirender dari font resident printer.
 
 ### 3c. Bug firmware terdokumentasi — `IPL_Firmware_Release_Notes_K10_v9_P10_v9.pdf`
 
+> **SELESAI 2026-09-27.** Tabel lengkapnya kini di
+> `docs/HONEYWELL-SIMULATOR.md` ("Kalau printer nyata berperilaku beda dari
+> preview"), dengan satu koreksi penting yang hanya muncul saat memverifikasi
+> balik ke PDF-nya: **semua issue ini SUDAH DIPERBAIKI**, bukan defect terbuka.
+> Tabelnya menyebut versi perbaikannya (x10.06.008523 untuk keempat issue
+> graphics, x10.05.007902 untuk EAN, x10.04.007069 untuk 11136.2), jadi yang
+> perlu dibandingkan adalah **versi firmware printer target**, bukan daftar
+> issue-nya. Dua koreksi lain: `15009.5` yang ikut dikutip sebagai bug IPL
+> sebenarnya **ESim**, dan `15939` duduk di tabel "Improved Functionality" —
+> artinya "sudah dibetulkan", bukan "masih rusak".
+
+
 Daftar issue ID + deskripsi, sangat berguna sebagai penjelas kalau printer
 nyata berperilaku beda dari spesifikasi. Yang menyentuh area kita, kutipan
 verbatim:
@@ -204,6 +216,9 @@ dokumentasi yang sudah pernah menggigit proyek ini.
 ---
 
 ## Tahap 3b-bis — Parameter `m` pada `c` diabaikan (celah, bukan bug yang tampak)
+
+> **SELESAI 2026-09-27** — dan celah ini ternyata menyembunyikan bug yang
+> JAUH lebih besar dari dirinya sendiri. Lihat "Temuan susulan" di bawah.
 
 **Terverifikasi langsung ke manual**, bukan dari laporan riset:
 `docs/manuals/IPL_Command_Reference_K10_937-028-003/Font_Type_Select_K10.htm`
@@ -238,6 +253,59 @@ kode sekarang, dan itulah buktinya.
 **Risiko kalau salah:** `m` bernilai negatif (−199..399) berarti karakter bisa
 saling tumpang-tindih. Perlu keputusan eksplisit apakah preview menirukan
 tumpang-tindih itu (menurut saya ya — printer melakukannya).
+
+### Temuan susulan 2026-09-27 — mengerjakan `m` membongkar bug advance yang nyata
+
+Menulis tes `m` ("c25,3 harus 3×(n−1) dot lebih lebar") menuntut pengukuran
+lebar yang benar-benar terpampang. Di situlah ketahuan bahwa **lebar yang
+terpampang tidak pernah sama dengan lebar yang dihitung** untuk font bitmap:
+
+| | model (dipakai SEMUA kalkulasi layout) | cat yang terpampang |
+|---|---|---|
+| `c0`, 21 karakter | 8,0 dot/karakter | **5,4 dot/karakter** |
+| `c0` dengan `w2` | 16,0 dot/karakter | 5,4 (w tidak berpengaruh sama sekali) |
+| `c0` dengan `w3` | 24,0 dot/karakter | 5,4 |
+
+Sebabnya: jalur gambar menyerahkan advance ke `ctx.fillText`, yang memakai
+metrik face host (Liberation Mono 0,6 em = 5,4 dot) alih-alih sel printer
+(7 dot + 1 gap). Akibatnya tinta ~33% lebih sempit daripada kotak field,
+seleksi, anchor, dan border `b` — dan **`w` tidak mengubah apa pun di layar**
+meski manualnya tegas: *"Increasing the width of a text field to 2 makes each
+letter in the field twice as wide"* (PRM 2.70 p.55).
+
+Di sisi **designer** masalahnya kembar tapi terbalik: `ctx.scale(w_mag, 1)`
+melebarkan seluruh run memakai metrik face, jadi 10 karakter `c0` tergambar
+104 px padahal kotaknya 79 dot — dan kedua mesin **berbeda satu sama lain**,
+padahal paritas layar↔cetak adalah kontrak inti proyek ini.
+
+**Perbaikan:** `services/fixedCellText.ts` — satu helper gambar bersama untuk
+face bitmap, dipakai renderer viewer DAN canvasDrawer designer, sehingga
+keduanya tidak bisa lagi berbeda. Advance = (lebar sel + gap) × w; glif
+diskalakan agar satu advance host sama dengan sel printer.
+
+**Kenapa tidak ada tes/golden yang menangkapnya:** tidak ada satu pun sample,
+golden, atau stream BarTender di repo yang memuat **field teks berfont bitmap**
+— semuanya memakai outline c20–c41 (`c25`/`c26` dominan). Jalur bitmap hanya
+tersentuh lewat UDC/graphic dan HRI. Jadi ini kelas cacat yang sama dengan
+cermin Direct Graphics: suite hijau, label tetap salah.
+
+**Guard permanen:** `tests/bitmapTextAdvance.test.ts` (advance yang terpampang
+vs model untuk c0/c2/c7 × w1/w2/w3, contoh 79-dot manual, rentang & tanda `m`,
+serta pemisahan parameter barcode) + 9 kasus paritas designer↔cetak di
+`tests/rotationWysiwyg.test.ts`. Keduanya **diverifikasi dengan memasukkan
+kembali bug-nya** (21 tes gagal pada bug viewer, 9 pada bug designer).
+
+**Catatan default `m`:** edisi manual berbeda — PRM ("the printer uses the
+default value of the selected font") vs K10 ("Default is 0"). Yang dipakai di
+sini adalah default font, karena itulah yang dikunci contoh 79-dot; perbedaan
+itu dicatat, bukan disembunyikan.
+
+**`p` sengaja TIDAK diimplementasikan** dan itu keputusan, bukan kelalaian:
+`p` menamai font yang bisa diunduh, yang byte-nya tidak ada di renderer ini.
+Peringatan untuk `p` juga tidak dipasang, karena bentuk `c18,2,L,8` pada frame
+**`B`** adalah perintah lain ("Bar Code, Select Type") yang slot ketiganya
+sebuah label — peringatan di sana akan menyala pada frame barcode yang benar
+(sudah diperiksa: nol peringatan palsu pada 9 sampel nyata).
 
 ### Konfirmasi: default `h` per tipe field SUDAH benar
 

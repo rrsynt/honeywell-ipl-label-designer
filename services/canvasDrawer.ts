@@ -6,6 +6,7 @@ import { validateBarcode } from './validator';
 import { measureBarcode, paintBarcode, isBarcodeEngineReady } from './ipl/barcodes';
 import { getUploadedFontMetrics } from './ipl/fontMetrics';
 import { designerBarcodeRender } from './designerBarcode';
+import { paintFixedCellText } from './fixedCellText';
 
 export const HANDLE_SIZE = 8;
 export const ROTATION_HANDLE_OFFSET = 20;
@@ -157,10 +158,14 @@ export const getFieldBoundingBox = (ctx: CanvasRenderingContext2D, field: Field,
                 const fontFamily = uploaded?.cssFamily || fontInfo?.family || 'sans-serif';
                 const fontSize = (field as TextField).fontSize * POINTS_TO_MM * PREVIEW_SCALE * zoom;
                 ctx.font = `normal ${fontSize}px ${cssFontStack(fontFamily)}`;
+                // `c n,m` widens the run by m dots per GAP (n − 1 of them), so
+                // the box has to include them — the draw path applies the same
+                // spacing per glyph.
+                const gapPx = ((field as TextField).intercharGapDots ?? 0) * dotSizePx;
                 let maxWidth = 0;
                 lines.forEach(line => {
                     const measuredWidth = line.length > 0 ? ctx.measureText(line).width : 0;
-                    maxWidth = Math.max(maxWidth, measuredWidth);
+                    maxWidth = Math.max(maxWidth, measuredWidth + gapPx * Math.max(0, line.length - 1));
                 });
                 width = maxWidth;
             }
@@ -509,12 +514,30 @@ export const drawElements = (
                     const drawX = blockX;
 
                      if (isBitmap) {
+                        // The printer's cell pitch, not the host face's own
+                        // advance — shared with the viewer renderer so the
+                        // screen and the print cannot drift apart again
+                        // (services/fixedCellText.ts).
                         ctx.save();
                         ctx.translate(drawX, yPos);
-                        ctx.scale(field.w_mag, 1);
-                        // Font size is already set correctly for height, scale handles width
-                        ctx.fillText(line, 0, 0);
+                        paintFixedCellText(
+                            ctx, [line],
+                            (fontInfo?.baseWidth ?? 7) * field.w_mag * dotSizePx,
+                            ((fontInfo?.baseWidth ?? 7) + (field.intercharGapDots ?? fontInfo?.gapWidth ?? 2)) * field.w_mag * dotSizePx,
+                            lineHeight,
+                        );
                         ctx.restore();
+                    } else if (field.intercharGapDots !== undefined) {
+                        // `c n,m` on an outline face: m dots between glyphs,
+                        // measured with the same helper the field's own box
+                        // uses so the screen matches the print (and the
+                        // selection box).
+                        const gapPx = field.intercharGapDots * dotSizePx;
+                        let cx = drawX;
+                        for (const ch of line) {
+                            ctx.fillText(ch, cx, yPos);
+                            cx += ctx.measureText(ch).width + gapPx;
+                        }
                     } else {
                         ctx.fillText(line, drawX, yPos);
                     }

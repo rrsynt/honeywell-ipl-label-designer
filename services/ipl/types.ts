@@ -60,6 +60,14 @@ export interface TextElement extends ElementBase {
      * hMag/wMag of 1 and no k of its own.
      */
     pitchAdvanceDots?: number;
+    /**
+     * Intercharacter gap override (`c n,m` — K10 "Font Type, Select"; PRM
+     * p.180): "the space between characters", replacing the font's own gap
+     * (1 dot for c0, 2 for the others). Absent = use the font default. The
+     * documented range is -199..399 (K10) / -199..199 (PRM), so a negative
+     * value overlaps characters and is honoured rather than clamped.
+     */
+    intercharGapDots?: number;
     /** Set when this is an interpretive field (I<n>) bound to barcode <n>;
      * its default anchor was derived from that barcode's rendered box. */
     interpretiveOf?: number;

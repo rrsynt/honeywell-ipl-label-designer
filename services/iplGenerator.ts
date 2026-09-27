@@ -558,7 +558,12 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
                 let params: string[] = [`o${rounded_ox},${rounded_oy}`, `f${rotationCmd}`];
                 if (field.type === 'text') {
                     const fontInfo = FONT_MAP[emitFontId(field.font)];
-                    params.push(`c${emitFontId(field.font)}`);
+                    // c n[,m] — the gap is emitted only when the field carries
+                    // one, so a design that never set it regenerates byte-
+                    // identically to before.
+                    params.push(field.intercharGapDots === undefined
+                        ? `c${emitFontId(field.font)}`
+                        : `c${emitFontId(field.font)},${field.intercharGapDots}`);
                     if (fontInfo?.type === 'bitmap') { 
                         params.push(`h${field.h_mag}`, `w${field.w_mag}`); 
                     } else { // Outline font

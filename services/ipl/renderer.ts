@@ -3,6 +3,7 @@ import { measureBarcode, paintBarcode, buildBwipSpec, applyI2of5Padding, interpr
 import { decodeGraphicColumns, paintBitmap } from './graphics';
 import { OUTLINE_FONTS } from './viewerParser';
 import { FONT_MAP, FONT_FAMILIES, fontAdvanceDots, fontStack } from '../../constants';
+import { paintFixedCellText } from '../fixedCellText';
 import { outlineTextBlockWidthDots, getUploadedFontMetrics } from './fontMetrics';
 
 export interface RenderOptions {
@@ -115,16 +116,23 @@ export const estimateElementSize = (
                 // FONT_MAP exactly as before.
                 const uploaded = getUploadedFontMetrics(el.font);
                 const family = uploaded ? el.font : (FONT_MAP[el.font]?.family ?? 'monospace');
+                // `c n,m` adds m dots between characters for outline faces too
+                // — "Selects a font type for human-readable and interpretive
+                // fields" is not restricted to the bitmap ids, and m is
+                // "the space between characters". Added between the n glyphs,
+                // never after the last one.
+                const gapDots = (el.intercharGapDots ?? 0) * (maxChars - 1);
                 return {
-                    lengthDots: Math.round(outlineTextBlockWidthDots(lines, hDots, family)),
+                    lengthDots: Math.round(outlineTextBlockWidthDots(lines, hDots, family) + gapDots),
                     crossDots: Math.round(lines.length * hDots * 1.15),
                 };
             }
             // Bitmap fonts advance by cell width + intercharacter gap
             // (c0: "7 dots wide by 9 dots high, with a 1-dot gap"; 10 chars of
             // c0 = 79 dots wide — PRM270 p.54). Cell heights from §7.3.
+            // `c n,m` replaces the font's own gap for this field.
             const meta = FONT_MAP[el.font] ?? FONT_FALLBACK;
-            const gap = meta.gapWidth ?? 2;
+            const gap = el.intercharGapDots ?? meta.gapWidth ?? 2;
             // Pitch (g) replaces the cell metrics with one derived from the
             // label width: n characters per line (PRM p.197).
             if (el.pitchAdvanceDots !== undefined) {
@@ -134,7 +142,10 @@ export const estimateElementSize = (
                     crossDots: Math.round(cellH * lines.length),
                 };
             }
-            const advance = fontAdvanceDots(el.font) * el.wMag;
+            // Advance = (cell width + gap) × w — spelled out rather than
+            // fontAdvanceDots() so an `m` override participates. The last gap
+            // is dropped: 10 chars of c0 are 79 dots, not 80.
+            const advance = ((meta.baseWidth ?? 7) + gap) * el.wMag;
             return {
                 lengthDots: Math.max(0, maxChars * advance - gap * el.wMag),
                 crossDots: (meta.baseHeight ?? 9) * el.hMag * lines.length,
@@ -252,6 +263,11 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
 
             let charW: number;
             let lineH: number;
+            // A real bitmap face (as opposed to an outline font, or a bitmap id
+            // that fell back to the outline path because it carries no cell
+            // metrics). Decides whether the printer's fixed cell pitch drives
+            // the advance or fillText's own font metrics do.
+            const isBitmapFace = meta.type === 'bitmap' && el.pointSize === undefined;
             // For outline fonts the border box must track the per-glyph
             // table too (Batch U) — fillText advances by the real font, and
             // 0.6em mis-sized b>0 borders for proportional families.
@@ -278,8 +294,10 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
                 ctx.font = `${cellH}px ${FONT_FAMILIES.monospace}`;
             } else {
                 const cellH = (meta.baseHeight ?? 9) * el.hMag * s;
-                // Advance = cell width + intercharacter gap (c0: +1, others +2).
-                charW = fontAdvanceDots(el.font) * el.wMag * s;
+                // Advance = cell width + intercharacter gap (c0: +1, others +2),
+                // both multiplied by w. `c n,m` replaces the font's own gap.
+                const gap = el.intercharGapDots ?? meta.gapWidth ?? 2;
+                charW = ((meta.baseWidth ?? 7) + gap) * el.wMag * s;
                 // Batch V: bitmap fonts are fixed matrix cells — the printer
                 // advances exactly cellHeight per line (estimateElementSize
                 // already measured lines × cellH × 1.0; drawing at 1.15 made
@@ -292,8 +310,11 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
             ctx.textBaseline = 'top';
             if (el.borderDots && el.borderDots > 0) {
                 // Border b (PRM p.167): white letters on a black n-dot surround.
+                // The surround must cover the `m` gaps too — measuring the run
+                // without them would clip the black box short of the ink.
+                const gapPad = (el.intercharGapDots ?? 0) * s;
                 const textW = outlineW
-                    ? Math.max(...lines.map(outlineW))
+                    ? Math.max(...lines.map(outlineW)) + gapPad * (Math.max(1, ...lines.map(l => l.length)) - 1)
                     : Math.max(1, ...lines.map(l => l.length)) * charW;
                 const textH = lines.length * lineH;
                 ctx.fillRect(-el.borderDots * s, -el.borderDots * s, textW + 2 * el.borderDots * s, textH + 2 * el.borderDots * s);
@@ -345,6 +366,25 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
                         ctx.fillText(ch, 0, 0);
                         ctx.restore();
                         cx += adv;
+                    }
+                });
+            } else if (isBitmapFace) {
+                // Fixed printer cells, not a host face — see
+                // services/fixedCellText.ts for why fillText's own advance is
+                // wrong here and what the manual's 79-dot example pins.
+                paintFixedCellText(ctx, lines, (meta.baseWidth ?? 7) * el.wMag * s, charW, lineH);
+            } else if (outlineW && el.intercharGapDots) {
+                // `c n,m` on an outline face: m dots between characters. Drawn
+                // per glyph from the same advance table the element's box was
+                // measured with, so box and ink stay in step (skipping the
+                // override entirely here would be the silent-drop this
+                // parameter was reported for).
+                const gapPx = el.intercharGapDots * s;
+                lines.forEach((line, li) => {
+                    let cx = 0;
+                    for (const ch of line) {
+                        ctx.fillText(ch, cx, li * lineH);
+                        cx += outlineW!(ch) + gapPx;
                     }
                 });
             } else {

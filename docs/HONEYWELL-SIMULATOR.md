@@ -94,10 +94,50 @@ perilaku firmware). Opsi realistis:
   bar terakhir (PRM p.191 "2 dots below bar code"); dipin
   `tests/originAndHri.test.ts`.
 
+- [ ] **Offset printhead 3 mm** — tech brief migrasi PM43/PC43 menyatakan semua
+  printhead generasi baru punya offset tetap 3 mm pada sumbu x sistem (≈24 dot
+  @203 dpi) yang tidak dimiliki PD41/42, PF2/4i, PM4i, PX4/6i. Belum ada
+  keputusan: apakah ini milik post-processing (seperti rotasi halaman) atau
+  milik firmware (preview harus ikut bergeser). **Ukur, jangan baca dari
+  dokumen:** cetak dua format identik dengan margin sistem berbeda lewat file
+  port, lalu ukur pergeseran tinta terhadap `W`/`L`. Sumber:
+  `docs/manuals/IPL_Migration_Considerations_PM43_PC43_TechBrief.pdf`.
+
 Yang **belum** bisa diputuskan tanpa printer: apakah metrik face outline printer
 persis menyamai Liberation, dan apakah firmware memakai tabel substitusi
 resident yang sama dengan Appendix B. Keduanya adalah pertanyaan akurasi, bukan
 pertanyaan struktur — struktur sudah teruji.
+
+### Kalau printer nyata berperilaku beda dari preview — periksa versi firmware dulu
+
+`docs/manuals/IPL_Firmware_Release_Notes_K10_v9_P10_v9.pdf` (versi dokumen
+x10.09.010948, 3 Nov 2015; IPL 1.001155) mendaftar defect bernomor **pada jalur
+perintah yang justru kita pakai** — direct graphics, font resident, HRI/EAN.
+Semuanya di bawah ini **sudah diperbaiki**, dan tabelnya menyebut versi
+perbaikannya. Jadi yang perlu dibandingkan bukan daftar ini sendiri melainkan
+**versi firmware printer target**: printer yang lebih tua dari kolom "fixed in"
+masih bisa memamerkan perilaku ini.
+
+| Issue ID | Deskripsi (verbatim) | Fixed in | Relevansi di sini |
+|---|---|---|---|
+| 16349 | IPL graphics problem (when using `<ESC>g1` command) | x10.06.008523 | jalur Direct Graphics yang dipakai `bartender-parity-base.ipl` |
+| 16350 | IPL graphics problem (when using IPL UDC commands) | x10.06.008523 | jalur UDC `u`/`G` |
+| 15952 | IPL direct graphics mode command `<ESC>g1` doesn't work | x10.06.008523 | idem, mode DG |
+| 16395 | Direct graphics can't be printed if using binary controlcode | x10.06.008523 | DG dengan byte kontrol biner di payload |
+| 15939 | IPL: Missing human readable and barcodes on printout | x10.06.008523 | HRI hilang tanpa sebab yang terlihat di stream |
+| 15002.1 | EAN8, 13 and their add-on barcodes position wrong | x10.05.007902 | keluarga `c7` — posisi HRI |
+| 15007.6 | EAN UCC barcode overlapping printout issues | x10.05.007902 | keluarga `c7`/`c8` — tumpang-tindih |
+| 11136.2 | Printer hangs when printing Font page with variable data | x10.04.007069 | hanya halaman uji printer, bukan alur kerja kita |
+| 130429-000121 | IPL: `<SI>L` command doubles its value in 406dpi | x10.06.008523 | label length salah di printer 406 dpi |
+
+Catatan kejujuran: `15009.5` ("ESim: PDF417 barcode printout issues") pernah
+ikut dikutip sebagai bug IPL — **itu ESim**, bahasa perintah yang berbeda, dan
+tidak berlaku untuk stream IPL kita. Yang benar untuk keluarga itu di IPL
+adalah `15002.1` dan `15007.6` di atas.
+
+**Bukan bug preview kita:** stream yang sudah benar bisa tetap salah cetak di
+printer yang firmwarenya lebih tua. Catat versi firmware bersama setiap temuan,
+supaya perilaku ini tidak salah diatribusikan ke parser/renderer.
 
 Setelah golden reference dari printer terkumpul:
 `testdata/golden/<nama>.png` diganti dengan hasil scan/foto printer, lalu

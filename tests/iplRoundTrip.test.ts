@@ -53,6 +53,9 @@ const normalizeField = (f: Field): Record<string, unknown> => {
             base.fontSize = f.fontSize;
             base.h_mag = f.h_mag;
             base.w_mag = f.w_mag;
+            // c n,m — must survive import -> regenerate, or a spacing the host
+            // asked for silently disappears from the printed label.
+            base.intercharGapDots = f.intercharGapDots ?? null;
             break;
         }
         case 'barcode': {
@@ -174,6 +177,35 @@ describe('IPL generator -> parser round trip', () => {
         expect(b2.code39_checkDigit).toBe('printer-generated');
         const t3 = parsed.fields[2] as TextField;
         expect(t3.dataSource).toEqual({ type: 'fixed', data: 'LINE ONE\nLINE TWO' });
+    });
+
+    // `c n,m` on a text field. Before this was carried through the designer,
+    // the importer stored `font: "25,3"` — a value FONT_MAP cannot resolve —
+    // and the regenerated stream emitted a plain `c25`, so the spacing the
+    // host asked for vanished without a word.
+    it('round-trips the intercharacter gap c n,m on outline and bitmap fonts', async () => {
+        const design = makeDesign([
+            text(1, 5, 5, 'HELLO', { font: '25', intercharGapDots: 3 }),
+            text(2, 5, 20, 'HELLO', { font: '0', h_mag: 2, w_mag: 1, intercharGapDots: -4 }),
+            text(3, 5, 35, 'HELLO', { font: '25' }),
+        ]);
+        const ipl = await generateIPL(design);
+        expect(ipl).toContain('c25,3');
+        expect(ipl).toContain('c0,-4');
+        // The third field carries no gap: exactly one `c25` may appear with a
+        // modifier, and one must appear bare.
+        expect(ipl.match(/c0,-4/g)?.length).toBe(1);
+        expect(ipl.match(/c25;[^,]/g)?.length, 'one bare c25 for field 3').toBe(1);
+
+        const parsed = parseIPL(ipl, DPI);
+        const t1 = parsed.fields[0] as TextField;
+        expect(t1.font, 'font id must not absorb the gap').toBe('25');
+        expect(t1.intercharGapDots).toBe(3);
+        const t2 = parsed.fields[1] as TextField;
+        expect(t2.font).toBe('0');
+        expect(t2.intercharGapDots, 'a negative gap overlaps on purpose').toBe(-4);
+        const t3 = parsed.fields[2] as TextField;
+        expect(t3.intercharGapDots).toBeUndefined();
     });
 
     it('round-trips printer settings and label dimensions', async () => {

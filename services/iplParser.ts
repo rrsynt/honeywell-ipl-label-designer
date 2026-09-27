@@ -220,7 +220,14 @@ export const parseIPL = (rawInput: string, dpi: PrinterSettings['dpi']): Design 
 
         switch (typeChar) {
             case 'H': {
-                const fontInfo = FONT_MAP[params['c']];
+                // c n[,m][,p] — the font id alone must reach FONT_MAP; feeding
+                // the raw value in would leave `font: "25,3"`, which resolves
+                // to no face at all AND silently drops the gap on regenerate.
+                const cParts = (params['c'] ?? '').split(',');
+                const fontId = (cParts[0] || '25').trim();
+                const gapRaw = cParts.length > 1 ? parseInt(cParts[1], 10) : NaN;
+                const intercharGapDots = Number.isInteger(gapRaw) && gapRaw >= -199 && gapRaw <= 399 ? gapRaw : undefined;
+                const fontInfo = FONT_MAP[fontId];
                 const isOutline = fontInfo?.type === 'outline';
                 let fontSize = 12, h_mag = 1, w_mag = 1;
 
@@ -237,8 +244,9 @@ export const parseIPL = (rawInput: string, dpi: PrinterSettings['dpi']): Design 
                 }
 
                 const textField: TextField = {
-                    ...baseProps, type: 'text', name: fieldName, x, y, dataSource, font: params['c'] || '25',
+                    ...baseProps, type: 'text', name: fieldName, x, y, dataSource, font: fontId,
                     fontSize, h_mag, w_mag,
+                    ...(intercharGapDots === undefined ? {} : { intercharGapDots }),
                 };
                 if (dataSource.type === 'variable') variableFields.push(textField);
                 field = textField;

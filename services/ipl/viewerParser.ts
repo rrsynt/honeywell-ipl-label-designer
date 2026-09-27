@@ -977,12 +977,54 @@ export class IPLViewerParser {
         return 0;
     }
 
+    /**
+     * `c n[,m][,p]` on a text field — "Font Type, Select" (PRM p.180, K10
+     * "Font Type, Select"). Returns the font id and, when the caller asked for
+     * it, the intercharacter gap `m`: "the space between characters", which
+     * REPLACES the font's own gap for this field (1 dot for c0, 2 for the
+     * rest). Range -199..399 per K10, -199..199 per PRM; values outside are
+     * reported and the font default is kept, because a silently different gap
+     * is exactly the class of quiet misprint this project exists to prevent.
+     *
+     * Editions disagree about the no-`m` case: PRM says the printer uses "the
+     * default value of the selected font", K10 says "Default is 0". The font
+     * default is what the 79-dot worked example pins, so it wins here; the
+     * discrepancy is recorded rather than hidden.
+     *
+     * The third parameter, `p` ("Name of the font (if the font does not have
+     * an ID number)"), is NOT handled: a downloadable named face has no bytes
+     * in this renderer, so there is nothing to draw it with. It is ignored
+     * rather than reported on purpose — no stream we hold uses it, and the
+     * two-parameter form `c18,2,L,8` on BAR CODE frames is a different
+     * command ("Bar Code, Select Type") whose third slot is a label, so a
+     * warning here would fire on correct barcode frames in real samples.
+     */
+    private fontSpecOf(params: FieldParam[], command: string): { font: string; gap?: number } {
+        const fontParams = params.filter(p => p.key === 'c');
+        const raw = fontParams.length > 0 ? fontParams[fontParams.length - 1].value : undefined;
+        if (raw === undefined) return { font: '0' }; // PRM p.189 default
+        const parts = raw.split(',');
+        const font = parts[0].trim();
+        if (parts.length < 2 || parts[1].trim() === '') return { font };
+        const gap = parseInt(parts[1], 10);
+        if (!Number.isInteger(gap)) {
+            this.printer.issue('warning', 'interchar-gap-invalid', `Intercharacter gap c${raw} is not a number; the font's own gap is used.`, command);
+            return { font };
+        }
+        if (gap < -199 || gap > 399) {
+            this.printer.issue('warning', 'interchar-gap-out-of-range', `Intercharacter gap c${raw} is outside the documented range -199 to 399; the font's own gap is used.`, command);
+            return { font };
+        }
+        return { font, gap };
+    }
+
     private parseTextField(id: number | undefined, params: FieldParam[]): void {
         this.beginField('H', id);
         const origin = this.originOf(params, 'H');
-        const fontParams = params.filter(p => p.key === 'c');
-        // Manual default: c = 7x9 standard (font "0"). PRM p.189.
-        const font = fontParams.length > 0 ? fontParams[fontParams.length - 1].value.split(',')[0] : '0';
+        // FONT_SELECT: c n[,m][,p]. `m` (intercharacter gap) overrides the
+        // font's own gap; see fontSpecOf for the range/default rules.
+        const spec = this.fontSpecOf(params, `H${id ?? ''}`);
+        const font = spec.font;
         if (!KNOWN_FONTS.has(font)) {
             this.printer.issue('warning', 'unknown-font', `Text field uses unknown font "${font}"; rendered with a fallback face.`, `H${id ?? ''}`);
         }
@@ -1047,6 +1089,7 @@ export class IPLViewerParser {
                 // advance as the equivalent point size, which is the same 0.6 em
                 // relation the fontMetrics tables use for monospace.
                 pointSize: bitmap ? undefined : Math.max(1, Math.round((advance / 0.6) * 72 / 203)),
+                intercharGapDots: spec.gap,
                 borderDots,
                 charRot: this.charRotationOf(params, `H${id ?? ''}`),
                 source: this.resolveSource(params),
@@ -1090,6 +1133,7 @@ export class IPLViewerParser {
             hMag,
             wMag,
             pointSize,
+            intercharGapDots: spec.gap,
             borderDots,
             charRot: this.charRotationOf(params, `H${id ?? ''}`),
             source: this.resolveSource(params),
@@ -1131,21 +1175,23 @@ export class IPLViewerParser {
             oy = host.oy + host.heightDots + 2;
         }
 
-        const fontParams = params.filter(p => p.key === 'c');
-        const font = fontParams.length > 0 ? fontParams[fontParams.length - 1].value.split(',')[0] : '0';
+        // Interpretive fields take the same `c n[,m][,p]` font spec as H fields
+        // ("Selects a font type for human-readable and interpretive fields").
+        const spec = this.fontSpecOf(params, cmd);
         const element: TextElement = {
             kind: 'text',
             id: undefined,
             ox,
             oy,
             f: this.rotationOf(params, cmd),
-            font,
+            font: spec.font,
             hMag: this.int(params, 'h', 2),
             wMag: this.int(params, 'w', 2),
             pointSize: (() => {
                 const k = params.find(p => p.key === 'k');
                 return k ? parseInt(k.value.split(',')[0], 10) || undefined : undefined;
             })(),
+            intercharGapDots: spec.gap,
             borderDots: undefined,
             charRot: this.charRotationOf(params, cmd),
             interpretiveOf: host ? barcodeId : undefined,

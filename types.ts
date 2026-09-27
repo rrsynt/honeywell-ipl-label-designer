@@ -77,6 +77,13 @@ export interface TextField extends BaseField {
     fontSize: number; // For outline fonts
     h_mag: number;    // For bitmap fonts
     w_mag: number;    // For bitmap fonts
+    /**
+     * `c n,m` intercharacter gap in dots — replaces the font's own gap and may
+     * be negative (characters overlap). Carried through the designer so an
+     * imported stream regenerates identically instead of quietly losing the
+     * spacing (undefined = the font's own gap).
+     */
+    intercharGapDots?: number;
     align?: 'left' | 'center' | 'right';
 }
 
