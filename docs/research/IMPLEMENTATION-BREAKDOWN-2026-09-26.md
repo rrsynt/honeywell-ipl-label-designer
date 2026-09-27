@@ -466,7 +466,7 @@ Lima fixture BarTender-authored dipakai: `grid`, `parity-base`, `one-box`,
 |---|---|---|
 | **Page setup landscape** | memutar seluruh label 90° CCW (dan 90° CW memberi citra cermin) | ✅ opsi **Rotate** — `RenderOptions.rotation`, `auto` mengikuti frame `q`; dikunci `bartenderPageTurn.test.ts` |
 | **Stok & margin** | kanvas preview **16 dot lebih kecil di kedua dimensi** (8+8), tapi konten **TIDAK bergeser** — preview berjangkar di origin halaman | ❌ **tidak** — viewer menggambar sampai tepi kanvas |
-| **`<SI>W`** (lebar label) | = extent halaman pada **sumbu lebar printhead** **− 18 dot** (18 = 16 + 2; lihat mekanisme di bawah) | ⚠️ sebagian — dipakai sebagai `widthDots`, tapi tidak ada kaitannya dengan pembingkaian di atas |
+| **`<SI>W`** (lebar label) | = extent halaman pada **sumbu lebar printhead** **− 16 dot − `LabelWidthAdjustment`** (16 = inset tercetak; adjustment = **2** untuk PD43, dibaca dari tabel driver — lihat mekanisme di bawah) | ⚠️ sebagian — dipakai sebagai `widthDots`, tapi tidak ada kaitannya dengan pembingkaian di atas |
 | **`Fix Direct Graphics`** | mengubah mode pengiriman (`g0` biner vs `g1` hex), bukan posisi | ✅ keduanya didekode identik (`extractDirectGraphics` mode 0/1) |
 | **Offset printhead 3 mm** | perilaku hardware; yang hidup di stream hanya perintah kompensasinya | ✅ diperingatkan via `setup-not-modelled` (Tahap 3a), sengaja tidak dimodelkan |
 | **Driver IPL PD43 203 dpi** | dpi → dot | ✅ opsi DPI 203/300/406 |
@@ -527,20 +527,55 @@ untuk `btLandscape`** — rotasi halaman menukar sumbu mana yang menghadap
 printhead. Itu sebabnya `mixed` (portrait, 4 in) memberi 794 sementara
 `one-box-landscape` (landscape, 4×2 → sumbu 2 in) memberi 388.
 
-**Dan 18 = 16 + 2, bukan angka baru.** Enam belas dot itu persis inset yang
-membuat kanvas preview mengecil (sudah terdokumentasi di atas); dua dot sisanya
-adalah hiasan tetap. Terverifikasi: **11 dari 12** preview PNG di dataset
-memenuhi `W + 2 = extent preview pada sumbu lebar` — angka 16 dan 18 itu **satu
-mekanisme**, bukan dua temuan terpisah.
+### Sisa 2 dot TERPECAHKAN 2026-09-28 — ia angka PER-MODEL di tabel driver
 
-Bukti pendukung dari header `.btw`, yang menyimpan `TemplateSize` (stok
-sebenarnya, dalam mm) di plaintext: `mixed` → 99,6 × 48,8 mm = 796 × 390 dot,
-yaitu **tepat ukuran kanvas preview**, dan pada sumbu lebarnya `794 + 2`.
+> **Koreksi atas koreksi.** Paragraf yang semula ada di sini mengklaim
+> "18 = 16 + 2", dengan bukti `W + 2 == extent preview`. **Bukti itu cacat:
+> ia sirkular.** `W + 2 = (halaman − 18) + 2 = halaman − 16 = preview` adalah
+> identitas aljabar dari dua pengukuran yang sudah diketahui, bukan konfirmasi
+> independen. Ia mengukur ulang hal yang sama dan tidak membuktikan apa pun
+> tentang *mengapa* selisihnya 2. Klaim "keduanya satu mekanisme" dicabut.
 
-**Yang TIDAK diklaim.** Sumber angka 2 itu sendiri belum dijelaskan — ia bisa
-jadi margin internal driver, kuantisasi, atau sesuatu yang lain. Yang diklaim
-hanya hubungannya: 18 = 16 + 2, dengan 16 sudah terjelaskan dan 2 belum.
-**Jangan modelkan angka 2 itu** sampai sebabnya ketemu.
+**Sumber angka 2 itu ada di mesin ini, di tabel driver Seagull.**
+`C:\Program Files\Seagull\Printer Drivers\Packages\2023.4\ss#ipl.ddz` adalah
+arsip **ZIP** (ekstensi menyesatkan) berisi `Model.d` — tabel per model printer.
+Di dalamnya, untuk printer yang justru dipakai proyek ini:
+
+```
+[PD43_203]
+    ~ConfigurationOptions.LabelWidthAdjustment=2
+    ~ConfigurationOptions.SetLabelWidth=true
+```
+
+`SetLabelWidth=true` berarti driver **memang** menghitung dan mengirim `<SI>W`
+(driver lain memakai `false` dan tidak mengirimnya sama sekali).
+`LabelWidthAdjustment` adalah koreksi per model yang diterapkan ke nilai itu.
+
+**Rumus lengkap, diverifikasi 19/19 (nol mismatch) atas seluruh pengukuran yang
+ada di disk — 15 format sweep + 4 sampel repo:**
+
+```
+W = round(sumbu_lebar_in × 203 dpi) − 16 − LabelWidthAdjustment
+```
+
+dengan **16** = inset area tercetak (diukur independen dari PNG preview) dan
+**2** = `LabelWidthAdjustment` milik PD43_203.
+
+**Nilainya berbeda per model**, yang menjelaskan kenapa ia tampak seperti
+konstanta ajaib ketika hanya satu printer yang diamati:
+
+| Model | UnprintableWidth | LabelWidthAdjustment | SetLabelWidth |
+|---|---|---|---|
+| PD43, PC23d, PC43, PC45d | 0.00 in | **2** | true |
+| PM43 (semua dpi) | 0.00 in | **4** | true |
+| PF2i, PF4i, PM4i | 0.07 in | **−40** | true |
+| PD41 | 3.00 mm | **−40** | true |
+| seri 3400/4100 lama | 0.05–0.12 in | 0 | **false** |
+
+Jadi 18 bukan "16 + hiasan 2 dot": ia `16 + LabelWidthAdjustment(PD43)`. Pada
+PM43 angkanya akan **20**, dan pada PM4i **−24** — besaran itu **tidak boleh**
+dihardcode. Kalau nanti model printer lain perlu didukung, angka itu harus
+dibaca per model, bukan disalin dari PD43.
 
 **Satu fixture sengaja dikecualikan: `edges`.** Ia satu-satunya yang mengubah
 dua variabel sekaligus (margin 0,05 in **dan** objek yang sengaja menggantung di
@@ -549,10 +584,15 @@ selisih 10,0 mm ≈ overhang 0,4 in. Ia **tidak bisa** dipakai sebagai uji
 "apakah 18 bergantung margin": dua variabel berubah bersamaan. Korelasi yang
 tidak bisa dipisahkan bukan bukti.
 
-**Pelajaran.** "Konstan di lima halaman" bukan bukti mekanisme — kelima halaman
-itu kebetulan punya lebar = sumbu pendek. Dataset yang lebih besar (17 format,
-termasuk empat ukuran halaman dan dua orientasi) membedakan keduanya dalam satu
-langkah. Pola yang sama dengan matriks 2×2 dan "crop 8 dot": **korelasi yang
+**Pelajaran (dua lapis).** Pertama: "konstan di lima halaman" bukan bukti
+mekanisme — kelima halaman itu kebetulan punya lebar = sumbu pendek; dataset
+yang lebih besar memisahkannya dalam satu langkah. Kedua, dan lebih penting:
+**bukti yang diturunkan dari dua pengukuran yang sudah diketahui bukan bukti.**
+`W + 2 == preview` terlihat seperti konfirmasi silang, padahal ia hanya aljabar.
+Angka 2 itu nyata sebagai fakta dan **kosong sebagai penjelasan** sampai tabel
+driver ditemukan.**
+
+Pola yang sama dengan matriks 2×2 dan "crop 8 dot": **korelasi yang
 rapi berhenti terlihat rapi begitu ada variabel yang memisahkannya.**
 
 ### Pergeseran vertikal adalah seragam — ia lapisan halaman, bukan bug DG
@@ -713,7 +753,7 @@ dikerjakan tanpa printer):
 | Item | Sifat |
 |---|---|
 | ~~Penempatan DG dipindah dari parse ke render~~ | **DIBANTAH 2026-09-27** — tidak ada model tinggi-label yang lulus uji stok-sama → `L`-sama, dan dengan floor yang ada perbaikannya no-op atau merusak. Jangan dikerjakan |
-| ~~Mekanisme `<SI>W` = sumbu pendek − 18 dot~~ | ✅ **SELESAI 2026-09-28** — mekanismenya *sumbu lebar printhead* − 18, dan 18 = 16 + 2 (16 sudah dijelaskan). Klaim "sumbu pendek" dibatalkan: salah pada halaman non-persegi. Sisa **2 dot** masih belum dijelaskan — **jangan** dimodelkan |
+| ~~Mekanisme `<SI>W`~~ | ✅ **SELESAI PENUH 2026-09-28** — `W = round(sumbu lebar printhead) − 16 − LabelWidthAdjustment`, diverifikasi 19/19. Klaim "sumbu pendek" dibatalkan (salah pada halaman non-persegi). Sisa 2 dot ternyata **angka per-model** di tabel driver Seagull (`Model.d` → `[PD43_203]` → `=2`), bukan konstanta. **Jangan hardcode** — PM43 memakai 4, PM4i −40 |
 | Selisih posisi absolut kita vs BarTender (dy 29 / 89) | belum dijelaskan; **tidak seragam**, jadi bukan satu crop maupun satu pergeseran. Dipaku sebagai baseline regresi oleh `bartenderAbsolute.test.ts` |
 | Kanvas preview 16 dot lebih kecil, konten tidak bergeser | viewer menggambar sampai tepi; perlu keputusan apakah ingin menawarkan tampilan area-tercetak |
 | ~~Guard paritas berbasis posisi absolut~~ | ✅ **SELESAI 2026-09-28** — `tests/bartenderAbsolute.test.ts` (6 tes). Bukti ia menutup celah nyata: dengan pergeseran seragam (4,6) disuntikkan, 18 tes paritas BarTender yang ada **tetap hijau**; guard ini gagal 5 dari 6 |

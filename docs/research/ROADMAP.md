@@ -194,28 +194,36 @@ diketahui dari `tools/bartender/BuildParityLabels.cs`:
 
 ```
 kanvas preview BarTender = halaman − 16 dot per dimensi  (konten TIDAK bergeser)
-<SI>W                    = (sumbu lebar printhead) − 18 dot, dan 18 = 16 + 2
+<SI>W                    = (sumbu lebar printhead) − 16 − LabelWidthAdjustment
 ```
 
-> **Koreksi 2026-09-28 (dua kali).** Entri ini mula-mula menulis *"memotong 8
-> dot per tepi"*. Itu **salah**: crop menyiratkan pergeseran, dan ground truth
-> membuktikan tidak ada pergeseran (objek di halaman x=37 muncul di preview
-> x=37, bukan 29). Yang benar: kanvas mengecil 16 dot, kontennya tetap.
+> **Koreksi 2026-09-28 (tiga kali, dan yang ketiga tentang cara saya mengukur).**
+> Entri ini mula-mula menulis *"memotong 8 dot per tepi"* — **salah**: crop
+> menyiratkan pergeseran, dan ground truth membuktikan tidak ada pergeseran
+> (objek di halaman x=37 muncul di preview x=37, bukan 29). Lalu menulis
+> *"sumbu pendek − 18"* — juga **salah**: `mixed` dan `one-box-landscape`
+> sama-sama 4×2 in tapi W-nya 794 vs 388, dan yang membedakan hanyalah
+> orientasi.
 >
-> Lalu entri lanjutannya menulis *"sumbu pendek − 18"*. Itu juga **salah** —
-> korelasi, bukan mekanisme. `mixed` dan `one-box-landscape` sama-sama halaman
-> 4×2 in tapi W-nya 794 vs 388; yang membedakan orientasinya. Mekanisme
-> sebenarnya: sumbu lebar printhead (X halaman untuk portrait, **Y** untuk
-> landscape), terverifikasi 15/15 di dataset sweep dan 5/5 di `samples/`.
-> Delapan belas itu **bukan angka baru**: 18 = 16 + 2, dan 16 sudah dijelaskan
-> baris di atasnya. Hanya sisa 2 dot yang belum.
+> Lalu menulis *"18 = 16 + 2"* dengan bukti `W + 2 == preview` — **bukti itu
+> cacat, ia sirkular**. `W + 2` memang sama dengan `preview` karena keduanya
+> diturunkan dari pengukuran yang sama; ia tidak menjelaskan apa pun tentang
+> *mengapa* 2. Yang benar: **2 itu `LabelWidthAdjustment`, angka per-model di
+> tabel driver Seagull** (`ss#ipl.ddz`, sebenarnya arsip ZIP, berisi `Model.d`;
+> `[PD43_203]` → `=2`). PM43 memakai 4, PM4i −40, seri 3400 lama 0 dan bahkan
+> tidak mengirim `<SI>W` sama sekali.
 
-Yang **tidak** dikerjakan, dan itu keputusan: sisa 2 dot itu tidak dimodelkan
-karena sebabnya belum ketemu. Menyelesaikan "tinggi label yang diperlukan" dari
-pergeseran yang terukur menghasilkan angka rapi (389 vs 390) dan **menyesatkan**
-— pengukuran pita-per-pita menunjukkan vektor dan raster bergeser **sama
-persis**, jadi pergeseran itu milik lapisan halaman, bukan cacat penempatan DG.
-Sisa pekerjaan tercatat di breakdown; tidak satu pun memblokir Fase 5.
+Rumus lengkapnya `W = round(sumbu_lebar_in × 203) − 16 − LabelWidthAdjustment`,
+diverifikasi **19/19 tanpa mismatch** atas seluruh pengukuran di disk. Karena
+adjustment itu **per model**, angkanya **tidak boleh di-hardcode**; ia harus
+dibaca per model kalau nanti printer lain perlu didukung.
+
+Yang **tidak** dikerjakan, dan itu keputusan: menyelesaikan "tinggi label yang
+diperlukan" dari pergeseran yang terukur menghasilkan angka rapi (389 vs 390)
+dan **menyesatkan** — pengukuran pita-per-pita menunjukkan vektor dan raster
+bergeser **sama persis**, jadi pergeseran itu milik lapisan halaman, bukan cacat
+penempatan DG. Sisa pekerjaan tercatat di breakdown; tidak satu pun memblokir
+Fase 5.
 
 **Tindak lanjut 2026-09-28 — guard posisi absolut.** Sisa pekerjaan Tahap 5
 yang paling berharga sudah dikerjakan: `tests/bartenderAbsolute.test.ts`.
