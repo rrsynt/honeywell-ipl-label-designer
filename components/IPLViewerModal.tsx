@@ -310,17 +310,28 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
         if (totalLabels <= 1) setPreviewBatch(0);
     }, [totalLabels]);
 
-    // Recompute the fit-to-width baseline whenever content or DPI changes
+    // Recompute the fit-to-width baseline whenever content, DPI or the CONTAINER
+    // size changes. The container matters as much as the content: this effect
+    // runs before the modal has laid out, so a first-and-only pass measured a
+    // near-zero box and left the preview at 40x19 CSS px. The ResizeObserver
+    // below re-runs it once real dimensions exist, and again on every window or
+    // pane resize.
     useEffect(() => {
         const el = scrollRef.current;
         if (!el || !hasContent) return;
-        const availW = el.clientWidth - 40;
-        const availH = el.clientHeight - 40;
-        if (availW <= 0 || availH <= 0) return;
-        const swap = effectiveRotation === 1 || effectiveRotation === 3;
-        const w = swap ? extent.heightDots : extent.widthDots;
-        const h = swap ? extent.widthDots : extent.heightDots;
-        setBasePxPerDot(Math.max(0.05, Math.min(availW / w, availH / h, 3)));
+        const fit = () => {
+            const availW = el.clientWidth - 40;
+            const availH = el.clientHeight - 40;
+            if (availW <= 0 || availH <= 0) return;
+            const swap = effectiveRotation === 1 || effectiveRotation === 3;
+            const w = swap ? extent.heightDots : extent.widthDots;
+            const h = swap ? extent.widthDots : extent.heightDots;
+            setBasePxPerDot(Math.max(0.05, Math.min(availW / w, availH / h, 3)));
+        };
+        fit();
+        const observer = new ResizeObserver(fit);
+        observer.observe(el);
+        return () => observer.disconnect();
     }, [extent, hasContent, effectiveRotation]);
 
     useEffect(() => {
