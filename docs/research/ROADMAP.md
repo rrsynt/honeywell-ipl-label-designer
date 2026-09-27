@@ -225,16 +225,34 @@ bergeser **sama persis**, jadi pergeseran itu milik lapisan halaman, bukan cacat
 penempatan DG. Sisa pekerjaan tercatat di breakdown; tidak satu pun memblokir
 Fase 5.
 
-**Tindak lanjut 2026-09-28 — guard posisi absolut.** Sisa pekerjaan Tahap 5
-yang paling berharga sudah dikerjakan: `tests/bartenderAbsolute.test.ts`.
+**Tindak lanjut 2026-09-28 — guard posisi absolut.** `tests/bartenderAbsolute.test.ts`.
 Alasannya konkret dan sudah dibuktikan, bukan teoretis — dengan pergeseran
 seragam (4,6) disuntikkan ke renderer, **18 tes** paritas BarTender yang ada
 (`bartenderSweep`, `bartenderGeometry`, `bartenderAuto`, `bartenderPageTurn`)
 **tetap hijau**, karena semuanya menyelaraskan origin tinta lebih dulu. Guard
 baru gagal 5 dari 6 pada injeksi yang sama. Isinya: ukuran konten vs preview
-BarTender, offset halaman terpaku sebagai baseline regresi, dan geometri kisi
-(pitch + ukuran kotak) vs ground truth build-script yang **independen dari
-renderer BarTender**.
+BarTender, geometri kisi (pitch + ukuran kotak) vs ground truth build-script
+yang **independen dari renderer BarTender**, dan offset halaman terpaku.
+
+**Selisih absolut TERPECAHKAN 2026-09-28.** Offset yang terpaku di guard itu
+semula dicatat "belum dijelaskan". Ternyata ia bukan pergeseran sama sekali
+melainkan **bentuk model yang salah**: origin vertikal Direct Graphics
+BarTender diukur dari **TENGAH halaman** —
+
+```
+y_top = (originY − maxBit) + pageH/2 − 424        terverifikasi 9/9 dalam 1 dot
+```
+
+Aturan kita (`hBase = max(extent, originY)`) selalu memberi `hBase = originY`,
+sehingga `y` kolaps jadi `minBit` dan setiap graphic mendarat di baris `minBit`
+kanvas KONTEN — kita tidak menghitung posisi halaman sama sekali. Itu sebabnya
+graphic selalu di atas (89,5 → 1, dst).
+
+Terverifikasi lewat fixture baru yang sengaja dibuat untuk memisahkan variabel
+(`sep-land-4x3` 3 in, `sep2-4x25` 2,5 in — `btLandscape` supaya previewnya
+tidak terputar), plus tiga fixture dibaca dari frame terputar sebagai
+orientasi pembanding. **Angka 424 masih di-fit, belum diturunkan** — jangan
+pakai sebagai model sebelum sebabnya ketemu.
 
 ## DPL (Datamax) — DITUNDA, menunggu sumber (2026-09-26)
 DPL adalah satu-satunya bahasa dari daftar rencana induk yang **tidak dibangun**,

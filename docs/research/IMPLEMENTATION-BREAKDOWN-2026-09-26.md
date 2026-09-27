@@ -617,9 +617,76 @@ justru menguatkan baris tabel itu: yang salah bukan elemen kita, melainkan
 origin halaman yang tidak dibawa stream.
 
 `dx = −8` itu **bukan** arti "crop 8 dot per tepi" (lihat koreksi di atas) —
-ia kebetulan mendekati 8 dan sempat memperkuat model yang keliru. Yang benar:
-ini satu pergeseran halaman yang belum dijelaskan, dan nilainya **berbeda per
-fixture** (parity-base dy 29, one-box-landscape dy 89, pada stok yang sama).
+ia kebetulan mendekati 8 dan sempat memperkuat model yang keliru.
+
+### Selisih absolut TERPECAHKAN 2026-09-28 — origin vertikal DG berbasis TENGAH halaman
+
+Bagian ini semula mencatat "belum dijelaskan, nilainya berbeda per fixture
+(dy 29 vs 89, pada stok sama)". **Sekarang terpecahkan, dan hasilnya bukan
+pergeseran sama sekali** — melainkan **model penempatan yang salah bentuk**.
+
+Rumus yang benar, diverifikasi **9/9 dalam 1 dot** — termasuk tiga fixture
+dibaca dari frame **terputar** (orientasi berbeda), jadi ia bukan curve-fit
+pada satu orientasi saja:
+
+```
+y_top(graphic) = (originY − maxBit) + pageH/2 − 424
+```
+
+dengan `pageH` = tinggi halaman pada sumbu feed, `maxBit` = bit tertinggi yang
+bertinta (baris TERATAS graphic, karena indeks bit menjauh dari origin).
+
+| Fixture | pageH | originY | maxBit | terukur | prediksi |
+|---|---|---|---|---|---|
+| `one-box-landscape` | 406 | 518 | 207 | 90 | 90,0 |
+| `landscape` | 406 | 553 | 279 | 53 | 53,0 |
+| `sep2-4x25` (fixture baru) | 507 | 370 | 151 | 49 | 48,5 |
+| `sep-land-4x3` (fixture baru) | 609 | 319 | 151 | 49 | 48,5 |
+| `parity-base` dg0 | 406 | 604 | 350 | 33 | 33,0 |
+| `parity-base` dg1 | 406 | 604 | 351 | 32 | 32,0 |
+| `one-box` (frame terputar) | 609 | 640 | 431 | 90 | 89,5 |
+| `one-rot90` (frame terputar) | 609 | 461 | 151 | 191 | 190,5 |
+| `one-text` (frame terputar) | 609 | 417 | 215 | 83 | 82,5 |
+
+**Temuan strukturalnya: suku `+ pageH/2`.** Origin vertikal Direct Graphics
+BarTender **diukur dari TENGAH halaman**, bukan dari tepi bawah seperti yang
+diasumsikan model bottom-up kita (PRM Appendix E). Itu menjelaskan kenapa
+selisihnya tampak "berbeda per fixture": ia memang bergantung tinggi halaman,
+lewat suku setengah — bukan konstanta.
+
+**Konsekuensinya untuk kode kita.** Aturan sekarang
+(`hBase = max(contentExtent, maxOriginY)`, lalu `y = hBase − originY + minBit`)
+menghasilkan `hBase = originY` **selalu**, karena `originY` selalu melebihi
+extent konten — sehingga `y` kolaps jadi `minBit`, dan setiap graphic mendarat
+di baris `minBit` dari kanvas **konten**. Kita tidak menghitung posisi halaman
+sama sekali. Itu sebabnya graphic kita selalu di atas (terukur: 89,5 → 1;
+52,9 → 1; 48,9 → 6, dst).
+
+**Yang belum dijelaskan: angka 424.** Ia **di-fit** dari data, bukan
+diturunkan. 424 dot = 53,0 mm = 2,089 in, dan `406 + 18 = 424` serta
+`2 × 203 + 18 = 424` sama-sama cocok — tapi keduanya belum diuji, jadi jangan
+dipilih salah satu. Yang **sudah** terbukti: modelnya peka terhadap `maxBit`
+(`parity-base` dg0 vs dg1 berbeda 1 → prediksi berbeda 1), jadi ia bukan
+artefak pemilihan fixture.
+
+**Catatan metode — dua kali salah sebelum benar, dan keduanya ketangkap oleh
+pengukuran sendiri:**
+
+1. Model pertama, `C = konstan`, cocok di semua fixture yang ada — **karena
+   semuanya halaman 2 inci**. Tanpa fixture tinggi lain, konstanta dan fungsi
+   tinggi tak terpisahkan. Fixture `sep-land-4x3` (3 in) memisahkannya: C
+   ternyata 119, bukan 221.
+2. Percobaan kedua menghasilkan "C tidak monoton (221 → 322 → 119), jadi C
+   bukan fungsi tinggi" — dan itu **salah, karena dua dari capture-nya file
+   basi**: `sep2-4x25` terbaca `W=185` padahal seharusnya 490. Spooler
+   Windows menulis ke port dengan jeda, dan `cp` yang dijalankan terlalu cepat
+   menyalin output job **sebelumnya**. Dengan sentinel + tunggu, capture yang
+   benar memberi C=170, dan modelnya langsung monoton.
+
+Pelajaran yang bisa dipakai ulang: **capture lewat port printer harus
+diverifikasi isinya, bukan sekadar keberadaan filenya** — periksa `W` terhadap
+nilai yang diharapkan. Dua kesalahan berturut-turut di atas keduanya berasal
+dari memakai angka yang belum diverifikasi sebagai data.
 
 **Pelajaran metodologis, sama seperti matriks 2×2 di audit DG sebelumnya:**
 sebelum mengaitkan pergeseran seragam ke fitur yang kebetulan menonjol,
@@ -754,7 +821,7 @@ dikerjakan tanpa printer):
 |---|---|
 | ~~Penempatan DG dipindah dari parse ke render~~ | **DIBANTAH 2026-09-27** — tidak ada model tinggi-label yang lulus uji stok-sama → `L`-sama, dan dengan floor yang ada perbaikannya no-op atau merusak. Jangan dikerjakan |
 | ~~Mekanisme `<SI>W`~~ | ✅ **SELESAI PENUH 2026-09-28** — `W = round(sumbu lebar printhead) − 16 − LabelWidthAdjustment`, diverifikasi 19/19. Klaim "sumbu pendek" dibatalkan (salah pada halaman non-persegi). Sisa 2 dot ternyata **angka per-model** di tabel driver Seagull (`Model.d` → `[PD43_203]` → `=2`), bukan konstanta. **Jangan hardcode** — PM43 memakai 4, PM4i −40 |
-| Selisih posisi absolut kita vs BarTender (dy 29 / 89) | belum dijelaskan; **tidak seragam**, jadi bukan satu crop maupun satu pergeseran. Dipaku sebagai baseline regresi oleh `bartenderAbsolute.test.ts` |
+| ~~Selisih posisi absolut kita vs BarTender (dy 29 / 89)~~ | ✅ **TERPECAHKAN 2026-09-28** — bukan pergeseran, melainkan **bentuk model yang salah**: origin vertikal DG BarTender berbasis **TENGAH halaman** (`y = originY − maxBit + pageH/2 − 424`), terverifikasi 9/9 dalam 1 dot termasuk dari frame terputar. Aturan kita kolaps jadi `y = minBit` sehingga tidak menghitung posisi halaman sama sekali. **Angka 424 masih di-fit, belum diturunkan** |
 | Kanvas preview 16 dot lebih kecil, konten tidak bergeser | viewer menggambar sampai tepi; perlu keputusan apakah ingin menawarkan tampilan area-tercetak |
 | ~~Guard paritas berbasis posisi absolut~~ | ✅ **SELESAI 2026-09-28** — `tests/bartenderAbsolute.test.ts` (6 tes). Bukti ia menutup celah nyata: dengan pergeseran seragam (4,6) disuntikkan, 18 tes paritas BarTender yang ada **tetap hijau**; guard ini gagal 5 dari 6 |
 
