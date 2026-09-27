@@ -693,26 +693,67 @@ yang membaca harus menambahkan `pageH/2` kembali untuk memulihkan koordinat
 halaman. Itu bukan pilihan desain kita — itu bagian dari cara nilai itu
 dikodekan.
 
-**Angka 424 sekarang jauh lebih sempit tebakannya.** Yang sudah **gugur**
-lewat pengukuran, bukan argumen:
+**Asal 424: TERJAWAB SEBAGIAN 2026-09-28 — ia milik DRIVER, bukan halaman;
+tetapi rumusnya belum diturunkan.**
 
-- **bukan fungsi lebar halaman** — `landscape` (W=1218) dan `parity-base`
-  (W=812) sama-sama cocok dengan 424 yang sama;
-- **bukan fungsi tinggi halaman** — dibuktikan di empat tinggi (406/507/609/812);
-- **tidak ada di tabel driver mana pun** — `Model.d`, `*.d`, `*.pfm` di
-  `ss#ipl.ddz` tidak memuat 424, 848, 212, maupun 106 sebagai token;
-- **bukan margin 1 mm (8), bukan 16, bukan 18**.
+Diuji dengan memasang printer kedua dari driver store yang sama
+(`Intermec PC23d (203 dpi) - IPL`) dan mencetak **berkas `.btw` yang sama**
+lewat kedua driver — halaman dan objek identik, hanya `fmt.Printer` yang
+diubah:
 
-Yang **masih** kandidat, dan **belum diuji**: 424 dot = 2,089 in = 53,05 mm, dan
-`848 = 2 × 424` = 4,177 in — mendekati `Stock.Printable.X = 4,17 in` milik
-PD43_300 (selisih 1,4 dot). Itu **hipotesis yang bisa diuji** kalau nanti ada
-printer 300 dpi: kalau 424 berskala dengan dpi, ia konstanta geometris; kalau
-tetap 424 di 300 dpi, ia konstanta dot. **Jangan pilih sekarang.**
+| driver | `W` | `originY` |
+|---|---|---|
+| PD43 (Default.X 4,00 in) | **408** | **413** |
+| PC23d (Default.X 2,00 in) | **388** | **254** |
 
-Yang **sudah** terbukti: modelnya peka terhadap `maxBit` (`parity-base` dg0 vs
-dg1 berbeda 1 → prediksi berbeda 1), jadi ia bukan artefak pemilihan fixture.
-Verifikasi akhir **10/10 dalam 1 dot**, termasuk tiga bacaan dari frame
-terputar (orientasi berbeda).
+Satu dokumen, dua driver, dua nilai berbeda. Karena halaman dan objeknya
+identik, **konstanta penempatan (dan `W`) ditentukan driver** — itu yang
+terjawab. Angka 424 milik **driver PD43** secara spesifik.
+
+**Yang GUGUR lewat pengukuran ini** (semua hipotesis numerik yang masuk akal):
+
+| Hipotesis | Kenapa gugur |
+|---|---|
+| `424 = DefaultX / 2 + 18` | cocok sempurna di PD43 (812/2+18 = 424), tapi PC23d tidak memberi 221 |
+| `424` dari `Stock.Printable.X` | selisih Printable 199 dot vs terukur 159 |
+| margin ikut masuk rumus `W` | `edges` (margin 0,05 in) tetap `609 − 18 = 591`, persis rumus lama |
+| `424` konstanta dot universal | `originY` beda 159 dot untuk dokumen yang sama |
+
+**Yang BELUM terjawab: rumus yang menurunkan konstanta itu dari parameter
+model.** Saya tidak menemukannya, dan sengaja tidak memilih kandidat yang
+tersisa — tiga kali di proyek ini kandidat yang "rapi" ternyata salah.
+
+**Yang tetap berdiri dan penting:**
+
+- Rumus `W` ter-commit **tetap valid** untuk semua fixture repo: diuji ulang
+  **6/6** (`grid`, `one-box`, `one-box-landscape`, `landscape`, `parity-base`,
+  `edges`) — termasuk `edges` yang bermargin 0,05 in, yang membatalkan dugaan
+  bahwa margin masuk rumus.
+- Model penempatan DG PD43 tetap terverifikasi **10/10 dalam 1 dot**; yang
+  ditambahkan di sini hanya keterangan bahwa 424 adalah **milik driver**.
+
+**Konsekuensi praktis.** Karena konstanta itu per-driver, **jangan**
+mengeraskannya ke kode. Untuk PD43 nilainya 424 dan modelnya tervalidasi;
+untuk driver lain angkanya lain dan belum diukur.
+
+**Catatan metode — eksperimen ini butuh tiga perbaikan sebelum satu
+perbandingan pun sah, dan dua di antaranya kesalahan saya:**
+
+1. Halaman 2,5 in yang saya minta **ditolak** PC23d (`Stock.Maximum.X = 2,36 in`),
+   dan BarTender diam-diam memakai stok lain (53,5 × 40,8 mm) — terlihat hanya
+   dari `TemplateSize`, bukan dari error. Percobaan pertama mengukur halaman
+   yang salah.
+2. Stream PC23d memakai **byte kontrol mentah** (0x02/0x03/0x1b), bukan notasi
+   teks `<STX>` seperti PD43; parser pertama saya melihat nol frame.
+3. Perbandingan pertama saya **mencampur tiga variabel** (halaman, objek, dan
+   driver sekaligus berubah), lalu saya menuliskan tabelnya dengan angka
+   "sumbu feed" yang salah. Perbandingan itu dibuang; yang dipakai di atas
+   adalah yang benar-benar terkendali.
+
+**Pelajaran.** "Cocok sempurna di satu printer" adalah sampel berukuran satu —
+dan printer pembandingnya **sudah ada di driver store sepanjang waktu**,
+lengkap dengan `Stock.Default.X = 2,00 in` di `Model.d` yang saya baca
+berkali-kali tanpa menyadari bahwa itu uji yang menunggu.
 
 **Catatan metode — dua kali salah sebelum benar, dan keduanya ketangkap oleh
 pengukuran sendiri:**
@@ -866,7 +907,7 @@ dikerjakan tanpa printer):
 |---|---|
 | ~~Penempatan DG dipindah dari parse ke render~~ | **DIBANTAH 2026-09-27** — tidak ada model tinggi-label yang lulus uji stok-sama → `L`-sama, dan dengan floor yang ada perbaikannya no-op atau merusak. Jangan dikerjakan |
 | ~~Mekanisme `<SI>W`~~ | ✅ **SELESAI PENUH 2026-09-28** — `W = round(sumbu lebar printhead) − 16 − LabelWidthAdjustment`, diverifikasi 19/19. Klaim "sumbu pendek" dibatalkan (salah pada halaman non-persegi). Sisa 2 dot ternyata **angka per-model** di tabel driver Seagull (`Model.d` → `[PD43_203]` → `=2`), bukan konstanta. **Jangan hardcode** — PM43 memakai 4, PM4i −40 |
-| ~~Selisih posisi absolut kita vs BarTender (dy 29 / 89)~~ | ✅ **TERPECAHKAN 2026-09-28** — bukan pergeseran, melainkan **bentuk model yang salah**. Driver menulis `originY = K − pageH/2` (kerangka terpusat), jadi pembaca harus menambahkan `pageH/2` kembali: `y_top = (originY + pageH/2) − maxBit − 424`, terverifikasi 10/10 dalam 1 dot termasuk frame terputar. Aturan kita kolaps jadi `y = minBit`. **Sisa satu besaran:** angka 424 — bukan fungsi lebar maupun tinggi halaman, tidak ada di tabel driver; kandidat `848 = 2×424 ≈ Stock.Printable.X` 4,17 in **belum diuji** |
+| ~~Selisih posisi absolut kita vs BarTender (dy 29 / 89)~~ | ✅ **TERPECAHKAN 2026-09-28** — bukan pergeseran, melainkan **bentuk model yang salah**. Driver menulis `originY = K − pageH/2` (kerangka terpusat), jadi pembaca harus menambahkan `pageH/2` kembali: `y_top = (originY + pageH/2) − maxBit − 424`, terverifikasi 10/10 dalam 1 dot termasuk frame terputar. Aturan kita kolaps jadi `y = minBit`. **Sisa satu besaran:** angka 424 — terbukti **milik DRIVER** (dokumen sama lewat dua driver memberi nilai berbeda), tapi rumusnya belum diturunkan |
 | Kanvas preview 16 dot lebih kecil, konten tidak bergeser | viewer menggambar sampai tepi; perlu keputusan apakah ingin menawarkan tampilan area-tercetak |
 | ~~Guard paritas berbasis posisi absolut~~ | ✅ **SELESAI 2026-09-28** — `tests/bartenderAbsolute.test.ts` (6 tes). Bukti ia menutup celah nyata: dengan pergeseran seragam (4,6) disuntikkan, 18 tes paritas BarTender yang ada **tetap hijau**; guard ini gagal 5 dari 6 |
 
