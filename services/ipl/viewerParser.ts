@@ -9,8 +9,8 @@ import type {
 } from './types';
 import { isBarcodeEngineReady, measureBarcode, applyI2of5Padding, interpretiveText } from './barcodes';
 import { VirtualPrinter, KIND_PREFIX } from './virtualPrinter';
-import { FONT_MAP } from '../../constants';
-import { extractDirectGraphics, nibblizedToByteString, directGraphicToBitmap } from './directGraphics';
+import { FONT_MAP, PRINTABLE_WIDTH_IN, LABEL_WIDTH_ADJUSTMENT } from '../../constants';
+import { extractDirectGraphics, nibblizedToByteString, directGraphicToBitmap, directGraphicInkBounds, type DirectGraphic } from './directGraphics';
 import { encodeBitmapColumns } from './graphics';
 import { decodePrintData } from './residentCharset';
 
@@ -163,8 +163,24 @@ export class IPLViewerParser {
      */
     private printer = new VirtualPrinter();
 
+    /**
+     * Target printer model/resolution for this parse. Held on the parser, not
+     * the printer, because parse() builds a fresh VirtualPrinter per call and
+     * would otherwise drop them.
+     */
+    private driverModel: string | null = null;
+    private driverDpi: 203 | 300 | 406 | null = null;
+
+    /** Sets the target printer, which Direct Graphics placement may need. */
+    setDriver(model: string | undefined, dpi: 203 | 300 | 406 | undefined): void {
+        this.driverModel = model ?? null;
+        this.driverDpi = dpi ?? null;
+    }
+
     parse(code: string): ViewerLabel {
         this.printer = new VirtualPrinter();
+        this.printer.driverModel = this.driverModel;
+        this.printer.driverDpi = this.driverDpi;
 
         const frames = tokenizeFramesWithLines(code);
         if (frames.length === 0) {
@@ -358,16 +374,46 @@ export class IPLViewerParser {
     /** Places pending Direct Graphics using the final label height. */
     private placeDirectGraphics(): void {
         if (this.printer.pendingDirectGraphics.length === 0) return;
-        // Origin Y is bottom-up; converting to top-down needs the label
-        // height. Without <SI>L, fall back to the tallest box/graphic content
-        // extent (text/line heights need the renderer's font metrics, which
-        // would be a circular import — the approximation is acceptable since
-        // the max-originY floor below keeps every DG on-label).
+        // TWO conventions write bit origins, decided by whether the stream
+        // defines the label's LENGTH:
         //
-        // Deliberately NOT <SI>W. That is the printhead-width axis while the DG
-        // origin's Y runs along the feed (length) axis; the two are independent,
-        // and in `bartender-parity-base.ipl` W388 coexists with origin Y604, so
-        // taking W as the height would put every graphic at a negative y.
+        //  * `<SI>L` present — PRM Appendix E's bottom-up frame is well-defined
+        //    ("measured from the label's BOTTOM edge"), so originY counts from
+        //    that edge. This is what this project's own generator writes, and
+        //    reading it back is what `directGraphicToBitmap` implements.
+        //
+        //  * `<SI>L` absent — the driver had no label length to reference and
+        //    wrote originY in its own CENTRED frame instead. Every real
+        //    BarTender stream is this case (all 8 DG samples in `samples/` have
+        //    no <SI>L), and reading it bottom-up put every graphic at the top of
+        //    the canvas — 29 to 89 dots off, measured against BarTender's own
+        //    previews.
+        //
+        // Undoing the centred frame needs the printer MODEL, which the stream
+        // does not carry. It is therefore never guessed: without an explicitly
+        // supplied model the bottom-up reading is used and an info is raised,
+        // because a wrong model's constants misplace every graphic silently.
+        const W = this.printer.label.widthDots;
+        if (this.printer.label.heightDots === null && W !== null) {
+            const model = this.printer.driverModel;
+            const dpi = this.printer.driverDpi ?? 203;
+            const printableX = model ? PRINTABLE_WIDTH_IN[model]?.[dpi] : undefined;
+            const adjust = model ? LABEL_WIDTH_ADJUSTMENT[model]?.[dpi] : undefined;
+            if (printableX !== undefined && adjust !== undefined) {
+                this.placeDriverFramedGraphics(W, printableX, adjust, dpi);
+                this.printer.pendingDirectGraphics = [];
+                return;
+            }
+            this.printer.issue(
+                'info',
+                'dg-driver-frame-unknown-model',
+                model
+                    ? `Direct Graphics are written in the ${model} driver's centred frame (the stream has no <SI>L), but no placement constants are measured for ${dpi} dpi; they are placed label-relative instead, which is expected to be off.`
+                    : 'Direct Graphics are written in a driver\'s centred frame (the stream has no <SI>L) and no printer model was given, so they are placed label-relative instead. Select the printer model to place them correctly.',
+                '<ESC>g',
+            );
+        }
+        // Bottom-up path (PRM Appendix E): needs the label height to convert.
         let hBase = this.printer.label.heightDots ?? 0;
         if (!hBase) {
             for (const el of this.printer.label.elements) {
@@ -405,6 +451,69 @@ export class IPLViewerParser {
             });
         }
         this.printer.pendingDirectGraphics = [];
+    }
+
+    /**
+     * Pushes one decoded graphic as a label element, packing its visual bitmap
+     * back into the column form the renderer already knows. Shared by both
+     * placement paths so they cannot drift in how they encode or anchor.
+     */
+    private pushGraphicElement(dg: DirectGraphic, yTop: number): void {
+        const { minCol, maxCol, minBit, maxBit } = directGraphicInkBounds(dg);
+        if (maxCol < 0) return;
+        const w = maxCol - minCol + 1;
+        const h = maxBit - minBit + 1;
+        const bm: number[][] = [];
+        for (let y = 0; y < h; y++) bm.push(new Array(w).fill(0));
+        for (let s = 0; s < dg.pixels.length; s++) {
+            const strip = dg.pixels[s];
+            if (!strip) continue;
+            for (let i = 0; i < strip.length; i++) {
+                if (!strip[i]) continue;
+                bm[maxBit - i][s - minCol] = 1;
+            }
+        }
+        this.printer.label.elements.push({
+            kind: 'graphic',
+            ox: minCol,
+            oy: yTop,
+            f: 0,
+            graphicId: -1,
+            widthDots: w,
+            heightDots: h,
+            data: encodeBitmapColumns(bm),
+        });
+    }
+
+    /**
+     * Places Direct Graphics written in the DRIVER's centred frame (streams
+     * with no <SI>L), where BarTender's own previews are the reference.
+     *
+     * The transform, verified 8/8 within 1 dot against BarTender's previews on
+     * the PD43 (see tests/dgRenderPlacement.test.ts):
+     *
+     *   yTop = originY + (W + 2*adjust)/2 - maxBit - ceil(printableX*dpi/2)
+     *
+     * `W` comes from the stream; `adjust` and `printableX` are read from the
+     * selected printer model's driver constants (constants.ts). Everything here
+     * is per-model: applying the PD43's numbers to another printer misplaces
+     * every graphic, which is why an unlisted model falls back to the bottom-up
+     * path rather than guessing.
+     *
+     * LIMIT, deliberately recorded rather than hidden: all 8 fixtures used to
+     * derive this have the feeder's width axis equal to the page's Y extent,
+     * because they are landscape or square. A btPortrait non-square page would
+     * need the page extent instead of `W`, and that case is UNTESTED — it has no
+     * fixture. Treat a portrait-non-square stream as unverified.
+     */
+    private placeDriverFramedGraphics(W: number, printableX: number, adjust: number, dpi: number): void {
+        const driverTop = Math.ceil(printableX * dpi / 2);
+        for (const dg of this.printer.pendingDirectGraphics) {
+            const { maxBit } = directGraphicInkBounds(dg);
+            if (maxBit < 0) continue;
+            const yTop = dg.origin[1] + (W + 2 * adjust) / 2 - maxBit - driverTop;
+            this.pushGraphicElement(dg, yTop);
+        }
     }
 
     /** Opens a format block, validating that program mode was entered first. */
@@ -1769,4 +1878,18 @@ export class IPLViewerParser {
     }
 }
 
-export const parseViewerIPL = (code: string): ViewerLabel => new IPLViewerParser().parse(code);
+export interface ParseOptions {
+    /**
+     * Target printer model. Direct Graphics written in a driver's centred frame
+     * (streams with no <SI>L) need per-model placement constants; without a
+     * model they fall back to the label-relative reading and are misplaced.
+     */
+    model?: string;
+    dpi?: 203 | 300 | 406;
+}
+
+export const parseViewerIPL = (code: string, opts: ParseOptions = {}): ViewerLabel => {
+    const parser = new IPLViewerParser();
+    parser.setDriver(opts.model, opts.dpi);
+    return parser.parse(code);
+};

@@ -15,6 +15,47 @@ export const PRINTER_MODELS: { [model: string]: (203 | 300 | 406)[] } = {
 };
 
 /**
+ * Per-model constants behind BarTender's Direct Graphics vertical placement.
+ *
+ * A BarTender stream writes each graphic's origin Y in a CENTRED frame, so
+ * recovering the printed position needs two driver values that the stream does
+ * not carry. Both are read from the Seagull driver's own model table
+ * (`ss#ipl.ddz` -> `Model.d`, extracted 2026-09-28):
+ *
+ *   printableXIn  Stock.Printable.X  -- the printable width, in inches
+ *   widthAdjust   LabelWidthAdjustment -- folded into the <SI>W the driver sends
+ *
+ * Placement (verified 8/8 within 1 dot against BarTender's own previews):
+ *
+ *   yTop = originY + (W + 2*widthAdjust)/2 - maxBit - ceil(printableXIn*dpi/2)
+ *
+ * `W` comes from the stream, so only these two numbers are model knowledge.
+ *
+ * DO NOT guess these for a model that is not listed: the constants differ a
+ * lot per model and a wrong one silently misplaces every graphic. `undefined`
+ * means "unknown", and the renderer falls back to the label's own height --
+ * the pre-2026-09-28 behaviour.
+ */
+export const PRINTABLE_WIDTH_IN: { [model: string]: Partial<Record<203 | 300 | 406, number>> } = {
+    'PD41': { 203: 4.09, 300: 4.16 },
+    'PD43': { 203: 4.09, 300: 4.17 },
+    // PD45S is absent from the driver's own table; the PD43 figures are used as
+    // a proxy and should be replaced if a PD45S stream is ever measured.
+    'PD45S': { 203: 4.09, 300: 4.17, 406: 4.09 },
+};
+
+/**
+ * `LabelWidthAdjustment` per model -- the driver adds this into the <SI>W it
+ * writes. Kept beside PRINTABLE_WIDTH_IN because the placement formula needs
+ * both, and a model is either measured for both or for neither.
+ */
+export const LABEL_WIDTH_ADJUSTMENT: { [model: string]: Partial<Record<203 | 300 | 406, number>> } = {
+    'PD41': { 203: -40, 300: -40 },
+    'PD43': { 203: 2, 300: 2 },
+    'PD45S': { 203: 2, 300: 2, 406: 2 },
+};
+
+/**
  * Fase 3: the strip along each edge of the stock that the print head cannot
  * reach, in mm, drawn as a guide rectangle on the canvas. Honeywell does not
  * publish a per-model figure for this, so the values below are the conservative

@@ -230,6 +230,13 @@ const inkBounds = (dg: DirectGraphic) => {
 };
 
 /**
+ * The ink extent of a graphic in DATA space. `maxBit` is the graphic's TOP row
+ * in the driver's centred frame, which is what the BarTender placement formula
+ * needs; `maxCol < 0` means the graphic carries no ink at all.
+ */
+export const directGraphicInkBounds = inkBounds;
+
+/**
  * Computes the VISUAL bounding box of a decoded graphic on the label, given
  * the label height in dots (PRM Appendix E: the origin's Y is measured from
  * the label's BOTTOM edge; see directGraphicToBitmap for the full transform).

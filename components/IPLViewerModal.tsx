@@ -17,6 +17,7 @@ import { describeCodePage } from '../services/ipl/codePages';
 import { notify, requestConfirm } from '../services/uiDialogs';
 import { sendIplViaBridge, pingBridge } from '../services/bridgeSend';
 import { getPrinterTarget, setPrinterTarget } from '../services/printerTarget';
+import { PRINTER_MODELS } from '../constants';
 
 const DPI_OPTIONS: PrinterSettings['dpi'][] = [203, 300, 406];
 
@@ -182,6 +183,18 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
         } catch { return 'auto'; }
     });
 
+    /**
+     * Target printer model. Direct Graphics in a BarTender stream (no <SI>L)
+     * are written in the DRIVER's centred frame, and undoing that needs
+     * per-model constants the stream does not carry — so the model is an input,
+     * never a guess. Unset means those graphics are placed label-relative, with
+     * an info in the issue list saying so. Persisted: the target printer rarely
+     * changes between sessions.
+     */
+    const [driverModel, setDriverModel] = useState<string>(() => {
+        try { return localStorage.getItem('ipl-viewer-driver-model') ?? ''; } catch { return ''; }
+    });
+
     // Persist paper size whenever it changes.
     useEffect(() => {
         try {
@@ -189,6 +202,14 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
             else localStorage.removeItem('ipl-viewer-paper-mm');
         } catch { /* storage unavailable */ }
     }, [paperMm]);
+
+    // Persist the printer model whenever it changes.
+    useEffect(() => {
+        try {
+            if (driverModel) localStorage.setItem('ipl-viewer-driver-model', driverModel);
+            else localStorage.removeItem('ipl-viewer-driver-model');
+        } catch { /* storage unavailable */ }
+    }, [driverModel]);
 
     // Persist the rotation choice whenever it changes.
     useEffect(() => {
@@ -259,8 +280,8 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
         () => (language === 'zpl' ? parseZPL(debouncedCode)
             : language === 'epl' ? parseEPL(debouncedCode)
             : language === 'tspl' ? parseTSPL(debouncedCode)
-            : parseViewerIPL(debouncedCode)),
-        [debouncedCode, language, bwipReady],
+            : parseViewerIPL(debouncedCode, { model: driverModel || undefined, dpi })),
+        [debouncedCode, language, bwipReady, driverModel, dpi],
     );
     // Importing a design back out of a stream is IPL-only.
     const isZpl = language !== 'ipl';
@@ -789,6 +810,18 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                                 <select value={dpi} onChange={e => setDpi(parseInt(e.target.value) as PrinterSettings['dpi'])}
                                     className="w-24 text-sm p-1.5 bg-gray-700 rounded-md border border-gray-600 focus:ring-1 focus:ring-blue-500 outline-none">
                                     {DPI_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-400 mb-1"
+                                    title="The printer the stream was made for. BarTender writes Direct Graphics in the driver's own frame and the stream does not say which model, so graphic placement needs this. Left unset, those graphics are placed label-relative and flagged in the issue list.">
+                                    Printer
+                                </label>
+                                <select value={driverModel} onChange={e => setDriverModel(e.target.value)}
+                                    className="w-28 text-sm p-1.5 bg-gray-700 rounded-md border border-gray-600 focus:ring-1 focus:ring-blue-500 outline-none">
+                                    <option value="">(unset)</option>
+                                    {Object.keys(PRINTER_MODELS).filter(m => m !== 'Generic').map(m =>
+                                        <option key={m} value={m}>{m}</option>)}
                                 </select>
                             </div>
                             <div>

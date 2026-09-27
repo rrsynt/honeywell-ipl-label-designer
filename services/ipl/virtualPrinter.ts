@@ -45,6 +45,16 @@ export class VirtualPrinter {
         settings: {},
     };
 
+    /**
+     * Target printer model and resolution, when the caller knows them. Direct
+     * Graphics written in a driver's centred frame (streams with no <SI>L) need
+     * per-model constants the stream does not carry; without a model those
+     * graphics fall back to the label-relative reading. Set via parseViewerIPL
+     * options; both null means "unknown".
+     */
+    driverModel: string | null = null;
+    driverDpi: 203 | 300 | 406 | null = null;
+
     /** In-format flag: field commands only count inside E#;F#...R. */
     inFormat = false;
     /** Program mode (<ESC>P) seen — formats before it are a warning condition. */

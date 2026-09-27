@@ -84,7 +84,11 @@ const colRuns = (cv: AnyCanvas) => {
 };
 
 const render = (ipl: string) => {
-    const label = parseViewerIPL(bytesToByteString(readFileSync(ipl)));
+    // The model is supplied on purpose: these are BarTender streams, whose
+    // Direct Graphics are written in the DRIVER's centred frame. Without the
+    // model they fall back to the label-relative reading and the offset below
+    // measures that fallback rather than the placement we ship.
+    const label = parseViewerIPL(bytesToByteString(readFileSync(ipl)), { model: 'PD43', dpi: DPI as 203 });
     const extent = computeLabelExtent(label, DPI);
     const cv = newRealCanvas(extent.widthDots, extent.heightDots) as unknown as AnyCanvas;
     renderLabel(cv as never, label, extent, { dpi: DPI, pxPerDot: 1, quality: 1, rotation: 0 });
@@ -133,14 +137,22 @@ const CASES = [
         ipl: 'samples/bartender-parity-base.ipl',
         png: 'testdata/bartender/parity-base.png',
         // Vector + Direct Graphics mixed; 7 elements.
-        offset: { x: -7, y: 29 },
+        // Was {x:-7, y:29} before 2026-09-28. The vertical part was measuring
+        // the Direct Graphics placement bug: the model read BarTender's centred
+        // origin frame as bottom-up and put every graphic ~29 dots high. With
+        // placement correct the offset is -1, i.e. our content now sits where
+        // BarTender draws it. Kept pinned so a regression re-opens the gap.
+        offset: { x: -7, y: -1 },
     },
     {
         name: 'one-box-landscape',
         ipl: 'samples/bartender-sweep-one-box-landscape.ipl',
         png: 'testdata/bartender-sweep-one-box-landscape.png',
         // Single Direct Graphics object on a landscape stock.
-        offset: { x: -8, y: 89 },
+        // Was {x:-8, y:89} before 2026-09-28 — same Direct Graphics placement
+        // bug, larger here because this format is a single rasterised object
+        // (89 dots of error). Now -1: the graphic lands on BarTender's ink.
+        offset: { x: -8, y: -1 },
     },
 ] as const;
 
