@@ -500,11 +500,25 @@ export class IPLViewerParser {
      * every graphic, which is why an unlisted model falls back to the bottom-up
      * path rather than guessing.
      *
-     * LIMIT, deliberately recorded rather than hidden: all 8 fixtures used to
-     * derive this have the feeder's width axis equal to the page's Y extent,
-     * because they are landscape or square. A btPortrait non-square page would
-     * need the page extent instead of `W`, and that case is UNTESTED — it has no
-     * fixture. Treat a portrait-non-square stream as unverified.
+     * MEASURED LIMIT — this formula is WRONG for btPortrait non-square pages,
+     * by ~42 dots. It was unverified when written; fixtures built 2026-09-28
+     * (tools/bartender/_p/BuildPortrait.cs, 3x2 and 2x3 in) now show the error:
+     *
+     *     por-3x2  predicted 90.5  measured 49
+     *     por-2x3  predicted 91.0  measured 49
+     *
+     * The cause is that the half-page term uses `W`, the printhead WIDTH axis,
+     * and on every other fixture that axis coincides with the page's feed axis
+     * (they are landscape or square), so the two readings were indistinguishable.
+     * A two-point fit suggested `pageX/2 - 49`; it matches both portrait
+     * fixtures and fails every landscape fixture by 100-360 dots, so it is NOT
+     * the model — do not adopt it. What IS ruled out: pageY/2, pageX/2, pageW/2,
+     * pageH/2, min/max/mean of the two axes, and W/2 with both 416 and 424.
+     *
+     * The orientation is not in the stream either (no q frame, no <SI>L), so
+     * whether this is solvable from the stream alone is an open question.
+     * tests/dgPortraitLimit.test.ts pins the error size so the gap cannot be
+     * forgotten and a real fix will be noticed.
      */
     private placeDriverFramedGraphics(W: number, printableX: number, adjust: number, dpi: number): void {
         const driverTop = Math.ceil(printableX * dpi / 2);

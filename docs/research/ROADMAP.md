@@ -285,6 +285,34 @@ Verifikasi akhir **7/7 dalam 1 dot** dengan
 (diuji ulang 6/6 termasuk `edges`). **Jangan hardcode 416/424** — hitung dari
 `Stock.Printable.X` model yang bersangkutan.
 
+### BATAS TERUKUR 2026-09-28 — rumus ini SALAH untuk btPortrait non-persegi
+
+Rumus di atas sudah diterapkan di kode (`03edd96`), dan batas yang dulu hanya
+"belum diuji" sekarang **terbukti salah**. Fixture yang sengaja dibuat
+(`tools/bartender/_p/BuildPortrait.cs`, halaman 3×2 dan 2×3 in portrait):
+
+| fixture | prediksi | terukur | galat |
+|---|---|---|---|
+| `por-3x2` | 90,5 | 49 | **41,5 dot** |
+| `por-2x3` | 91,0 | 49 | **42,0 dot** |
+
+**Sebabnya:** suku setengah-halaman memakai `W` (sumbu **lebar** printhead).
+Di semua fixture lain sumbu itu **berimpit** dengan sumbu feed halaman — karena
+semuanya landscape atau persegi — sehingga kedua bacaan tak terbedakan. Halaman
+portrait non-persegi memisahkannya.
+
+**Yang sudah GUGUR** (jangan diulang): `pageY/2`, `pageX/2`, `pageW/2`,
+`pageH/2`, min/max/rata-rata kedua sumbu, dan `W/2` dengan 416 maupun 424. Satu
+kandidat sempat terlihat sempurna — `pageX/2 − 49` cocok **tepat** di kedua
+fixture portrait — dan **gagal 100–360 dot** di setiap fixture landscape. Dua
+titik selalu bisa memuat dua parameter; itu bukan model.
+
+**Orientasi halaman juga tidak ada di stream** (tidak ada frame `q`, tidak ada
+`<SI>L`), jadi apakah kasus ini bisa dipecahkan dari stream saja masih
+pertanyaan terbuka. Penjaga: `tests/dgPortraitLimit.test.ts` memaku **besar
+galatnya** (bukan menegaskan jawaban yang salah), supaya celah ini tidak
+terlupakan dan perbaikan yang benar akan ketahuan.
+
 ## DPL (Datamax) — DITUNDA, menunggu sumber (2026-09-26)
 DPL adalah satu-satunya bahasa dari daftar rencana induk yang **tidak dibangun**,
 dan alasannya bukan tingkat kesulitan melainkan tidak adanya bahan:
