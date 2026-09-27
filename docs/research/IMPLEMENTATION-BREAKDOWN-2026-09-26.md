@@ -662,12 +662,57 @@ di baris `minBit` dari kanvas **konten**. Kita tidak menghitung posisi halaman
 sama sekali. Itu sebabnya graphic kita selalu di atas (terukur: 89,5 → 1;
 52,9 → 1; 48,9 → 6, dst).
 
-**Yang belum dijelaskan: angka 424.** Ia **di-fit** dari data, bukan
-diturunkan. 424 dot = 53,0 mm = 2,089 in, dan `406 + 18 = 424` serta
-`2 × 203 + 18 = 424` sama-sama cocok — tapi keduanya belum diuji, jadi jangan
-dipilih salah satu. Yang **sudah** terbukti: modelnya peka terhadap `maxBit`
-(`parity-base` dg0 vs dg1 berbeda 1 → prediksi berbeda 1), jadi ia bukan
-artefak pemilihan fixture.
+**Asal suku `pageH/2` TERPECAHKAN — dan ia mengubah arti rumusnya.** Suku itu
+**bukan aturan penempatan halaman**, melainkan **membatalkan penskalaan yang
+sudah dilakukan driver**. Terukur pada satu objek yang sama di tiga tinggi
+halaman berbeda:
+
+| Fixture (objek sama, Y=0,3 in) | pageH | originY | `originY + pageH/2` |
+|---|---|---|---|
+| `sep-land-4x4` | 812 | 218 | **624,0** |
+| `sep-land-4x3` | 609 | 319 | **623,5** |
+| `sep2-4x25` | 507 | 370 | **623,5** |
+
+Konstan dalam 0,5 dot. Dan antar pasangan, `ΔoriginY / ΔpageH` = **−0,4975** dan
+**−0,5000** — jadi hubunya **persis**:
+
+```
+originY = K − pageH/2        (K = properti OBJEK, bukan halaman)
+```
+
+Substitusikan ke rumus sebelumnya dan `pageH/2` **saling menghapus**:
+
+```
+y_top = (originY − maxBit) + pageH/2 − 424
+      = (K − pageH/2 − maxBit) + pageH/2 − 424
+      = K − maxBit − 424
+```
+
+Jadi driver **sudah menulis `originY` dalam kerangka terpusat**, dan aplikasi
+yang membaca harus menambahkan `pageH/2` kembali untuk memulihkan koordinat
+halaman. Itu bukan pilihan desain kita — itu bagian dari cara nilai itu
+dikodekan.
+
+**Angka 424 sekarang jauh lebih sempit tebakannya.** Yang sudah **gugur**
+lewat pengukuran, bukan argumen:
+
+- **bukan fungsi lebar halaman** — `landscape` (W=1218) dan `parity-base`
+  (W=812) sama-sama cocok dengan 424 yang sama;
+- **bukan fungsi tinggi halaman** — dibuktikan di empat tinggi (406/507/609/812);
+- **tidak ada di tabel driver mana pun** — `Model.d`, `*.d`, `*.pfm` di
+  `ss#ipl.ddz` tidak memuat 424, 848, 212, maupun 106 sebagai token;
+- **bukan margin 1 mm (8), bukan 16, bukan 18**.
+
+Yang **masih** kandidat, dan **belum diuji**: 424 dot = 2,089 in = 53,05 mm, dan
+`848 = 2 × 424` = 4,177 in — mendekati `Stock.Printable.X = 4,17 in` milik
+PD43_300 (selisih 1,4 dot). Itu **hipotesis yang bisa diuji** kalau nanti ada
+printer 300 dpi: kalau 424 berskala dengan dpi, ia konstanta geometris; kalau
+tetap 424 di 300 dpi, ia konstanta dot. **Jangan pilih sekarang.**
+
+Yang **sudah** terbukti: modelnya peka terhadap `maxBit` (`parity-base` dg0 vs
+dg1 berbeda 1 → prediksi berbeda 1), jadi ia bukan artefak pemilihan fixture.
+Verifikasi akhir **10/10 dalam 1 dot**, termasuk tiga bacaan dari frame
+terputar (orientasi berbeda).
 
 **Catatan metode — dua kali salah sebelum benar, dan keduanya ketangkap oleh
 pengukuran sendiri:**
@@ -821,7 +866,7 @@ dikerjakan tanpa printer):
 |---|---|
 | ~~Penempatan DG dipindah dari parse ke render~~ | **DIBANTAH 2026-09-27** — tidak ada model tinggi-label yang lulus uji stok-sama → `L`-sama, dan dengan floor yang ada perbaikannya no-op atau merusak. Jangan dikerjakan |
 | ~~Mekanisme `<SI>W`~~ | ✅ **SELESAI PENUH 2026-09-28** — `W = round(sumbu lebar printhead) − 16 − LabelWidthAdjustment`, diverifikasi 19/19. Klaim "sumbu pendek" dibatalkan (salah pada halaman non-persegi). Sisa 2 dot ternyata **angka per-model** di tabel driver Seagull (`Model.d` → `[PD43_203]` → `=2`), bukan konstanta. **Jangan hardcode** — PM43 memakai 4, PM4i −40 |
-| ~~Selisih posisi absolut kita vs BarTender (dy 29 / 89)~~ | ✅ **TERPECAHKAN 2026-09-28** — bukan pergeseran, melainkan **bentuk model yang salah**: origin vertikal DG BarTender berbasis **TENGAH halaman** (`y = originY − maxBit + pageH/2 − 424`), terverifikasi 9/9 dalam 1 dot termasuk dari frame terputar. Aturan kita kolaps jadi `y = minBit` sehingga tidak menghitung posisi halaman sama sekali. **Angka 424 masih di-fit, belum diturunkan** |
+| ~~Selisih posisi absolut kita vs BarTender (dy 29 / 89)~~ | ✅ **TERPECAHKAN 2026-09-28** — bukan pergeseran, melainkan **bentuk model yang salah**. Driver menulis `originY = K − pageH/2` (kerangka terpusat), jadi pembaca harus menambahkan `pageH/2` kembali: `y_top = (originY + pageH/2) − maxBit − 424`, terverifikasi 10/10 dalam 1 dot termasuk frame terputar. Aturan kita kolaps jadi `y = minBit`. **Sisa satu besaran:** angka 424 — bukan fungsi lebar maupun tinggi halaman, tidak ada di tabel driver; kandidat `848 = 2×424 ≈ Stock.Printable.X` 4,17 in **belum diuji** |
 | Kanvas preview 16 dot lebih kecil, konten tidak bergeser | viewer menggambar sampai tepi; perlu keputusan apakah ingin menawarkan tampilan area-tercetak |
 | ~~Guard paritas berbasis posisi absolut~~ | ✅ **SELESAI 2026-09-28** — `tests/bartenderAbsolute.test.ts` (6 tes). Bukti ia menutup celah nyata: dengan pergeseran seragam (4,6) disuntikkan, 18 tes paritas BarTender yang ada **tetap hijau**; guard ini gagal 5 dari 6 |
 

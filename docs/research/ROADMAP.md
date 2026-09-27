@@ -236,12 +236,18 @@ yang **independen dari renderer BarTender**, dan offset halaman terpaku.
 
 **Selisih absolut TERPECAHKAN 2026-09-28.** Offset yang terpaku di guard itu
 semula dicatat "belum dijelaskan". Ternyata ia bukan pergeseran sama sekali
-melainkan **bentuk model yang salah**: origin vertikal Direct Graphics
-BarTender diukur dari **TENGAH halaman** —
+melainkan **bentuk model yang salah**: driver menulis origin Y Direct Graphics
+dalam **kerangka terpusat**, `originY = K − pageH/2` — terukur persis, rasio
+ΔoriginY/ΔpageH = −0,5000 pada dua pasangan tinggi halaman. Pembaca harus
+menambahkan `pageH/2` kembali:
 
 ```
-y_top = (originY − maxBit) + pageH/2 − 424        terverifikasi 9/9 dalam 1 dot
+y_top = (originY + pageH/2) − maxBit − 424        terverifikasi 10/10 dalam 1 dot
 ```
+
+Jadi suku `pageH/2` itu **bukan aturan penempatan halaman** melainkan
+**membatalkan penskalaan driver** — kalau disubstitusi, `pageH/2` saling
+menghapus dan tersisa `y_top = K − maxBit − 424`.
 
 Aturan kita (`hBase = max(extent, originY)`) selalu memberi `hBase = originY`,
 sehingga `y` kolaps jadi `minBit` dan setiap graphic mendarat di baris `minBit`
@@ -249,10 +255,16 @@ kanvas KONTEN — kita tidak menghitung posisi halaman sama sekali. Itu sebabnya
 graphic selalu di atas (89,5 → 1, dst).
 
 Terverifikasi lewat fixture baru yang sengaja dibuat untuk memisahkan variabel
-(`sep-land-4x3` 3 in, `sep2-4x25` 2,5 in — `btLandscape` supaya previewnya
-tidak terputar), plus tiga fixture dibaca dari frame terputar sebagai
-orientasi pembanding. **Angka 424 masih di-fit, belum diturunkan** — jangan
-pakai sebagai model sebelum sebabnya ketemu.
+(`sep-land-4x3` 3 in, `sep2-4x25` 2,5 in, `sep-land-4x4` 4 in — `btLandscape`
+supaya previewnya tidak terputar), plus tiga fixture dibaca dari frame terputar
+sebagai orientasi pembanding. Prediksi `C = 18` di tinggi 812 dikonfirmasi
+sebelum diukur.
+
+**Sisa satu besaran: 424.** Yang sudah gugur: bukan fungsi lebar halaman
+(`landscape` W=1218 tetap cocok), bukan fungsi tinggi (empat tinggi diuji),
+tidak ada di tabel driver mana pun. Kandidat yang **belum diuji**:
+`848 = 2×424 = 4,177 in` mendekati `Stock.Printable.X = 4,17 in` — bisa diuji
+kalau ada printer 300 dpi. Jangan pakai sebagai model sebelum sebabnya ketemu.
 
 ## DPL (Datamax) — DITUNDA, menunggu sumber (2026-09-26)
 DPL adalah satu-satunya bahasa dari daftar rencana induk yang **tidak dibangun**,
