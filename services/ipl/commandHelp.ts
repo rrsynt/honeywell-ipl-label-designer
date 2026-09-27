@@ -102,6 +102,17 @@ export const COMMAND_HELP: CommandHelp[] = [
       summary: 'Selects media sense mode (gap / reflective / continuous).', page: 'PRM p.125' },
     { token: '<SI>g', kind: 'setup', title: 'Media sensitivity', syntax: '<SI>gn[,m]',
       summary: 'Selects direct-thermal vs thermal-transfer stock and sensitivity.', page: 'PRM p.127' },
+    // These three change the printed image and are NOT reproduced by this
+    // preview; the parser warns when one is present (setup-not-modelled).
+    { token: '<SI>X', kind: 'setup', title: 'Label origin X-Y adjust', syntax: '<SI>X[m1][,m2]',
+      summary: 'Moves the imaged position on the media (m1 = x, m2 = y, in dots). Not reproduced by this preview.',
+      page: 'K10 937-028-003 (absent from PRM rev 008)' },
+    { token: '<SI>F', kind: 'setup', title: 'Top of form', syntax: '<SI>Fn',
+      summary: 'Sets the start print point in 5-mil increments (default 20). Not reproduced by this preview.',
+      page: 'PRM p.139' },
+    { token: '<SI>h', kind: 'setup', title: 'Printhead loading mode', syntax: '<SI>hn[,m]',
+      summary: 'n=1 mirror printing, m=1 inverse printing — "affects how the whole image prints". Not reproduced by this preview.',
+      page: 'PRM p.135' },
 ];
 
 const HELP_BY_TOKEN = new Map(COMMAND_HELP.map(h => [h.token, h]));

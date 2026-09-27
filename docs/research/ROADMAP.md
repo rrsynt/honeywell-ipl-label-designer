@@ -159,6 +159,30 @@ Dokumentasi lengkap: [GOLDEN-TESTING.md](GOLDEN-TESTING.md).
   checklist kalibrasi visual di dokumen itu.
 - Tawarkan hasil ke penulis portakal & komunitas Labelize untuk uji silang.
 
+### Koreksi 2026-09-27 — tiga perintah yang menggeser gambar kini bersuara
+Perintah yang dipakai untuk mengompensasi offset printhead 3 mm antar generasi
+(lihat tech brief migrasi PM43/PC43) ternyata **tidak pernah masuk jalur
+keputusan mana pun**: `parseSetupFrame` mencocokkan W/L/T/g/S/d/l lewat regex
+dan membuang sisanya tanpa jejak. Yang dibuang itu termasuk tiga perintah yang
+manualnya tegas mengubah gambar tercetak:
+
+| Perintah | Arti | Manual |
+|---|---|---|
+| `<SI>X m1[,m2]` | Label Origin, X-Y Adjust — menggeser posisi terimajinasi | K10 937-028-003 (tidak ada di ketiga edisi PRM) |
+| `<SI>F n` | Top of Form, Set — titik awal cetak (default 20) | PRM p.139 |
+| `<SI>h n[,m]` | Printhead Loading Mode — `n=1` mirror, `,m=1` inverse | PRM p.135 |
+
+Kini ketiganya dilaporkan sebagai peringatan `setup-not-modelled` dan punya entri
+bantuan perintah. **Diperingatkan, bukan dimodelkan:** besarnya pergeseran adalah
+perilaku hardware (interval 5 mil, rentang ±30 dot, `<SI>X` berbunyi *"IPL uses
+the system configuration for this setting"*), dan aturan proyek ini adalah tabel
+semacam itu diukur, tidak ditebak. Penjaga: `tests/unmodelledSetup.test.ts`.
+
+Bentuk telanjang `<SI>h` (tanpa argumen) tidak memilih mode apa pun — `n` dan `m`
+wajib, jadi tidak ada yang berubah dan preview tetap senyap. Tiga sampel yang
+di-ship memakai bentuk telanjang itu (kemungkinan salah tulis; contoh Intermec
+yang asli berbunyi `<SI>h0,0;`), dan tes menguncinya tetap senyap.
+
 ## DPL (Datamax) — DITUNDA, menunggu sumber (2026-09-26)
 DPL adalah satu-satunya bahasa dari daftar rencana induk yang **tidak dibangun**,
 dan alasannya bukan tingkat kesulitan melainkan tidak adanya bahan:

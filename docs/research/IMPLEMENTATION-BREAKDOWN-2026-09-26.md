@@ -143,20 +143,51 @@ utama dan belum diolah:
 
 ### 3a. Offset cetak 3 mm — `IPL_Migration_Considerations_PM43_PC43_TechBrief.pdf`
 
-> *"The fixed offset of 3mm for all print heads along system x axis (IPL y
-> axis) printing position may not be same as PD41/42, PF2/4i, PM4i and
-> PX4/6i upgrade printers. You may need to adjust system X margin (IPL y axis)
-> or start/stop (IPL x axis) adjust to achieve legacy printing positions."*
+> **SELESAI 2026-09-27, dengan premis yang dikoreksi.** Kalimat yang dikutip di
+> bawah ternyata **menunjuk jalan keluarnya sendiri**, dan jalan itu bukan
+> "geser preview" melainkan perintah kompensasi di dalam stream. Offset 3 mm
+> adalah perbedaan **hardware** antar generasi printhead; ia tidak pernah ada di
+> dalam stream, jadi memang bukan milik preview.
 
-**Kenapa penting.** 3 mm pada 203 dpi ≈ 24 dot. Itu pergeseran yang terlihat
-mata dan persis jenisnya yang membuat "preview bagus, cetakan meleset".
-Proyek ini belum memodelkannya. Perlu diputuskan: apakah ia milik
-*post-processing BarTender* (seperti rotasi halaman) atau milik *firmware*
-(yang berarti preview kita harus ikut menggeser).
+**Yang benar-benar perlu dikerjakan, dan sudah dikerjakan.** Tiga perintah yang
+dipakai untuk mengompensasi offset itu — `<SI>X` (Label Origin X-Y Adjust),
+`<SI>F` (Top of Form), `<SI>h` (Printhead Loading Mode, `n=1` mirror / `,m=1`
+inverse) — **sama sekali tidak ditangani** `parseSetupFrame` dan lenyap tanpa
+satu pun peringatan. `parseSetupFrame` mencocokkan W/L/T/g/S/d/l lewat regex dan
+mengabaikan sisanya, yang benar untuk setelan comms/jaringan tapi salah untuk
+ketiganya: manual menyatakan `<SI>h` *"affects how the whole image prints"*.
+Teknisi yang mengikuti anjuran tech brief akan mengirim `<SI>X` ke PD43 dan
+preview kita diam saja sementara label tercetak bergeser ~24 dot.
 
-**Cara memutuskan.** Dua format identik dengan margin sistem berbeda, cetak
-lewat file port, ukur pergeseran tinta terhadap `W`/`L`. Bukan dibaca dari
-dokumen — diukur.
+Dibuktikan dengan probe lebih dulu (`parseViewerIPL` atas stream sintetis):
+`<SI>X5,3`, `<SI>F20`, `<SI>f0`, `<SI>r0`, `<SI>Z` semuanya menghasilkan
+`issues=[]` — sedangkan frame field betulan (`Q9`) memunculkan `unknown-frame`.
+Jadi ini bukan kebijakan "diam untuk yang tak dikenal", melainkan celah di jalur
+yang seharusnya bersuara.
+
+**Perbaikan:** pelaporan `setup-not-modelled` (`viewerParser.reportUnmodelledSetup`)
+untuk ketiganya, plus entri bantuan perintah. Default tidak diperingatkan
+(`<SI>X0`, `<SI>F20`, `<SI>h0`), dan bentuk telanjang `<SI>h` tetap senyap —
+`n` dan `m` wajib, jadi tanpa argumen tidak ada mode yang dipilih. Tiga sampel
+yang di-ship (`box-date`, `external`, `product`) memakai bentuk telanjang itu;
+contoh Intermec yang asli di `docs/research/SOURCE-HUNT-2026-09-26.md` berbunyi
+`<SI>h0,0;`, jadi milik kita kemungkinan salah tulis — tetapi senyap adalah
+respons yang benar untuk keduanya. Penjaga `tests/unmodelledSetup.test.ts`
+(9 tes) menyapu seluruh sampel yang di-ship agar tidak ada alarm palsu;
+diverifikasi dengan memasukkan kembali bug-nya (4 tes gagal). Satu kasus batas
+ditemukan lewat sapuan manual, bukan oleh tes pertama: `<SI>X,3` (m1 kosong,
+m2 diberi) sah menurut sintaks `[m1][,m2]` dan tadinya lolos senyap.
+
+**Sengaja diperingatkan, bukan dimodelkan.** Besar dan tanda pergeseran adalah
+perilaku hardware (5 mil per langkah, rentang ±30 dot, dan `<SI>X` berbunyi
+*"IPL uses the system configuration for this setting"*). Aturan proyek ini:
+tabel semacam itu diukur, tidak ditebak — EPL huruf barcode-nya dan TSPL nama
+tipenya dua kali membuktikan ongkosnya. Yang **masih butuh printer**: besar
+pergeseran nyata per unit, dan apakah `<SI>X` berlaku sama di firmware PD43.
+
+**Cara mengukur sisanya (kalau ada printer).** Dua format identik dengan
+`<SI>X` berbeda, cetak lewat file port, ukur pergeseran tinta terhadap `W`/`L`.
+Bukan dibaca dari dokumen — diukur.
 
 ### 3b. Font resident metrically compatible — tech brief yang sama
 
@@ -205,13 +236,32 @@ perbaiki. Kalau printer target memakai firmware sebelum perbaikan, `g1` bisa
 saja **memang tidak bekerja** di lapangan — dan itu bukan bug preview kita.
 Ini harus dicatat di panduan kalibrasi, bukan dipatok sebagai tes.
 
-### 3d. PRM edisi `066396-003`
+### 3d. PRM edisi `066396-003` — **BUKAN edisi keempat; ini edisi KETIGA yang lebih tua**
 
-Edisi keempat PRM yang proyek ini miliki. Belum dibandingkan dengan yang sudah
-dipakai. **Tugasnya:** diff terhadap `IPL_Programmers_Reference_Manual.txt`
-untuk mencari perbedaan nomor halaman/semantik yang membuat kutipan di kode
-menunjuk halaman yang salah. Kutipan halaman yang salah adalah kelas bug
-dokumentasi yang sudah pernah menggigit proyek ini.
+> **SELESAI 2026-09-27, dan hasilnya membatalkan premisnya.** Berkas itu memang
+> ber-P/N 066396-**003**, tapi namanya menyesatkan: yang **sedang dipakai**
+> proyek ini adalah 066396-**008** (Document Change Record: revisi 008, 06/04,
+> "IPL firmware versions 1.4 and 2.0 functionality", PF2i/PF4i/PM4i), sedangkan
+> 066396-**003** berhenti di revisi 003 (10/00) — **lima revisi lebih tua**, dari
+> era EasyCoder F4, sebelum 3400e/44X0/PF2i ada.
+
+**Kenapa ini penting dan bukan sekadar catatan.** Rencana semula adalah
+memakainya untuk **mengoreksi kutipan halaman** di kode (213 kutipan `PRM p.N`).
+Kalau dikerjakan, hasilnya akan **merusak** semuanya: penomoran halamannya beda
+sistem — edisi 003 memakai `7-50` (bab-halaman), edisi 008 memakai nomor urut
+`191`. Kutipan seperti `PRM p.191` tidak punya padanan langsung di 003, jadi
+"mengoreksinya" berarti memetakan dua skema penomoran dan menebak.
+
+**Terverifikasi:** spot-check kutipan yang paling sering dipakai —
+`PRM p.191` ("2 dots below bar code", interpretive gap) — **benar** di edisi
+008: halaman tercetak di footer sekitar hit itu memang 191. Tidak ada yang perlu
+diperbaiki.
+
+**Yang tetap berguna dari berkas ini:** sebagai pembanding *isi antar era*,
+bukan penomoran. Ekstraksi teksnya sudah dibuat lewat `pdftotext` dan
+menunjukkan struktur bab yang sama; kalau nanti ada klaim "perintah X berubah
+perilaku", dua edisi ini adalah pasangan sebelum/sesudah yang sah. **Jangan**
+pakai 003 sebagai sumber nomor halaman.
 
 ---
 
@@ -453,13 +503,23 @@ sebelumnya.
 
 ## Urutan kerja yang disarankan
 
-1. **Tahap 1** — perbaiki cermin DG. Tulis tes yang gagal dulu.
-2. **Tahap 2** — ganti guard centroid → profil, tambah syarat asimetri.
-3. **Tahap 3c** — catat bug firmware di panduan kalibrasi (murah, mencegah salah diagnosis).
-4. **Tahap 3a** — ukur offset 3 mm lewat file port.
-5. **Tahap 3d** — diff PRM edisi baru, perbaiki kutipan halaman.
-6. **Tahap 5** — tabel setting → efek.
+1. **Tahap 1** — perbaiki cermin DG. Tulis tes yang gagal dulu. ✅ 2026-09-27
+2. **Tahap 2** — ganti guard centroid → profil, tambah syarat asimetri. ✅
+3. **Tahap 3c** — catat bug firmware di panduan kalibrasi. ✅
+4. **Tahap 3a** — offset 3 mm: **bukan** pekerjaan preview, tapi tiga perintah
+   kompensasinya yang dulu hilang tanpa jejak. ✅ 2026-09-27 (`setup-not-modelled`)
+5. **Tahap 3d** — PRM 066396-003: **lebih tua**, bukan lebih baru; premis tesnya
+   dibatalkan. ✅ 2026-09-27
+6. **Tahap 5** — tabel setting → efek. ⬜ berikutnya
 7. **Tahap 4** — hanya setelah ada printer.
 
 Tahap 1 dan 2 adalah satu unit kerja: memperbaiki tanpa memperkuat guard
 berarti mengundang bug yang sama terulang ketiga kalinya.
+
+**Pola yang muncul tiga kali sekarang** (772 tes vs urutan `I<n>`/`B<n>`; 605 vs
+resize canvas; dan Tahap 3a ini): yang tidak pernah tertangkap suite adalah
+**perintah/perilaku yang tidak punya jalur keputusan sama sekali** — bukan yang
+salah dihitung, melainkan yang tidak pernah dilihat. Cara menemukannya bukan
+menambah tes ke jalur yang sudah ada, melainkan menyapu permukaan command
+(`<SI>` letter sweep di atas stream nyata vs himpunan yang ditangani) dan
+menanyakan "apa lagi yang bisa mengubah gambar di sini?".

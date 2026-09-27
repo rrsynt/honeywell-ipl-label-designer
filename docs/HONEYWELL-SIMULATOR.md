@@ -94,14 +94,36 @@ perilaku firmware). Opsi realistis:
   bar terakhir (PRM p.191 "2 dots below bar code"); dipin
   `tests/originAndHri.test.ts`.
 
-- [ ] **Offset printhead 3 mm** — tech brief migrasi PM43/PC43 menyatakan semua
-  printhead generasi baru punya offset tetap 3 mm pada sumbu x sistem (≈24 dot
-  @203 dpi) yang tidak dimiliki PD41/42, PF2/4i, PM4i, PX4/6i. Belum ada
-  keputusan: apakah ini milik post-processing (seperti rotasi halaman) atau
-  milik firmware (preview harus ikut bergeser). **Ukur, jangan baca dari
-  dokumen:** cetak dua format identik dengan margin sistem berbeda lewat file
-  port, lalu ukur pergeseran tinta terhadap `W`/`L`. Sumber:
-  `docs/manuals/IPL_Migration_Considerations_PM43_PC43_TechBrief.pdf`.
+- [~] **Offset printhead 3 mm** — **premisnya sudah dikoreksi 2026-09-27 dan
+  tidak lagi menunggu printer.** Tech brief migrasi PM43/PC43 menyebut offset
+  3 mm pada sumbu x sistem (≈24 dot @203 dpi) sebagai perbedaan **hardware**
+  antar generasi printhead, lalu menunjuk sendiri jalan keluarnya: *"You may
+  need to adjust system X margin (IPL y axis) or start/stop (IPL x axis) adjust
+  to achieve legacy printing positions."* Artinya offset itu **tidak pernah
+  hidup di dalam stream** dan memang bukan milik preview — yang hidup di stream
+  adalah perintah kompensasinya:
+
+  | Perintah | Arti | Efek pada gambar |
+  |---|---|---|
+  | `<SI>X m1[,m2]` | Label Origin, X-Y Adjust | menggeser posisi terimajinasi |
+  | `<SI>F n` | Top of Form, Set (default 20) | titik awal cetak |
+  | `<SI>h n[,m]` | Printhead Loading Mode | `n=1` mirror, `,m=1` inverse |
+
+  **Yang dikerjakan 2026-09-27:** ketiganya kini **dilaporkan** sebagai
+  peringatan `setup-not-modelled` alih-alih diabaikan tanpa jejak, dan muncul di
+  daftar bantuan perintah. Sengaja diperingatkan, **bukan** dimodelkan: besar
+  dan tanda pergeserannya adalah perilaku hardware (interval 5 mil, rentang ±30
+  dot, dan `<SI>X` sendiri berbunyi *"IPL uses the system configuration for this
+  setting"*), sedangkan aturan proyek ini adalah tabel semacam itu **diukur**,
+  tidak ditebak — EPL dan TSPL dua kali membuktikan ongkosnya. Penjaga:
+  `tests/unmodelledSetup.test.ts` (8 tes, diverifikasi dengan memasukkan kembali
+  bug-nya).
+
+  **Sisa yang masih butuh printer:** besar pergeseran sesungguhnya per unit
+  (karena itu tabel di atas belum boleh jadi model), dan apakah `<SI>X` di
+  firmware PD43 memang berlaku seperti di K10. Sumber:
+  `docs/manuals/IPL_Migration_Considerations_PM43_PC43_TechBrief.pdf`,
+  `docs/manuals/IPL_Command_Reference_K10_937-028-003/Label_Origin_X_Y_Adjust_K10.htm`.
 
 Yang **belum** bisa diputuskan tanpa printer: apakah metrik face outline printer
 persis menyamai Liberation, dan apakah firmware memakai tabel substitusi

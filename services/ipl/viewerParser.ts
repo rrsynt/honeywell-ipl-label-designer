@@ -753,6 +753,62 @@ export class IPLViewerParser {
         // bound to fields (see parse / resolveSource).
         const lang = frame.match(/<SI>l(\d+)/);
         if (lang) this.printer.setCodePage(parseInt(lang[1], 10));
+
+        this.reportUnmodelledSetup(frame);
+    }
+
+    /**
+     * Setup commands that move or transform the whole printed image, which this
+     * renderer does not reproduce. Every other unhandled <SI> setting is comms,
+     * network or media handling — it cannot change the picture — but these
+     * three can, and silence about them is the failure mode this project exists
+     * to prevent (see tests/unmodelledSetup.test.ts for the sources).
+     *
+     * Warned rather than modelled: their effect is hardware behaviour whose
+     * magnitudes are not derivable from the stream alone, and this project has
+     * twice proved what a table guessed instead of measured costs.
+     */
+    private reportUnmodelledSetup(frame: string): void {
+        const warn = (what: string, detail: string): void => {
+            this.printer.issue('warning', 'setup-not-modelled',
+                `${what} changes the printed image, which this preview does not reproduce: ${detail}`,
+                frame.slice(0, 24));
+        };
+
+        // Label Origin, X-Y Adjust: moves the imaged position on the media.
+        // K10/P10 firmware only — PRM rev 008 does not document it. Both
+        // parameters are bracketed in the syntax (<SI>X[m1][,m2]), so "<SI>X,3"
+        // (m1 omitted, m2 given) is legal and must be caught too — the leading
+        // digit group is optional here, unlike <SI>F and <SI>h where n is
+        // mandatory. The command letter is uppercase X; "<SI>xc" is a different
+        // command and does not match.
+        const origin = frame.match(/<SI>X(?:(-?\d+)(?:,(-?\d+))?|,(-?\d+))/);
+        if (origin) {
+            const m1 = origin[1] === undefined ? 0 : parseInt(origin[1], 10);
+            const m2 = (origin[2] ?? origin[3]) === undefined ? 0 : parseInt((origin[2] ?? origin[3])!, 10);
+            if (m1 !== 0 || m2 !== 0)
+                warn('Label origin X-Y adjust (<SI>X)', `the image is shifted by ${m1} dot(s) in x and ${m2} in y.`);
+        }
+
+        // Top of Form, Set: the start print point. Default 20 (PRM p.139).
+        const topOfForm = frame.match(/<SI>F(-?\d+)/);
+        if (topOfForm && parseInt(topOfForm[1], 10) !== 20)
+            warn('Top of form (<SI>F)', `the start print point is ${topOfForm[1]} (5-mil increments), moved from its default of 20.`);
+
+        // Printhead Loading Mode, Select (PRM p.135): n=1 mirrors, ,m=1
+        // inverts. Both are mandatory in the syntax, so a bare "<SI>h" — which
+        // samples/product.ipl and two siblings carry — supplies no value at
+        // all. Nothing is selected, so it stays silent. (The real Intermec
+        // sample of this command is "<SI>h0,0;", args and all; ours is likely a
+        // hand-authoring slip, but silence is the correct response either way,
+        // and warning would fire on our own fixtures.)
+        const loading = frame.match(/<SI>h(\d+)(?:,(\d+))?/);
+        if (loading) {
+            const modes: string[] = [];
+            if (loading[1] === '1') modes.push('mirror');
+            if (loading[2] === '1') modes.push('inverse');
+            if (modes.length) warn('Printhead loading mode (<SI>h)', `${modes.join(' + ')} printing is selected.`);
+        }
     }
 
     private parseFieldFrame(frame: string): void {

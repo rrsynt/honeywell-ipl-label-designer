@@ -91,6 +91,27 @@ pada PDF ("Bar Code, Select Type").
 | `<SI>d<n>` | dark adjust |
 | `<SI>T<m>` | jenis media (gap/reflective/continuous) |
 
+### Menggeser/mengubah seluruh gambar — TIDAK direproduksi preview
+
+Tiga perintah ini mengubah hasil cetak dan **tidak dimodelkan** oleh preview;
+viewer memunculkan peringatan `setup-not-modelled` saat menemukannya. Besarnya
+pergeseran adalah perilaku hardware dan harus diukur, bukan ditebak:
+
+| Command | Arti | Manual |
+|---|---|---|
+| `<SI>X[m1][,m2]` | Label Origin, X-Y Adjust — menggeser posisi terimajinasi (m1=x, m2=y, dots) | K10 937-028-003; **tidak ada** di edisi PRM mana pun |
+| `<SI>F<n>` | Top of Form, Set — titik awal cetak, interval 5 mil (default 20) | PRM p.139 |
+| `<SI>h n[,m]` | Printhead Loading Mode — `n=1` mirror printing, `,m=1` inverse printing | PRM p.135 |
+
+Perintah inilah yang dipakai untuk mengompensasi **offset printhead 3 mm** antar
+generasi printer (PM43/PC43 vs PD41/42, PF2/4i, PM4i, PX4/6i) — lihat
+`IPL_Migration_Considerations_PM43_PC43_TechBrief.pdf`.
+
+**Catatan:** `n` dan `m` **wajib** di sini, jadi `<SI>h` **tanpa argumen** tidak
+memilih mode apa pun (bentuk itu dipakai `samples/product.ipl` dan dua
+saudaranya — kemungkinan salah tulis saat menulis sampel; contoh nyata dari
+Intermec berbunyi `<SI>h0,0;`). Preview tetap senyap untuk bentuk telanjang.
+
 ## DPI printer (untuk skala render)
 
 Keluarga Intermec/Honeywell umum: 203 dpi (8 dots/mm) dan 300 dpi (12 dots/mm).

@@ -349,6 +349,25 @@ describe('fase 4: line tracking + command help', () => {
         const si = frameAtCaret('<STX><SI>W812<ETX>', 8)!;
         expect(lookupHelpForFrame(si.frame, si.offsetInFrame)?.token).toBe('<SI>W');
     });
+
+    it('resolves help for the image-moving setup commands', async () => {
+        // These three warn at parse time (setup-not-modelled). The warning tells
+        // the user the preview moved nothing; the help entry is where they find
+        // out what the command would have done. A token typo here would leave
+        // the warning with no explanation behind it.
+        const { frameAtCaret, lookupHelpForFrame } = await import('../services/ipl/commandHelp');
+        for (const [frame, token] of [
+            ['<STX><SI>X5,3<ETX>', '<SI>X'],
+            ['<STX><SI>F100<ETX>', '<SI>F'],
+            ['<STX><SI>h1<ETX>', '<SI>h'],
+        ] as const) {
+            const at = frameAtCaret(frame, 6)!;
+            const help = lookupHelpForFrame(at.frame, at.offsetInFrame);
+            expect(help?.token, `${frame} should resolve help`).toBe(token);
+            expect(help?.summary, `${token} help should say it is not reproduced`)
+                .toMatch(/not reproduced/i);
+        }
+    });
 });
 
 describe('fase 4: page composition (S/M/O/q)', () => {
