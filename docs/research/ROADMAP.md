@@ -194,18 +194,24 @@ diketahui dari `tools/bartender/BuildParityLabels.cs`:
 
 ```
 kanvas preview BarTender = halaman − 16 dot per dimensi  (konten TIDAK bergeser)
-<SI>W                    = sumbu pendek − 18 dot          (mekanisme BELUM dijelaskan)
+<SI>W                    = (sumbu lebar printhead) − 18 dot, dan 18 = 16 + 2
 ```
 
-> **Koreksi 2026-09-28.** Entri ini semula menulis *"memotong 8 dot per tepi"*.
-> Itu **salah**: crop menyiratkan pergeseran, dan ground truth membuktikan tidak
-> ada pergeseran (objek di halaman x=37 muncul di preview x=37, bukan 29).
-> Yang benar: kanvas mengecil 16 dot, kontennya tetap. Delapan dot itu ukuran
-> beberapa efek nyata di sini, jadi model yang keliru sempat menutupi selisih
-> asli — lihat breakdown.
+> **Koreksi 2026-09-28 (dua kali).** Entri ini mula-mula menulis *"memotong 8
+> dot per tepi"*. Itu **salah**: crop menyiratkan pergeseran, dan ground truth
+> membuktikan tidak ada pergeseran (objek di halaman x=37 muncul di preview
+> x=37, bukan 29). Yang benar: kanvas mengecil 16 dot, kontennya tetap.
+>
+> Lalu entri lanjutannya menulis *"sumbu pendek − 18"*. Itu juga **salah** —
+> korelasi, bukan mekanisme. `mixed` dan `one-box-landscape` sama-sama halaman
+> 4×2 in tapi W-nya 794 vs 388; yang membedakan orientasinya. Mekanisme
+> sebenarnya: sumbu lebar printhead (X halaman untuk portrait, **Y** untuk
+> landscape), terverifikasi 15/15 di dataset sweep dan 5/5 di `samples/`.
+> Delapan belas itu **bukan angka baru**: 18 = 16 + 2, dan 16 sudah dijelaskan
+> baris di atasnya. Hanya sisa 2 dot yang belum.
 
-Yang **tidak** dikerjakan, dan itu keputusan: 18 dot itu tidak dimodelkan karena
-sebabnya belum ketemu. Menyelesaikan "tinggi label yang diperlukan" dari
+Yang **tidak** dikerjakan, dan itu keputusan: sisa 2 dot itu tidak dimodelkan
+karena sebabnya belum ketemu. Menyelesaikan "tinggi label yang diperlukan" dari
 pergeseran yang terukur menghasilkan angka rapi (389 vs 390) dan **menyesatkan**
 — pengukuran pita-per-pita menunjukkan vektor dan raster bergeser **sama
 persis**, jadi pergeseran itu milik lapisan halaman, bukan cacat penempatan DG.
