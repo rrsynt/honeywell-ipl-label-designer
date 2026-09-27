@@ -454,9 +454,153 @@ lapisan di luar stream itu sebagai **opsi eksplisit**, bukan diasumsikan. Kalau
 tidak, "akurat" bergantung pada setting yang tidak terlihat siapa pun yang
 membaca `.ipl`-nya.
 
-**Yang harus dihasilkan:** satu tabel di dokumen ini yang memetakan setiap
-setting BarTender → efek terukur → apakah aplikasi kita memodelkannya.
-Baris yang belum ada modelnya menjadi pekerjaan tersendiri.
+### Tabel yang diminta — diukur 2026-09-27, bukan diasumsikan
+
+Setiap baris di bawah diukur dari pasangan yang sudah ada di repo (stream
+BarTender-asli + PNG preview BarTender-asli), bukan dari deskripsi setting.
+Lima fixture BarTender-authored dipakai: `grid`, `parity-base`, `one-box`,
+`one-box-landscape`, `landscape` — semuanya dibuat
+`tools/bartender/BuildParityLabels.cs`, jadi ukuran halamannya diketahui persis.
+
+| Setting BarTender | Efek terukur | Dimodelkan? |
+|---|---|---|
+| **Page setup landscape** | memutar seluruh label 90° CCW (dan 90° CW memberi citra cermin) | ✅ opsi **Rotate** — `RenderOptions.rotation`, `auto` mengikuti frame `q`; dikunci `bartenderPageTurn.test.ts` |
+| **Stok & margin** | kanvas preview **16 dot lebih kecil di kedua dimensi** (8+8), tapi konten **TIDAK bergeser** — preview berjangkar di origin halaman | ❌ **tidak** — viewer menggambar sampai tepi kanvas |
+| **`<SI>W`** (lebar label) | = sumbu pendek stok **− 18 dot**, konsisten di kelima fixture | ⚠️ sebagian — dipakai sebagai `widthDots`, tapi tidak ada kaitannya dengan pembingkaian di atas |
+| **`Fix Direct Graphics`** | mengubah mode pengiriman (`g0` biner vs `g1` hex), bukan posisi | ✅ keduanya didekode identik (`extractDirectGraphics` mode 0/1) |
+| **Offset printhead 3 mm** | perilaku hardware; yang hidup di stream hanya perintah kompensasinya | ✅ diperingatkan via `setup-not-modelled` (Tahap 3a), sengaja tidak dimodelkan |
+| **Driver IPL PD43 203 dpi** | dpi → dot | ✅ opsi DPI 203/300/406 |
+
+### Koreksi 2026-09-28 — "crop 8 dot per tepi" itu SALAH; yang benar kanvas mengecil tanpa pergeseran
+
+Versi pertama tabel di atas menyebut preview BarTender *"memotong tepat 8 dot
+(1,00 mm) dari tiap tepi"*. **Itu keliru, dan kesalahannya berbahaya** karena
+crop menyiratkan **pergeseran** — padahal tidak ada.
+
+Yang benar-benar terukur, diverifikasi terhadap ground truth
+`tools/bartender/BuildParityLabels.cs` (koordinat yang **dimasukkan** untuk
+membangun format, jadi bukan rasterisasi kedua):
+
+| Fixture | GT halaman | Preview BarTender | Cocok? |
+|---|---|---|---|
+| `grid` | box 0,2 in → path x=41; tebal 1 mm → ink mulai **37** | kolom pertama bertinta di **37** | ✅ persis |
+| `one-box-landscape` | box 0,6 in → path x=122; tebal 3 mm → ink mulai **110**; path y=102 → ink **90** | ink bbox **(110, 90)** | ✅ persis |
+
+Kalau model "crop 8 dot per tepi" benar, objek di halaman x=37 akan muncul di
+preview x=**29**. Yang terukur: **37**. Jadi:
+
+```
+BENAR : kanvas preview = halaman − 16 dot per dimensi, origin tetap di (0,0)
+        -> konten tidak bergeser sama sekali
+SALAH : "halaman dipotong 8 dot per tepi"  (menyiratkan pergeseran −8)
+```
+
+Angka 16 dot itu sendiri nyata dan konsisten di kelima fixture (812→796,
+406→390, 609→593, 1218→1202), dan 16 = 2 mm = dua kali
+`UNPRINTABLE_MARGIN_MM['PD43'] = 1` mm. Yang salah hanyalah **membaginya dua
+lalu menyebutnya pergeseran**. Delapan dot itu ukuran beberapa efek nyata di
+sini, jadi model yang keliru sempat menutupi selisih asli — pelajaran yang sama
+dengan matriks 2×2 di audit DG.
+
+**Konsekuensi yang penting untuk jumlah yang belum dijelaskan:** selisih posisi
+absolut kita vs BarTender tetap **tidak seragam** — berbeda per fixture, bahkan
+antara dua fixture berstok sama (dy 31 vs 89). Ia **bukan** satu crop, bukan
+satu pergeseran, dan belum dijelaskan. Guard
+`tests/bartenderAbsolute.test.ts` memakukannya sebagai baseline regresi.
+
+**Mekanisme 18 dot itu juga BELUM dijelaskan** dan sengaja tidak ditebak. Ia
+bukan margin halaman (`0,1 in` = 20,3 dot) dan bukan 16 dot itu. Yang
+dicatat di sini hanya faktanya: konstannya di lima halaman dengan ukuran
+berbeda, jadi ia bukan efek pembulatan tepi. **Jangan jadikan model sebelum
+mekanismenya ditemukan** — aturan proyek ini.
+
+### Pergeseran vertikal adalah seragam — ia lapisan halaman, bukan bug DG
+
+Hipotesis pertama yang muncul saat mengukur adalah "Direct Graphics salah
+tempat karena `hBase` ditebak". **Itu dibantah oleh pengukuran.** Dengan
+mengorelasikan pita-pita terpisah dari `parity-base` secara independen — tiap
+pita hanya berisi satu jenis konten — semuanya memberi pergeseran yang **sama**:
+
+| Pita (jenis) | dx | dy | tumpang-tindih |
+|---|---|---|---|
+| barcode x13–367 (vektor) | −8 | 24 | 91,4% |
+| line x48–777 (vektor) | −8 | 29 | 74,2% |
+| box x547–710 (vektor) | −9 | 29 | 75,6% |
+| graphic x9–328 (Direct Graphics) | −8 | 24 | 93,6% |
+| graphic x338–800 (Direct Graphics) | −8 | 29 | 83,7% |
+
+Konten **vektor dan raster bergeser dengan jumlah yang sama**. Jadi
+ketidakcocokan posisi itu milik **lapisan halaman** (baris "Stok & margin" di
+tabel — memang di luar stream), bukan cacat penempatan Direct Graphics. Ini
+justru menguatkan baris tabel itu: yang salah bukan elemen kita, melainkan
+origin halaman yang tidak dibawa stream.
+
+`dx = −8` itu **bukan** arti "crop 8 dot per tepi" (lihat koreksi di atas) —
+ia kebetulan mendekati 8 dan sempat memperkuat model yang keliru. Yang benar:
+ini satu pergeseran halaman yang belum dijelaskan, dan nilainya **berbeda per
+fixture** (parity-base dy 29, one-box-landscape dy 89, pada stok yang sama).
+
+**Pelajaran metodologis, sama seperti matriks 2×2 di audit DG sebelumnya:**
+sebelum mengaitkan pergeseran seragam ke fitur yang kebetulan menonjol,
+periksa apakah ia seragam. Menyelesaikan "hBase yang diperlukan" dari
+pergeseran itu menghasilkan angka yang rapi (389 vs printable 390) dan
+**menyesatkan** — kerapian itu artefak dari sebab yang salah.
+
+### Temuan arsitektur terpisah — posisi DG dibakar saat PARSE (fakta benar), tapi "perbaikannya" DIBANTAH
+
+Ini berdiri sendiri dari koreksi di atas, dan **terverifikasi langsung**:
+`viewerParser.decodeDirectGraphics()` memanggil
+`directGraphicToBitmap(dg, hBase)` **saat parse**, dengan `hBase` dari `<SI>L`
+atau — karena stream BarTender tidak pernah membawa `L` — tebakan
+`max(origin Y, content extent)`.
+
+Karena origin Y Direct Graphics bersifat **bottom-up** (PRM Appendix E),
+tinggi label seharusnya menentukan posisinya. Tapi keputusan itu sudah final
+sebelum renderer berjalan, sehingga kontrol **Paper mm** di viewer membesarkan
+kanvas **tanpa menggeser satu dot pun** (extent 352 → 952 dot, ink top tetap
+`y=3`). Konten vektor juga diam, dan itu benar — koordinatnya top-down dan
+tidak bergantung tinggi label.
+
+**Rekomendasi "pindahkan penempatan DG dari parse ke render" ditulis di sini
+sebelum diuji, dan sekarang DIBANTAH oleh dua pengukuran.** Jangan
+mengerjakannya.
+
+**Bantahan 1 — model yang mendasarinya tidak konsisten.** Kalau
+`y = L − originY + minBit` benar (`L` = panjang label), menyelesaikan balik
+dari preview BarTender harus memberi `L` yang **sama** untuk dua fixture
+berstok identik. `parity-base` dan `one-box-landscape` keduanya halaman
+4×2 in landscape (812×406 dot) dengan framing preview identik (796×390),
+jadi crop 8 dot saling menghapus dan sisa selisihnya nyata:
+
+| Fixture (keduanya 4×2 in) | originY | minBit | preview ink-top | `L` tersirat |
+|---|---|---|---|---|
+| `one-box-landscape` | 518 | 1 | 90 | **607** |
+| `parity-base` (dg1) | 604 | 3 | 32 | **633** |
+
+Selisih **26 dot**: tidak ada satu `L` pun yang mereproduksi keduanya. Dan
+`L` yang manual-faithful (406, sumbu feed) akan menaruh `one-box-landscape`
+di `y = 406 − 518 + 1 = −111` — **di luar label**. Jadi model tinggi-label
+itu bukan deskripsi yang benar untuk apa yang BarTender lakukan.
+
+**Bantahan 2 — perbaikannya no-op, atau merusak.** Floor `max(L, originY)`
+harus dipertahankan (tanpanya graphic jatuh off-label). Dengan floor itu,
+setiap `L` yang masuk akal dari stok nyata — 406, 609, 812 — **di bawah**
+`originY` (518, 640, 718, 604), sehingga floor menelannya dan `y` tetap
+`= minBit`. Satu-satunya fixture yang berubah adalah `grid`, dan di sana
+`L = 812` menggeser error dari 39 → **55 dot** (memburuk).
+
+**Kesimpulan.** Paper mm memang tidak memindahkan Direct Graphics, dan
+berdasarkan bukti yang ada itu **bukan bug**: tidak ada model tinggi-label
+yang tervalidasi untuk menggantikannya. Yang benar-benar salah posisi adalah
+**lapisan halaman** (pergeseran seragam yang terdokumentasi di atas), dan itu
+memang di luar stream. Kalau nanti mau membuat Paper mm berpengaruh pada DG,
+yang dibutuhkan lebih dulu adalah **model yang lulus uji stok-sama → `L`-sama**
+— bukan memindahkan kode penempatan.
+
+**Pelajaran:** mengukur itu bukan sekadar memverifikasi kesimpulan, tapi juga
+menguji *rekomendasi*. Dua rekomendasi berturut-turut di sesi ini
+("hBase yang diperlukan = 389" dan "pindahkan ke render") terlihat masuk akal
+dan keduanya gugur saat diuji.
 
 ---
 
@@ -510,11 +654,28 @@ sebelumnya.
    kompensasinya yang dulu hilang tanpa jejak. ✅ 2026-09-27 (`setup-not-modelled`)
 5. **Tahap 3d** — PRM 066396-003: **lebih tua**, bukan lebih baru; premis tesnya
    dibatalkan. ✅ 2026-09-27
-6. **Tahap 5** — tabel setting → efek. ⬜ berikutnya
-7. **Tahap 4** — hanya setelah ada printer.
+6. **Tahap 5** — tabel setting → efek. ✅ 2026-09-27 (diukur, 5 fixture;
+   `<SI>W` = sumbu pendek − 18 dot; pergeseran halaman memukul vektor **dan**
+   raster sama rata. Koreksi 2026-09-28: model "crop 8 dot per tepi" salah —
+   kanvas preview mengecil 16 dot TANPA menggeser konten)
+7. **Guard paritas posisi absolut** — tindak lanjut Tahap 5. ✅ 2026-09-28
+   (`tests/bartenderAbsolute.test.ts`: 6 tes, ukuran konten + offset terpaku +
+   geometri kisi vs ground truth build-script)
+8. **Tahap 4** — hanya setelah ada printer.
 
 Tahap 1 dan 2 adalah satu unit kerja: memperbaiki tanpa memperkuat guard
 berarti mengundang bug yang sama terulang ketiga kalinya.
+
+**Sisa pekerjaan yang tercatat dari Tahap 5** (bukan bagian Tahap 4, bisa
+dikerjakan tanpa printer):
+
+| Item | Sifat |
+|---|---|
+| ~~Penempatan DG dipindah dari parse ke render~~ | **DIBANTAH 2026-09-27** — tidak ada model tinggi-label yang lulus uji stok-sama → `L`-sama, dan dengan floor yang ada perbaikannya no-op atau merusak. Jangan dikerjakan |
+| Mekanisme `<SI>W` = sumbu pendek − 18 dot | belum dijelaskan; **jangan** dimodelkan sebelum sebabnya ditemukan |
+| Selisih posisi absolut kita vs BarTender (dy 29 / 89) | belum dijelaskan; **tidak seragam**, jadi bukan satu crop maupun satu pergeseran. Dipaku sebagai baseline regresi oleh `bartenderAbsolute.test.ts` |
+| Kanvas preview 16 dot lebih kecil, konten tidak bergeser | viewer menggambar sampai tepi; perlu keputusan apakah ingin menawarkan tampilan area-tercetak |
+| ~~Guard paritas berbasis posisi absolut~~ | ✅ **SELESAI 2026-09-28** — `tests/bartenderAbsolute.test.ts` (6 tes). Bukti ia menutup celah nyata: dengan pergeseran seragam (4,6) disuntikkan, 18 tes paritas BarTender yang ada **tetap hijau**; guard ini gagal 5 dari 6 |
 
 **Pola yang muncul tiga kali sekarang** (772 tes vs urutan `I<n>`/`B<n>`; 605 vs
 resize canvas; dan Tahap 3a ini): yang tidak pernah tertangkap suite adalah

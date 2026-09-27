@@ -183,6 +183,45 @@ wajib, jadi tidak ada yang berubah dan preview tetap senyap. Tiga sampel yang
 di-ship memakai bentuk telanjang itu (kemungkinan salah tulis; contoh Intermec
 yang asli berbunyi `<SI>h0,0;`), dan tes menguncinya tetap senyap.
 
+### Tahap 5 selesai 2026-09-27 — tabel setting → efek, diukur bukan diasumsikan
+
+Tujuan proyek ini ("preview ≡ cetak") bergantung pada setting BarTender yang
+**tidak hidup di dalam stream IPL**. Tahap 5 memetakan tiap setting ke efek
+terukurnya; tabelnya di
+[IMPLEMENTATION-BREAKDOWN-2026-09-26.md](IMPLEMENTATION-BREAKDOWN-2026-09-26.md)
+("Tabel yang diminta"). Angka diukur dari lima fixture yang halaman aslinya
+diketahui dari `tools/bartender/BuildParityLabels.cs`:
+
+```
+kanvas preview BarTender = halaman − 16 dot per dimensi  (konten TIDAK bergeser)
+<SI>W                    = sumbu pendek − 18 dot          (mekanisme BELUM dijelaskan)
+```
+
+> **Koreksi 2026-09-28.** Entri ini semula menulis *"memotong 8 dot per tepi"*.
+> Itu **salah**: crop menyiratkan pergeseran, dan ground truth membuktikan tidak
+> ada pergeseran (objek di halaman x=37 muncul di preview x=37, bukan 29).
+> Yang benar: kanvas mengecil 16 dot, kontennya tetap. Delapan dot itu ukuran
+> beberapa efek nyata di sini, jadi model yang keliru sempat menutupi selisih
+> asli — lihat breakdown.
+
+Yang **tidak** dikerjakan, dan itu keputusan: 18 dot itu tidak dimodelkan karena
+sebabnya belum ketemu. Menyelesaikan "tinggi label yang diperlukan" dari
+pergeseran yang terukur menghasilkan angka rapi (389 vs 390) dan **menyesatkan**
+— pengukuran pita-per-pita menunjukkan vektor dan raster bergeser **sama
+persis**, jadi pergeseran itu milik lapisan halaman, bukan cacat penempatan DG.
+Sisa pekerjaan tercatat di breakdown; tidak satu pun memblokir Fase 5.
+
+**Tindak lanjut 2026-09-28 — guard posisi absolut.** Sisa pekerjaan Tahap 5
+yang paling berharga sudah dikerjakan: `tests/bartenderAbsolute.test.ts`.
+Alasannya konkret dan sudah dibuktikan, bukan teoretis — dengan pergeseran
+seragam (4,6) disuntikkan ke renderer, **18 tes** paritas BarTender yang ada
+(`bartenderSweep`, `bartenderGeometry`, `bartenderAuto`, `bartenderPageTurn`)
+**tetap hijau**, karena semuanya menyelaraskan origin tinta lebih dulu. Guard
+baru gagal 5 dari 6 pada injeksi yang sama. Isinya: ukuran konten vs preview
+BarTender, offset halaman terpaku sebagai baseline regresi, dan geometri kisi
+(pitch + ukuran kotak) vs ground truth build-script yang **independen dari
+renderer BarTender**.
+
 ## DPL (Datamax) — DITUNDA, menunggu sumber (2026-09-26)
 DPL adalah satu-satunya bahasa dari daftar rencana induk yang **tidak dibangun**,
 dan alasannya bukan tingkat kesulitan melainkan tidak adanya bahan:
