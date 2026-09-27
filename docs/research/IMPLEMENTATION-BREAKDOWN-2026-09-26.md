@@ -693,67 +693,92 @@ yang membaca harus menambahkan `pageH/2` kembali untuk memulihkan koordinat
 halaman. Itu bukan pilihan desain kita — itu bagian dari cara nilai itu
 dikodekan.
 
-**Asal 424: TERJAWAB SEBAGIAN 2026-09-28 — ia milik DRIVER, bukan halaman;
-tetapi rumusnya belum diturunkan.**
+**Asal 424: TERPECAHKAN PENUH 2026-09-28 — ia setengah lebar area cetak driver,
+diukur dalam kerangka printable.**
 
-Diuji dengan memasang printer kedua dari driver store yang sama
-(`Intermec PC23d (203 dpi) - IPL`) dan mencetak **berkas `.btw` yang sama**
-lewat kedua driver — halaman dan objek identik, hanya `fmt.Printer` yang
-diubah:
+```
+konstanta = ceil( Stock.Printable.X [dot] / 2 )
+```
 
-| driver | `W` | `originY` |
-|---|---|---|
-| PD43 (Default.X 4,00 in) | **408** | **413** |
-| PC23d (Default.X 2,00 in) | **388** | **254** |
+| driver | `Stock.Printable.X` | /2 | `ceil` | terukur |
+|---|---|---|---|---|
+| PD43_203 | 4,09 in = 830,27 dot | 415,14 | **416** | **416** ✓ |
+| PC23d_203 | 2,13 in = 432,39 dot | 216,20 | **217** | **217** ✓ |
 
-Satu dokumen, dua driver, dua nilai berbeda. Karena halaman dan objeknya
-identik, **konstanta penempatan (dan `W`) ditentukan driver** — itu yang
-terjawab. Angka 424 milik **driver PD43** secara spesifik.
+**Dua printer, satu rumus, keduanya cocok** — jadi ini bukan kecocokan satu
+sampel seperti `DefaultX/2+18` dulu, yang gugur justru di printer kedua.
 
-**Yang GUGUR lewat pengukuran ini** (semua hipotesis numerik yang masuk akal):
+**Kenapa saya melihat 424 dan bukan 416: kerangka ukur, bukan angka berbeda.**
+
+```
+printH = pageH − 16            (inset preview 2×8 dot)
+416 = C + printH/2 = C + (pageH−16)/2 = C + pageH/2 − 8
+424 = C + pageH/2
+=>  424 − 416 = 8              (persis setengah inset)
+```
+
+Jadi 424 dan 416 **besaran yang sama** di dua kerangka: 424 dalam koordinat
+halaman, 416 dalam koordinat printable. Enam fixture PD43 memberi 416,0
+(dan 415,5 pada satu fixture yang `printH`-nya ganjil — pembulatan setengah
+dot), dengan sebaran **0,5 dot** — jauh lebih rapat daripada 424 yang tersebar.
+
+**Verifikasi akhir: 7/7 dalam 1 dot** dengan
+`y_top = (originY + pageH/2) − maxBit − 424`.
+
+**Catatan tentang angka yang di-`ceil`.** `415,135` → `416` dan `216,195` → `217`
+keduanya pembulatan **ke atas**; pembulatan ke bawah akan memberi 415 dan 216,
+yang meleset dari pengukuran. Satu sampel tambahan akan menguatkan ini, tapi ia
+konsisten di dua model printer berbeda, yang jauh lebih kuat daripada kecocokan
+satu printer.
+
+**Yang GUGUR sebelum ini** (semua diuji, bukan diargumenkan):
 
 | Hipotesis | Kenapa gugur |
 |---|---|
 | `424 = DefaultX / 2 + 18` | cocok sempurna di PD43 (812/2+18 = 424), tapi PC23d tidak memberi 221 |
-| `424` dari `Stock.Printable.X` | selisih Printable 199 dot vs terukur 159 |
+| `424` turunan `Default.X` | bukan lebar stok default; yang benar `Printable.X` |
 | margin ikut masuk rumus `W` | `edges` (margin 0,05 in) tetap `609 − 18 = 591`, persis rumus lama |
 | `424` konstanta dot universal | `originY` beda 159 dot untuk dokumen yang sama |
 
-**Yang BELUM terjawab: rumus yang menurunkan konstanta itu dari parameter
-model.** Saya tidak menemukannya, dan sengaja tidak memilih kandidat yang
-tersisa — tiga kali di proyek ini kandidat yang "rapi" ternyata salah.
+Kuncinya **bukan** menemukan angka baru, melainkan **mengganti kerangka ukur**:
+selama tinggi halaman diambil dari halaman, konstantanya 424 dan tersebar;
+begitu diambil dari **area cetak** (`TemplateSize` / preview), konstantanya
+416 dan sebarannya tinggal 0,5 dot — dan 416 barulah yang punya bentuk tertutup.
+Petunjuk yang mengarah ke sana: `424 − 416 = 8` tepat setengah inset preview,
+jadi keduanya memang besaran yang sama.
 
 **Yang tetap berdiri dan penting:**
 
 - Rumus `W` ter-commit **tetap valid** untuk semua fixture repo: diuji ulang
   **6/6** (`grid`, `one-box`, `one-box-landscape`, `landscape`, `parity-base`,
-  `edges`) — termasuk `edges` yang bermargin 0,05 in, yang membatalkan dugaan
-  bahwa margin masuk rumus.
-- Model penempatan DG PD43 tetap terverifikasi **10/10 dalam 1 dot**; yang
-  ditambahkan di sini hanya keterangan bahwa 424 adalah **milik driver**.
+  `edges`) — termasuk `edges` yang bermargin 0,05 in.
+- Model penempatan DG PD43 tetap terverifikasi **7/7 dalam 1 dot** setelah
+  konstanta diganti `ceil(Printable.X/2)`.
 
-**Konsekuensi praktis.** Karena konstanta itu per-driver, **jangan**
-mengeraskannya ke kode. Untuk PD43 nilainya 424 dan modelnya tervalidasi;
-untuk driver lain angkanya lain dan belum diukur.
+**Konsekuensi praktis.** Konstanta itu **per-driver** dan sekarang **bisa
+dihitung**, bukan ditebak: baca `Stock.Printable.X` dari model di `Model.d`,
+bagi dua, bulatkan ke atas. Untuk PD43 memberi 416 (≡ 424 dalam koordinat
+halaman); **jangan hardcode 424**, hitung dari model.
 
-**Catatan metode — eksperimen ini butuh tiga perbaikan sebelum satu
-perbandingan pun sah, dan dua di antaranya kesalahan saya:**
+**Catatan metode — tiga perbaikan sebelum satu perbandingan pun sah, dua di
+antaranya kesalahan saya:**
 
 1. Halaman 2,5 in yang saya minta **ditolak** PC23d (`Stock.Maximum.X = 2,36 in`),
    dan BarTender diam-diam memakai stok lain (53,5 × 40,8 mm) — terlihat hanya
-   dari `TemplateSize`, bukan dari error. Percobaan pertama mengukur halaman
-   yang salah.
+   dari `TemplateSize`, bukan dari error.
 2. Stream PC23d memakai **byte kontrol mentah** (0x02/0x03/0x1b), bukan notasi
    teks `<STX>` seperti PD43; parser pertama saya melihat nol frame.
 3. Perbandingan pertama saya **mencampur tiga variabel** (halaman, objek, dan
-   driver sekaligus berubah), lalu saya menuliskan tabelnya dengan angka
-   "sumbu feed" yang salah. Perbandingan itu dibuang; yang dipakai di atas
-   adalah yang benar-benar terkendali.
+   driver sekaligus berubah), lalu tabelnya saya tulis dengan angka yang salah.
+   Dibuang; yang dipakai di atas hanya yang benar-benar terkendali.
 
 **Pelajaran.** "Cocok sempurna di satu printer" adalah sampel berukuran satu —
-dan printer pembandingnya **sudah ada di driver store sepanjang waktu**,
-lengkap dengan `Stock.Default.X = 2,00 in` di `Model.d` yang saya baca
-berkali-kali tanpa menyadari bahwa itu uji yang menunggu.
+printer pembandingnya **sudah ada di driver store sepanjang waktu**, lengkap
+dengan `Stock.Printable.X` di `Model.d` yang saya baca berkali-kali tanpa
+menyadari bahwa itu uji yang menunggu. Dan pelajaran keduanya: ketika sebuah
+konstanta tetap tidak berbentuk setelah beberapa hipotesis, curigai **kerangka
+ukurannya**, bukan angkanya — di sini mengganti kerangka membuat rumusnya
+muncul sendiri.
 
 **Catatan metode — dua kali salah sebelum benar, dan keduanya ketangkap oleh
 pengukuran sendiri:**

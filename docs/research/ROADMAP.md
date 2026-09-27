@@ -260,28 +260,30 @@ supaya previewnya tidak terputar), plus tiga fixture dibaca dari frame terputar
 sebagai orientasi pembanding. Prediksi `C = 18` di tinggi 812 dikonfirmasi
 sebelum diukur.
 
-**Sisa satu besaran: 424 — terjawab sebagian 2026-09-28.** Printer kedua dari
-driver store yang sama (**PC23d**, `Stock.Default.X` separuh PD43) dipasang,
-lalu **berkas `.btw` yang sama** dicetak lewat kedua driver — halaman dan objek
-identik, hanya `fmt.Printer` yang berubah:
+**Sisa satu besaran: 424 — TERPECAHKAN PENUH 2026-09-28.** Konstanta itu
+**setengah lebar area cetak driver**:
 
-| driver | `W` | `originY` |
-|---|---|---|
-| PD43 (Default.X 4,00 in) | 408 | 413 |
-| PC23d (Default.X 2,00 in) | 388 | 254 |
+```
+konstanta = ceil( Stock.Printable.X [dot] / 2 )
+```
 
-Satu dokumen, dua driver, dua nilai → **konstanta itu milik DRIVER**, bukan
-halaman. Angka 424 spesifik driver PD43.
+| driver | `Stock.Printable.X` | /2 | `ceil` | terukur |
+|---|---|---|---|---|
+| PD43_203 | 4,09 in = 830,27 dot | 415,14 | **416** | **416** ✓ |
+| PC23d_203 | 2,13 in = 432,39 dot | 216,20 | **217** | **217** ✓ |
 
-Yang **gugur** lewat pengukuran: `DefaultX/2+18` (PC23d tidak memberi 221),
-turunan dari `Stock.Printable.X` (199 vs 159 dot), margin ikut masuk rumus `W`
-(`edges` margin 0,05 in tetap `609−18`), dan "424 konstanta dot universal".
+**Dua printer, satu rumus, keduanya cocok** — bukan kecocokan satu sampel.
 
-Yang **belum**: rumus yang menurunkan angka itu dari parameter model. Tidak
-dipilih kandidat yang tersisa — tiga kali di proyek ini kandidat yang "rapi"
-ternyata salah. **Jangan hardcode**; baca per model kalau printer lain perlu
-didukung. Rumus `W` ter-commit tetap valid (diuji ulang 6/6 termasuk `edges`),
-dan model DG PD43 tetap 10/10 dalam 1 dot.
+**Kenapa yang terlihat 424, bukan 416: kerangka ukur.** `printH = pageH − 16`
+(inset preview), sehingga `424 − 416 = 8` — persis setengah inset. Keduanya
+besaran yang sama: 424 dalam koordinat halaman, 416 dalam koordinat printable.
+Begitu tinggi diambil dari **area cetak** (bukan halaman), sebaran enam fixture
+turun ke **0,5 dot** dan bentuk tertutupnya muncul.
+
+Verifikasi akhir **7/7 dalam 1 dot** dengan
+`y_top = (originY + pageH/2) − maxBit − 424`; rumus `W` ter-commit tetap valid
+(diuji ulang 6/6 termasuk `edges`). **Jangan hardcode 416/424** — hitung dari
+`Stock.Printable.X` model yang bersangkutan.
 
 ## DPL (Datamax) — DITUNDA, menunggu sumber (2026-09-26)
 DPL adalah satu-satunya bahasa dari daftar rencana induk yang **tidak dibangun**,
