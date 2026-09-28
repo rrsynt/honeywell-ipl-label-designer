@@ -351,3 +351,107 @@ describe('c63/c65 condensed cuts use measured Univers advances', () => {
         }
     });
 });
+
+// c52..c56 are the resident CJK bitmap faces. Unlike c23/c24 — whose cell width
+// is an admitted assumption — these ids NAME their cell, so the metrics are
+// published values rather than inference: "Katakana 12 x 16 bitmap" states the
+// 12 and the 16. The driver's c52.pfm..c56.pfm agree (bytes 0x1b/0x16 read
+// 12/16, 16/24, 24/36, 16/16, 24/24), so the two sources corroborate.
+//
+// These pin those cells, because they are what every layout calculation for a
+// CJK field is built from.
+describe('c52..c56 CJK bitmap cells (PRM 2.70 p.206, stated in the id names)', () => {
+    const CELLS: Record<string, [number, number]> = {
+        '52': [12, 16],   // Katakana 12 x 16
+        '53': [16, 24],   // Katakana 16 x 24
+        '54': [24, 36],   // Katakana 24 x 36
+        '55': [16, 16],   // Kanji 16 x 16
+        '56': [24, 24],   // Kanji 24 x 24
+    };
+
+    it('each id carries the cell its own name states', () => {
+        for (const [id, [w, h]] of Object.entries(CELLS)) {
+            const def = FONT_MAP[id];
+            expect(def, `c${id} missing from FONT_MAP`).toBeDefined();
+            expect(def.type, `c${id} is a bitmap face`).toBe('bitmap');
+            expect(def.baseWidth, `c${id} width`).toBe(w);
+            expect(def.baseHeight, `c${id} height`).toBe(h);
+            // The id's own name is the source, so they must not drift apart.
+            expect(def.name, `c${id} name must state its cell`).toContain(`${w} x ${h}`);
+        }
+    });
+
+    it('they are bitmap, so `h` magnifies instead of setting a point size', () => {
+        // The exact defect c23/c24 had: typed as outline, `h` is read as a point
+        // size, so h8 painted a 3pt field rather than magnifying 8x.
+        for (const id of Object.keys(CELLS)) {
+            const label = parseViewerIPL([
+                stx('<ESC>P'), stx('E1;F1'),
+                stx(`H0;o10,10;c${id};h8;w8;d3,カナ`), stx('R'), stx('<ESC>E1'),
+            ].join(''));
+            const el = textEl(label);
+            expect(el.pointSize, `c${id} must not read h8 as a point size`).toBeUndefined();
+            expect(el.hMag, `c${id} h8 magnifies`).toBe(8);
+            expect(OUTLINE_FONTS.has(id), `c${id} is not an outline id`).toBe(false);
+        }
+    });
+
+    it('a three-character field meters 3 cells at h1/w1', () => {
+        // advance = width + gap, and the last gap is dropped — the same rule the
+        // 86XX cells use, pinned there by the manual's 79-dot c0 example
+        // (10 chars of c0 = 10 * 8 - 1 = 79). "カナカ" is exactly three.
+        const THREE = 'カナカ';
+        expect([...THREE], 'the fixture must be 3 characters').toHaveLength(3);
+        for (const [id, [w, h]] of Object.entries(CELLS)) {
+            const label = parseViewerIPL([
+                stx('<ESC>P'), stx('E1;F1'),
+                stx(`H0;o10,10;c${id};h1;w1;d3,${THREE}`), stx('R'), stx('<ESC>E1'),
+            ].join(''));
+            const size = estimateElementSize(textEl(label), 203);
+            const gap = FONT_MAP[id].gapWidth ?? 2;
+            expect(size.lengthDots, `c${id} length`).toBe(3 * (w + gap) - gap);
+            expect(size.crossDots, `c${id} height`).toBe(h);
+        }
+    });
+
+    it('they no longer raise unknown-font', () => {
+        for (const id of Object.keys(CELLS)) {
+            const label = parseViewerIPL([
+                stx('<ESC>P'), stx('E1;F1'),
+                stx(`H0;o10,10;c${id};k12;d3,カナ`), stx('R'), stx('<ESC>E1'),
+            ].join(''));
+            expect(label.issues.filter(i => i.code === 'unknown-font'),
+                `c${id} should be known now`).toEqual([]);
+        }
+    });
+});
+
+// c57..c60 (Kanji / Korean / Traditional Chinese / Simplified Chinese) stay OUT
+// on purpose, exactly as c27 does. PRM 2.70 p.206 jumps from 56 straight to 61,
+// and none of the four manuals in docs/manuals/ lists 57-60. The Seagull driver
+// names them, but alongside their own font GROUP FILES and Honeywell part
+// numbers — the signature of a downloadable language option, not a resident
+// face — and the manual's per-printer table gives PD43-era printers the range
+// "0 to 28, 30 to 41", with the 50s only "with the Kanji option".
+//
+// This test exists so a future session does not "complete" the range by
+// inventing metrics for fonts the printer may not have. Warning is the honest
+// outcome; a wrong cell would be silently wrong printing.
+describe('c57..c60 stay unknown — not in the authoritative font table', () => {
+    it('they are absent from FONT_MAP', () => {
+        for (const id of ['57', '58', '59', '60']) {
+            expect(FONT_MAP[id], `c${id} must not be added without a source`).toBeUndefined();
+        }
+    });
+
+    it('a field using one warns rather than rendering silently', () => {
+        for (const id of ['57', '58', '59', '60']) {
+            const label = parseViewerIPL([
+                stx('<ESC>P'), stx('E1;F1'),
+                stx(`H0;o10,10;c${id};k12;d3,ABC`), stx('R'), stx('<ESC>E1'),
+            ].join(''));
+            const unknown = label.issues.filter(i => i.code === 'unknown-font');
+            expect(unknown, `c${id} must warn, not pass silently`).toHaveLength(1);
+        }
+    });
+});

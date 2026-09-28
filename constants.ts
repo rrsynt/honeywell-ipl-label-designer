@@ -256,6 +256,39 @@ export const FONT_MAP: { [key: string]: FontDef } = {
     // against the full em fontMetrics charges. tests/cjkWidth.test.ts pins it.
     '50': { name: 'Kanji Outline (TBMinPro)', type: 'outline', family: 'sans-serif' },
     '51': { name: 'Kanji monospace outline', type: 'outline', family: 'monospace' },
+    // c52..c56 are the resident CJK BITMAP faces (face TBMinPro-Light). The
+    // manual publishes their cells in the id's own name — "Katakana 12 x 16
+    // bitmap", "Kanji 24 x 24 bitmap" — which is a stronger statement than
+    // anything derivable, so these are the published numbers and no inference
+    // was needed. The driver's c52.pfm..c56.pfm agree: bytes 0x1b/0x16 read
+    // 12/16, 16/24, 24/36, 16/16, 24/24 for the five ids, matching the names
+    // exactly. (Those two bytes do NOT carry the cell for the 86XX ids — there
+    // they read 8/11, 16/22, 12/17, 6/9 against published 7x9, 7x11, 10x14,
+    // 5x7 — so the PFM template differs and the manual is the authority here.)
+    //
+    // The intercharacter gap is NOT published for these ids anywhere in the
+    // manuals, and no sample stream uses them. 2 dots is the convention for
+    // every resident bitmap cell EXCEPT c0 (which is 1), so these take 2 and
+    // the assumption is stated rather than hidden. Advance = width + gap.
+    '52': { name: 'Katakana 12 x 16 bitmap', type: 'bitmap', baseWidth: 12, baseHeight: 16, gapWidth: 2 },
+    '53': { name: 'Katakana 16 x 24 bitmap', type: 'bitmap', baseWidth: 16, baseHeight: 24, gapWidth: 2 },
+    '54': { name: 'Katakana 24 x 36 bitmap', type: 'bitmap', baseWidth: 24, baseHeight: 36, gapWidth: 2 },
+    '55': { name: 'Kanji 16 x 16 bitmap', type: 'bitmap', baseWidth: 16, baseHeight: 16, gapWidth: 2 },
+    '56': { name: 'Kanji 24 x 24 bitmap', type: 'bitmap', baseWidth: 24, baseHeight: 24, gapWidth: 2 },
+    // c57..c60 (Kanji / Korean / Traditional Chinese / Simplified Chinese) are
+    // DELIBERATELY absent, for the same reason c27 is: they are not in the
+    // authoritative table. PRM 2.70 p.206 jumps straight from 56 to 61, and
+    // none of the four manuals in docs/manuals/ lists 57-60 at all. The
+    // Seagull driver does name them in ~FontDescriptions.d — Type=Scalable,
+    // each with its own font GROUP FILE (Kanji.pfg, Korean.pfg, ChineseGB.pfg,
+    // ChineseBig5.pfg) and a Honeywell part number — which is the signature of
+    // a downloadable language OPTION, not a resident face. The manual's own
+    // per-printer table agrees: the 4X30/PD43 range is "0 to 28, 30 to 41",
+    // with the 50s available only "with the Kanji option".
+    //
+    // Writing cells for them would mean inventing metrics for fonts the printer
+    // may not have. A stream that uses them gets the unknown-font warning,
+    // which is the honest outcome.
     '61': { name: 'Swiss 721 (Univers)', type: 'outline', family: 'sans-serif' },
     '62': { name: 'Swiss 721 bold', type: 'outline', family: 'sans-serif' },
     '63': { name: 'Swiss 721 bold condensed', type: 'outline', family: 'univers-condensed' },
