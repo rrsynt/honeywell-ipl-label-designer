@@ -51,6 +51,29 @@ particular does not produce the current binaries.
 **`ws5-print.out`** — the AccessViolationException stack trace, kept because it
 documents the VARIANT-marshalling failure described above.
 
+**`bfp-fontnames.cs`** — asked whether BarTender can be an oracle for the
+metrics of a *specific printer-resident font* (IPL c23/c24/c69), the way it is
+for geometry. **It cannot, and this proves it.**
+
+The probe sets `FontName` on a text object and reads it back. Two things it
+settled, both useful:
+
+- The write is real. `FontName` reads back as "Arial" whatever you set, but
+  that read-back is a lie — dump the `.btw` itself and it stores "OCR-A" /
+  "OCR-B". Do not trust `obj.FontName`; read the file.
+- The write does not reach the printer stream. Four formats (OCR-A, OCR-B,
+  Letter Gothic, Arial control) print to **byte-identical** IPL (one md5 for
+  all four), and export **byte-identical** preview PNGs. The face never
+  influences output on this path.
+
+So this path cannot resolve an unknown font metric, and any future question of
+that shape should not come here. What did answer it: the driver's own tables
+(`ss#ipl.ddz` → `FontGroup.d`, where c23/c24 sit in `bitmap_ocr_203`), which is
+also where the c67 and `<SI>W` constants came from.
+
+Two traps for anyone extending it: objects added before `Formats.Open` do not
+persist (`objects=0`), and writes only work on an already-opened document.
+
 ## Naming
 
 `ws5-*` came from "Workstream 5", the plan item these were written for.

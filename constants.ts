@@ -150,8 +150,22 @@ export const FONT_MAP: { [key: string]: FontDef } = {
     '20': { name: '8 point monospace', type: 'outline', family: 'monospace', defaultPointSize: 8 },
     '21': { name: '12 point monospace', type: 'outline', family: 'monospace', defaultPointSize: 12 },
     '22': { name: '20 point monospace', type: 'outline', family: 'monospace', defaultPointSize: 20 },
-    '23': { name: 'OCR A', type: 'outline', family: 'monospace' },
-    '24': { name: 'OCR B size 2', type: 'outline', family: 'monospace' },
+    // c23/c24 are BITMAP faces, not outline: the Seagull driver's own table
+    // (FontGroup.d, group `bitmap_ocr_203`) and PRM270's "Bitmap fonts
+    // recognized by optical character recognition" both say so. Typing them
+    // as outline routed them through the outline branch, where `h>4` is read
+    // as a point size — so `h8` painted a 3pt field instead of magnifying 8x
+    // (~8x too small, and silent). As bitmap, h/w magnify like every other
+    // bitmap id.
+    //
+    // The CELL IS UNKNOWN. No manual publishes an OCR cell size, and the
+    // driver's c23_203.pfm does not decode to one (its header carries no value
+    // matching the known c0/c1/c2/c7 cells at any offset). These are the
+    // c0-shaped values that were already being applied implicitly through
+    // FONT_FALLBACK, stated here so the assumption is visible and so the
+    // advance (7+2 = 9 dots at w1) does not move. Do NOT read them as measured.
+    '23': { name: 'OCR A', type: 'bitmap', baseWidth: 7, baseHeight: 9, gapWidth: 2 },
+    '24': { name: 'OCR B size 2', type: 'bitmap', baseWidth: 7, baseHeight: 9, gapWidth: 2 },
     '25': { name: 'Swiss Mono 721', type: 'outline', family: 'monospace' },
     '26': { name: 'Swiss Mono 721 bold', type: 'outline', family: 'monospace' },
     '28': { name: 'Dutch Roman 801', type: 'outline', family: 'serif' },

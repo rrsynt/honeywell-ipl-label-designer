@@ -451,14 +451,65 @@ satu piksel pun**. Sebelum mempercayai perbandingan `ctx.font` apa pun,
 tidak resolve. Di repo ini pendaftarannya `GlobalFonts.registerFromPath` seperti
 di `tests/golden/fonts.ts`.
 
-**Yang BELUM diukur, dan sengaja tidak diklaim:** 23/24 (OCR A/B), 69 (Letter
-Gothic), dan 50/51 (TBMinPro) **bukan** Andale Mono — dan di `FONT_MAP`
-ketiganya memang `type: 'outline'` dengan `family: 'monospace'`, jadi **ikut
-memakai `MONO_PER_MILLE = 600`** (bukan jalur bitmap). Advance OCR A/B dan
-Letter Gothic adalah pertanyaan terbuka yang sama seperti c67 — dan justru
-**lebih berisiko terlihat**, karena ketiganya masih dipetakan ke 600 tanpa
-dasar. Jadi hasil di atas menutup id **Andale** (12 dari 18 id monospace),
+**Yang BELUM diukur, dan sengaja tidak diklaim:** 69 (Letter Gothic) dan 50/51
+(TBMinPro) **bukan** Andale Mono — keduanya `type: 'outline'` tanpa dasar
+pengukuran. Jadi hasil di atas menutup id **Andale** (12 dari 18 id monospace),
 bukan seluruh keluarga.
+
+**23/24 ternyata bukan masalah metrik sama sekali — lihat bagian di bawah.**
+
+### 23/24 (OCR A/B) DIPERBAIKI 2026-09-28 — mereka BITMAP, dan bug `h` hilang
+
+Pertanyaannya salah sejak awal. 23/24 **bukan** font outline, jadi
+memperdebatkan metrik outline-nya tidak ada gunanya. Dua sumber independen:
+
+| sumber | bukti |
+|---|---|
+| tabel driver Seagull `FontGroup.d` | grup **`[bitmap_ocr_203]`** berisi `c23_203.pfm` + `c24_203.pfm` |
+| PRM 2.70 p.45–46 | daftar "internal bitmap fonts" memuat *"Bitmap fonts recognized by optical character recognition (OCR programs)"* secara terpisah |
+
+Karena `FONT_MAP` menandainya `outline`, keduanya dirutekan ke cabang outline,
+dan di sana **`h > 4` dibaca sebagai POINT SIZE**, bukan magnifikasi:
+
+```
+h8  ->  pointSize 3, hMag 1  ->  kotak 19 x  9 dot   (≈8x terlalu kecil, DIAM)
+```
+
+Manual menyatakan aturan yang benar dengan angka, PRM270 p.54: *"if you
+increase the height to 2 (h2) ... the field height doubles ... 79 dots long by
+18 dots high. If you change the height magnification to h3, the field height
+triples, and the field prints 79 dots by 27 dots."* — jadi **`h` adalah
+pengali**, dan jalur bitmap kita sudah benar untuk c0/c2/c7. Yang salah hanya
+**tipe 23/24**.
+
+Sesudah diperbaiki, terukur di browser:
+
+```
+c23 h2:  kotak 18 dot, tinta 10 px     c23 h8:  kotak 72 dot, tinta 43 px
+```
+
+**Ukuran sel tetap TIDAK diketahui dan dicatat sebagai asumsi.** Tidak ada
+manual yang menerbitkan ukuran sel OCR, dan `c23_203.pfm` tidak bisa
+didekode jadi salah satunya (tidak ada offset yang cocok dengan sel c0/c1/c2/c7
+yang diketahui). Nilai `7x9 gap 2` yang dipakai adalah bentuk-c0 yang **sudah
+berlaku sebelumnya lewat `FONT_FALLBACK`** — jadi advance (7+2 = 9 dot pada w1)
+**tidak bergeser sama sekali**; yang diperbaiki murni perilaku magnifikasi.
+Komplain di `constants.ts` menandainya jangan dibaca sebagai hasil ukur.
+
+**Jalur yang GUGUR untuk mencari metriknya** (jangan diulang): BarTender
+automation sebagai oracle — `FontName` memang bisa di-set dan **terbukti
+tersimpan di `.btw`**, tapi keempat output cetaknya (OCR-A, OCR-B, Letter
+Gothic, Arial) **byte-identik md5**, dan keempat preview PNG-nya juga
+byte-identik; jalur cetak itu tidak meneruskan font sama sekali. Face
+`OCR-A-Seagull`/`OCR-B-Seagull` di sistem Windows **tidak boleh
+didistribusikan** (pola sama dengan `CENSCBK.TTF`), `OCRAEXT.TTF` ternyata
+monospace datar 604 (bukan OCR asli), dan CTAN hanya menyediakan METAFONT yang
+butuh compiler tidak ada di mesin ini.
+
+**c69 (Letter Gothic) TIDAK disentuh.** Ia memang outline, dan ia hanya muncul
+di grup `outline_idp_*` driver — yang menurut `Font.d` **tidak dipakai model
+PD43/PM43/PC43 mana pun** (seksi di file itu hanya 3240/3400/4x30/86xx), jadi
+tidak ada metrik yang bisa dipercaya. Tes mengunci bahwa 69 **tetap** outline.
 
 **Cara mengulang:** `hmtx` + `unitsPerEm` dari `head` memberi advance mentah
 tanpa perlu rasterisasi sama sekali.
@@ -540,11 +591,12 @@ pertama adalah face komersial/bundel printer yang tidak ada di mesin ini;
 OCR A/B adalah face bitmap printer yang tidak diedarkan sebagai TrueType, jadi
 angkanya tidak bisa diambil dengan metode yang sama.
 
-**Prioritas yang tersisa, bila mau dilanjutkan:** 23/24 dan 69 paling berisiko
-karena **masih dipetakan ke 600 tanpa bukti** — sekarang justru mereka satu-satunya
-yang belum diukur sama sekali, karena Andale dan Century Schoolbook sudah
-ditutup. Kalau pola TeX Gyre berlaku lagi (lihat Schola untuk c67), keduanya
-layak dicari pengganti bebasnya lebih dulu sebelum menyimpulkan "butuh printer".
+**Prioritas yang tersisa, bila mau dilanjutkan:** **69 (Letter Gothic)** —
+masih dipetakan ke 600 tanpa bukti, dan ia satu-satunya yang belum tersentuh
+sama sekali. Kalau pola TeX Gyre berlaku lagi (lihat Schola untuk c67), layak
+dicari pengganti bebasnya lebih dulu sebelum menyimpulkan "butuh printer".
+**23/24 sudah selesai** (bukan masalah metrik — tipenya salah, lihat bagian di
+atas).
 
 **Pertanyaan (b) tetap terbuka**, tapi target pencariannya berubah: halaman
 charset K10 menunjuk ke **printer user manual** ("For international character

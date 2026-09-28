@@ -5,13 +5,22 @@ import './golden/setup';
 import { describe, it, expect } from 'vitest';
 import { FONT_MAP, FONT_FAMILIES, fontStack } from '../constants';
 import { parseViewerIPL, OUTLINE_FONTS } from '../services/ipl/viewerParser';
+import { estimateElementSize } from '../services/ipl/renderer';
 import type { TextElement } from '../services/ipl/types';
 
 const stx = (f: string) => `<STX>${f}<ETX>`;
 
-/** Every id the 2.70 manual lists as an outline font. */
+/** Every id the 2.70 manual lists as an outline font.
+ *
+ *  c23/c24 are deliberately NOT here. The PRM table on p.206 is a single
+ *  mixed list of resident fonts; the manual's own prose groups "Bitmap fonts
+ *  recognized by optical character recognition" separately, and the Seagull
+ *  driver agrees — its FontGroup.d places c23/c24 in `bitmap_ocr_203`. Listing
+ *  them as outline is what caused them to be routed through the outline
+ *  branch, where `h` is a point size instead of a magnification (see the
+ *  bitmapMagnification test below and the note in constants.ts). */
 const DOCUMENTED_OUTLINE_IDS = [
-    '20', '21', '22', '23', '24', '25', '26', '28',
+    '20', '21', '22', '25', '26', '28',
     '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41',
     '50', '51',
     '61', '62', '63', '64', '65', '66', '67', '68', '69', '70',
@@ -95,6 +104,68 @@ describe('nominal point sizes for the fixed-size families', () => {
             stx('R'), stx('<ESC>E1'),
         ].join('')));
         expect(el.pointSize).toBeUndefined();
+    });
+});
+
+// `h` is a MAGNIFICATION for bitmap faces, and the manual states the rule with
+// numbers: PRM270 p.54 — "if you increase the height to 2 (h2) ... the field
+// height doubles ... 79 dots long by 18 dots high. If you change the height
+// magnification to h3, the field height triples, and the field prints 79 dots
+// by 27 dots." c23/c24 were typed as outline, and the outline branch reads
+// `h>4` as a POINT SIZE, so `h8` produced a 3pt field — roughly 8x too small,
+// with no warning. These pin the magnification contract for the OCR ids and
+// for the bitmap ids generally.
+describe('bitmap height magnification (c23/c24 are bitmap, not outline)', () => {
+    const estOf = (font: string, extra: string) => {
+        const label = parseViewerIPL([
+            stx('<ESC>P'), stx('<SI>W900<ETX>'), stx('<SI>L400<ETX>'), stx('E1;F1'),
+            stx(`H0;o40,60;c${font};${extra};d3,ABCD`), stx('R'), stx('<ESC>E1'),
+        ].join(''));
+        const el = textEl(label) as TextElement & { hMag: number };
+        return { el, size: estimateElementSize(el as never, 203) };
+    };
+
+    it('c23/c24 are typed bitmap', () => {
+        expect(FONT_MAP['23'].type).toBe('bitmap');
+        expect(FONT_MAP['24'].type).toBe('bitmap');
+        expect(OUTLINE_FONTS.has('23')).toBe(false);
+        expect(OUTLINE_FONTS.has('24')).toBe(false);
+    });
+
+    it('h8 magnifies 8x, it does not become a point size', () => {
+        for (const id of ['23', '24']) {
+            const { el, size } = estOf(id, 'h8');
+            // The regression: an outline route leaves hMag at 1 and invents a
+            // point size, so the height comes out ~9 dots instead of 72.
+            expect(el.hMag, `c${id} h8 should stay a magnification`).toBe(8);
+            expect(el.pointSize, `c${id} h8 must not be read as a point size`).toBeUndefined();
+            expect(size.crossDots, `c${id} h8 height`).toBe(9 * 8);
+        }
+    });
+
+    it('magnification is linear, as the manual example requires', () => {
+        // h1/h2/h3 -> 1x/2x/3x, the shape PRM270 p.54 spells out for c0.
+        for (const id of ['23', '24']) {
+            const base = estOf(id, 'h1').size.crossDots;
+            for (const m of [2, 3, 8]) {
+                expect(estOf(id, `h${m}`).size.crossDots, `c${id} h${m}`).toBe(base * m);
+            }
+        }
+    });
+
+    it('w magnifies the advance too', () => {
+        // 4 chars: width = 4 x (baseWidth + gap) x wMag - gap x wMag, i.e.
+        // 34 x wMag for a 7+2 cell. w4 is therefore exactly 4x w1.
+        const w1 = estOf('23', 'w1').size.lengthDots;
+        expect(estOf('23', 'w4').size.lengthDots).toBe(4 * w1);
+        expect(estOf('23', 'w8').size.lengthDots).toBe(8 * w1);
+    });
+
+    it('c69 stays outline — it is a scalable face, not a bitmap one', () => {
+        // The fix is specific to the OCR ids. Letter Gothic is resolved by the
+        // driver's outline group; do not sweep it into the bitmap branch.
+        expect(FONT_MAP['69'].type).toBe('outline');
+        expect(OUTLINE_FONTS.has('69')).toBe(true);
     });
 });
 
