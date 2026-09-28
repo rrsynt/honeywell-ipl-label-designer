@@ -642,8 +642,8 @@ angkanya tidak bisa diambil dengan metode yang sama.
 | 28/66 | CG Times (Bold) | serif (Times) | ✅ proxy 0,0 |
 | 67 | Century Schoolbook Roman | schoolbook | ✅ **diperbaiki** (TeX Gyre Schola, 0,0) |
 | **69** | **Letter Gothic** | monospace 600 | ⚠️ **terukur 500 → 20% terlalu lebar; diberitahukan, belum diperbaiki** |
-| **63/65** | **Univers Condensed Bold / Extra Condensed** | sans-serif biasa | ⚠️ **condensed digambar regular → terlalu lebar; diberitahukan, faktor tidak diukur** |
-| 61/62/68 | Univers (regular/bold) | sans-serif | ⬜ **tidak bisa diukur** — lihat di bawah |
+| **63/65** | **Univers Condensed Bold / Extra Condensed** | univers-condensed | ✅ **diperbaiki** — advance dari AFM Adobe asli |
+| 61/62/68 | Univers (regular/bold) | sans-serif | ⚠️ **selisih terukur ~74 per-mille (≈6,5%), belum dipakai** — lihat di bawah |
 | **50/51** | **TBMinPro-Light (Kanji)** | sans / monospace | ✅ **bug lebar CJK DIPERBAIKI** — lihat di bawah |
 
 ### 50/51 (TBMinPro / Kanji) — DIPERBAIKI 2026-09-28: lebar CJK dihitung setengah
@@ -683,7 +683,51 @@ dibuktikan dengan mematikan cabang lebarnya → 2 tes gagal. **Tidak ada golden
 yang berubah** dan Latin/aksen sama sekali tidak bergeser (c50 Latin 185 vs
 tinta 184; c61 `Café Ünïcode` 208 vs 205).
 
-### 61/62/63/65/68 (varian Univers) — buntu sumber, tapi 63/65 punya cacat ARAH 2026-09-28
+### 63/65 DIPERBAIKI 2026-09-28 — AFM Univers asli ADA, dan metriknya dipakai
+
+Catatan sebelumnya di dokumen ini menyatakan "tidak ada sumber metrik Univers".
+**Itu keliru** — sumbernya ada, hanya tidak di tempat yang saya cari sebelumnya:
+**`mal359/unixfonts`, `sgi/irix6/Type1/AFM/Univers-CondensedBold`** — AFM
+**asli dari Adobe Systems** (Copyright 1987/1991), FullName *"Univers 67
+Condensed Bold"*, CapHeight 722. Juga tersedia varian Condensed, Condensed
+Oblique, dan Condensed Bold Oblique.
+
+Yang benar-benar tidak ada adalah **face**-nya, bukan metriknya — dan itu
+perbedaan yang menentukan:
+
+| pembanding | rata-rata \|Δ\| vs Univers Cond Bold |
+|---|---|
+| Liberation Sans (**yang kita pakai**) | **74,4** per-mille |
+| Arial Narrow | 40,7 |
+| Nimbus Sans Narrow (bebas) | 40,3 |
+
+Jadi keluarga sans kita memang **salah ~74 per-mille**, dan tidak ada face
+bebas yang cukup dekat (Arial Narrow hanya Windows; Nimbus Sans Narrow 40,3).
+
+**Kenapa kali ini memakai metrik tanpa face itu AMAN — berbeda dari c69.**
+Diukur terhadap advance Univers yang asli, **0 dari 67 glyph** Liberation Sans
+bertumpuk; yang paling sempit (`a`, tinta 531 terhadap advance 556) masih sisa
+**25 unit**. Bandingkan c69: pada 500 per-mille, **25 dari 94** glyph lebih
+lebar dari advancenya sendiri. Itu sebabnya c69 tetap hanya diberitahukan
+sementara 63/65 bisa diperbaiki.
+
+**Yang diterapkan:** keluarga `'univers-condensed'` (keluarga metrik ke-5),
+tabel advance dari AFM, dipakai c63 **dan** c65. Stack-nya
+`"Arial Narrow", "Liberation Sans", …` — Arial Narrow di depan supaya host yang
+punya memakai desain condensed sungguhan; Liberation Sans sebagai cadangan yang
+diperas ke advance condensed. Peringatan `univers-condensed-width` **dihapus**
+karena cacatnya sudah hilang.
+
+**Drift yang jujur dicatat:** kotak (dari tabel) dan tinta (dari face yang
+benar-benar resolve) tidak lagi identik — di browser terukur **box 336 vs tinta
+326**, sekitar **3%**, konsisten dengan selisih Arial Narrow ↔ Univers Condensed
+yang ~4%. Ini batas yang tersisa sampai ada face Univers sungguhan.
+
+**Bukti:** 2 tes baru gagal terhadap pemetaan `sans-serif` yang lama. Di browser
+c63 kini **336 dot** (sebelumnya diperlakukan sama dengan c61 yang 350), c65
+215, tanpa peringatan.
+
+### 61/62/68 (Univers regular/bold) — masih terbuka, tapi tidak lagi buta
 
 Pemetaan dari K10 937-028-003 dikonfirmasi ulang **baris per baris** (tabelnya
 di-parse, bukan dibaca sekilas): 61 → **Univers**, 62 → **Univers Bold**,

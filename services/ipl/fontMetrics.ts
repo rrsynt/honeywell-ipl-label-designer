@@ -58,12 +58,36 @@ const SCHOOLBOOK: readonly number[] = [
     574, 556, 444, 463, 389, 611, 537, 778, 537, 537, 481, 333, 606, 333, 606,
 ];
 
+/** Univers Condensed Bold (c63) and Univers Extra Condensed (c65) — the printer's
+ *  condensed cuts. Read from Adobe's own AFM for the family
+ *  (`Univers-CondensedBold.afm`, Copyright 1987/1991 Adobe Systems, FullName
+ *  "Univers 67 Condensed Bold"), so these are measured, not fitted.
+ *
+ *  No free face is vendored for it, deliberately: Nimbus Sans Narrow matches the
+ *  family only to 40.3 per-mille, and the closest available face (Arial Narrow)
+ *  is Windows-only and is a Helvetica Narrow derivative, not Univers. So the
+ *  glyphs come from the sans stack at these advances.
+ *
+ *  That is safe HERE in a way it was not for Letter Gothic: measured against
+ *  these advances, 0 of 67 Liberation Sans glyphs overlap, the tightest (`a`,
+ *  531 ink against 556) leaving 25 units of slack. c69's 500 per-mille had 25 of
+ *  94 glyphs wider than their own advance. */
+const UNIVERS_CONDENSED: readonly number[] = [
+    222, 333, 333, 444, 444, 778, 667, 222, 278, 278, 444, 500, 222, 333, 222, 278,
+    444, 444, 444, 444, 444, 444, 444, 444, 444, 444, 222, 222, 500, 500, 500, 444,
+    795, 611, 611, 556, 611, 500, 444, 611, 611, 278, 500, 556, 444, 833, 667, 611,
+    556, 611, 556, 556, 500, 611, 556, 889, 556, 556, 500, 278, 250, 278, 500, 500,
+    222, 500, 500, 500, 500, 500, 278, 500, 500, 278, 278, 500, 278, 722, 500, 500,
+    500, 500, 333, 444, 278, 500, 444, 778, 500, 444, 389, 274, 250, 274, 500,
+];
+
 /** Fallback advance for codepoints outside printable ASCII (non-Latin text,
  *  control chars): the family's average, so widths stay plausible instead of
  *  collapsing to 0. */
 const SANS_DEFAULT = 524;
 const SERIF_DEFAULT = 478;
 const SCHOOLBOOK_DEFAULT = 558;
+const UNIVERS_CONDENSED_DEFAULT = 461;
 
 /**
  * Fase 3: a user-uploaded font. The screen renders it by its real face (the
@@ -108,6 +132,7 @@ const tableFor = (family: string | undefined): { t: readonly number[] | null; pe
     if (family === 'sans-serif') return { t: SANS, perMille: 0, dflt: SANS_DEFAULT };
     if (family === 'serif') return { t: SERIF, perMille: 0, dflt: SERIF_DEFAULT };
     if (family === 'schoolbook') return { t: SCHOOLBOOK, perMille: 0, dflt: SCHOOLBOOK_DEFAULT };
+    if (family === 'univers-condensed') return { t: UNIVERS_CONDENSED, perMille: 0, dflt: UNIVERS_CONDENSED_DEFAULT };
     // Monospace is the fallthrough, so an unknown family lands on 600. Every
     // FontFamily member must be named explicitly above: a new family that
     // reached this line would be measured as monospace, which for schoolbook

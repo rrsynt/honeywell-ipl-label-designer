@@ -280,52 +280,53 @@ describe('c69 Letter Gothic advance is announced, not silently wrong', () => {
     });
 });
 
-// c63/c65 are condensed cuts drawn at the regular sans width. The direction is
-// certain from the printer's own font table; the magnitude is NOT measured,
-// because no metric source for Univers exists on this machine and the driver's
-// .pfm files decode to noise. Announcing the direction without a number is the
-// honest form, and these pin that it stays announced and stays un-invented.
-describe('c63/c65 condensed cuts are announced, with no invented factor', () => {
+// c63/c65 are the printer's condensed cuts. They used to be drawn at the
+// regular sans width — announced, not fixed, because no metric source for
+// Univers had been found. Adobe's own AFM for the family was then located, so
+// the width is now measured and the warning is gone. These pin the fix.
+describe('c63/c65 condensed cuts use measured Univers advances', () => {
     const parseWith = (font: string) => parseViewerIPL([
         stx('<ESC>P'), stx('E1;F1'),
         stx(`H0;o10,10;c${font};k12;d3,ABC`),
         stx('R'), stx('<ESC>E1'),
     ].join(''));
 
-    it('c63 and c65 each warn, and name their face', () => {
-        for (const [id, face] of [['63', 'Condensed Bold'], ['65', 'Extra Condensed']] as const) {
-            const issues = parseWith(id).issues.filter(i => i.code === 'univers-condensed-width');
-            expect(issues, `c${id} should warn`).toHaveLength(1);
-            expect(issues[0].level).toBe('warning');
-            expect(issues[0].message).toContain(face);
+    it('both resolve to the condensed family', () => {
+        for (const id of ['63', '65']) {
+            expect(FONT_MAP[id].family, `c${id}`).toBe('univers-condensed');
+            expect(OUTLINE_FONTS.has(id)).toBe(true);
         }
     });
 
-    it('warns once per label, not once per field', () => {
-        const label = parseViewerIPL([
-            stx('<ESC>P'), stx('E1;F1'),
-            stx('H0;o10,10;c63;k12;d3,AAA'),
-            stx('H1;o10,40;c63;k12;d3,BBB'),
-            stx('H2;o10,70;c65;k12;d3,CCC'),
-            stx('R'), stx('<ESC>E1'),
-        ].join(''));
-        expect(label.elements.filter(e => e.kind === 'text')).toHaveLength(3);
-        // One per code, shared across fields — c63 and c65 are the same defect.
-        expect(label.issues.filter(i => i.code === 'univers-condensed-width')).toHaveLength(1);
+    it('they are measured NARROWER than the regular sans ids, not equal to them', () => {
+        // The defect was that c63 was metered exactly like c61/c68. If these
+        // ever match again, the condensed table has stopped being applied.
+        const size = (id: string) => {
+            const el = parseWith(id).elements.find(e => e.kind === 'text')!;
+            return estimateElementSize(el, 203).lengthDots;
+        };
+        const condensed = size('63');
+        const regular = size('61');
+        expect(condensed, 'c63 must be narrower than c61').toBeLessThan(regular);
+        // "ABC" in the AFM: 611+611+556 = 1778 per-mille vs Arial's 667+667+722
+        // = 2056, i.e. ~86.5%.
+        expect(condensed / regular).toBeGreaterThan(0.8);
+        expect(condensed / regular).toBeLessThan(0.9);
     });
 
-    it('states that the factor is unmeasured, and does not state a number', () => {
-        // A confident percentage here would be a fabrication: Arial Narrow's
-        // 0.82x is a different design. The message must say what is unknown.
-        const msg = parseWith('63').issues.find(i => i.code === 'univers-condensed-width')!.message;
-        expect(msg).toMatch(/unmeasured/i);
-        expect(msg).not.toMatch(/\d+(\.\d+)?\s*%/);
-    });
-
-    it('does not fire for the regular Univers ids or the sans family', () => {
-        for (const id of ['61', '62', '68']) {
+    it('no longer warns — the width is now measured, not estimated', () => {
+        for (const id of ['63', '65']) {
             expect(parseWith(id).issues.filter(i => i.code === 'univers-condensed-width'),
-                `c${id} is not a condensed cut`).toEqual([]);
+                `c${id} should no longer warn`).toEqual([]);
+        }
+    });
+
+    it('the regular Univers ids keep the sans family', () => {
+        // Only the condensed cuts move. c61/c62/c68 are still unmeasured, but
+        // they are regular-width Helvetica-metric faces, which is what the sans
+        // table is, so they stay put until a source turns up.
+        for (const id of ['61', '62', '68']) {
+            expect(FONT_MAP[id].family, `c${id}`).toBe('sans-serif');
         }
     });
 });

@@ -103,6 +103,9 @@ const RESIDENT_AVERAGE: Record<UploadedFontMetrics['family'], number> = {
     // so an upload running ~500–560 now substitutes to c67 rather than
     // rounding to one of the neighbours.
     'schoolbook': 558,
+    // Univers Condensed Bold / Extra Condensed. Averages 461, so an upload
+    // running ~420-500 substitutes to a condensed cut.
+    'univers-condensed': 461,
 };
 
 /**

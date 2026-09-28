@@ -70,12 +70,21 @@ export const UNPRINTABLE_MARGIN_MM: { [model: string]: number } = {
     'PD45S': 1,
 };
 
-/** The resident outline families the printer actually has faces for. Four, not
- *  three: Century Schoolbook (c67) is metrically distinct from BOTH the Times-
- *  compatible serif (c28/c66 → CG Times) and the monospace ids — its advances
- *  run ~10–13% wider than Liberation Serif, which is what the serif family
- *  used to give it, so it needs its own advance table. */
-export type FontFamily = 'monospace' | 'sans-serif' | 'serif' | 'schoolbook';
+/** The resident outline families the printer actually has faces for.
+ *
+ *  Four are metric families resolved by an advance table: 'monospace'
+ *  (Andale Mono), 'sans-serif' (Helvetica metrics — see FONT_FAMILIES),
+ *  'serif' (Times/CG Times), 'schoolbook' (Century Schoolbook, c67).
+ *
+ *  'univers-condensed' is the FIFTH and is a different kind of thing: it is a
+ *  WIDTH OVERRIDE, not a face. The printer's cuts are Univers Condensed Bold
+ *  and Univers Extra Condensed, and their advances come from Adobe's own AFM
+ *  for the family — but no free Univers-shaped face exists (Nimbus Sans Narrow
+ *  is 40.3 per-mille off; Arial Narrow is Windows-only), so the glyphs still
+ *  come from Liberation Sans at the condensed advances. That is safe here in a
+ *  way it was NOT for c69: measured against the real AFM, 0 of 67 glyphs
+ *  overlap, the tightest leaving 25 units of slack. */
+export type FontFamily = 'monospace' | 'sans-serif' | 'serif' | 'schoolbook' | 'univers-condensed';
 
 // THE single source of font metrics (audit T1: the designer, the viewer
 // renderer and the parser each used to carry their own diverging table).
@@ -118,6 +127,12 @@ export const FONT_FAMILIES: Record<FontFamily, string> = {
     'sans-serif': '"Liberation Sans", Arial, Helvetica, sans-serif',
     serif: '"Liberation Serif", "Times New Roman", serif',
     schoolbook: '"TeX Gyre Schola", "Century Schoolbook", "Liberation Serif", serif',
+    // Arial Narrow leads, so a host that has it uses a REAL condensed design;
+    // Liberation Sans is the vendored fallback and is squeezed to the
+    // condensed advances by the table (see fontMetrics.ts). Both are needed:
+    // the advance comes from the table either way, but only Arial Narrow has
+    // the right glyph shapes.
+    'univers-condensed': '"Arial Narrow", "Liberation Sans", Arial, Helvetica, sans-serif',
 };
 
 /**
@@ -185,9 +200,9 @@ export const FONT_MAP: { [key: string]: FontDef } = {
     '51': { name: 'Kanji monospace outline', type: 'outline', family: 'monospace' },
     '61': { name: 'Swiss 721 (Univers)', type: 'outline', family: 'sans-serif' },
     '62': { name: 'Swiss 721 bold', type: 'outline', family: 'sans-serif' },
-    '63': { name: 'Swiss 721 bold condensed', type: 'outline', family: 'sans-serif' },
+    '63': { name: 'Swiss 721 bold condensed', type: 'outline', family: 'univers-condensed' },
     '64': { name: 'Prestige bold', type: 'outline', family: 'monospace' },
-    '65': { name: 'Zurich extra condensed', type: 'outline', family: 'sans-serif' },
+    '65': { name: 'Zurich extra condensed', type: 'outline', family: 'univers-condensed' },
     '66': { name: 'Dutch 801 bold', type: 'outline', family: 'serif' },
     '67': { name: 'Century Schoolbook', type: 'outline', family: 'schoolbook' },
     '68': { name: 'Futura light', type: 'outline', family: 'sans-serif' },

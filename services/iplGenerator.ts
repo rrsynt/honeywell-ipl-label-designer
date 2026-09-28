@@ -19,6 +19,8 @@ const RESIDENT_FONT_ID: Record<FontFamily, string> = {
     'serif': '28',
     'monospace': '25',
     schoolbook: '67',
+    // c63 — the family's plain member (Univers Condensed Bold).
+    'univers-condensed': '63',
 };
 
 /**
