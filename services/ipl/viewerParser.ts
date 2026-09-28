@@ -1314,6 +1314,24 @@ export class IPLViewerParser {
                 'Font c69 (Letter Gothic) is drawn with the monospace advance (600/1000 em), but the printer\'s Letter Gothic is a 500/1000 em (12-pitch) face, so this field prints about 20% narrower than the preview. No metric-matching free face is vendored for it.',
                 `H${id ?? ''}`);
         }
+        // c63/c65 are CONDENSED cuts — the printer's faces for them are
+        // Univers Condensed Bold and Univers Extra Condensed (K10 937-028-003)
+        // — but both resolve to the plain sans family here, so the field is
+        // drawn at full width and prints narrower than the preview. The
+        // DIRECTION is certain (a condensed cut is narrower than its regular by
+        // construction); the magnitude is not measured, because Univers ships
+        // with nothing: no font on this machine (or in Office/Adobe), no AFM,
+        // no free clone, and the driver's .pfm files carry no readable width
+        // table — that decode scores noise against Century and Times, whose
+        // metrics are known. So this announces the direction and invents no
+        // factor. Arial Narrow IS available and measures a consistent 0.82x
+        // Liberation Sans, but asserting Univers Condensed shares that number
+        // is the kind of guess EPL and TSPL already proved wrong.
+        if ((font === '63' || font === '65') && !this.printer.hasIssue('univers-condensed-width')) {
+            this.printer.issue('warning', 'univers-condensed-width',
+                `Font c${font} is a CONDENSED cut (the printer's face is Univers ${font === '65' ? 'Extra Condensed' : 'Condensed Bold'}), but it is drawn at the regular sans width, so this field prints narrower than the preview. The exact factor is unmeasured — no metric source for Univers has been found — so the preview is not adjusted.`,
+                `H${id ?? ''}`);
+        }
         // "Code pages 11 through 33 do not work with resident fonts" (PRM
         // p.134). Resident bitmap fonts ignore the printer language, so bytes
         // above 0x7F print as whatever the font's own table holds.

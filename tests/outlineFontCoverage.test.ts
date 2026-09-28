@@ -279,3 +279,53 @@ describe('c69 Letter Gothic advance is announced, not silently wrong', () => {
         expect(FONT_MAP['69'].type).toBe('outline');
     });
 });
+
+// c63/c65 are condensed cuts drawn at the regular sans width. The direction is
+// certain from the printer's own font table; the magnitude is NOT measured,
+// because no metric source for Univers exists on this machine and the driver's
+// .pfm files decode to noise. Announcing the direction without a number is the
+// honest form, and these pin that it stays announced and stays un-invented.
+describe('c63/c65 condensed cuts are announced, with no invented factor', () => {
+    const parseWith = (font: string) => parseViewerIPL([
+        stx('<ESC>P'), stx('E1;F1'),
+        stx(`H0;o10,10;c${font};k12;d3,ABC`),
+        stx('R'), stx('<ESC>E1'),
+    ].join(''));
+
+    it('c63 and c65 each warn, and name their face', () => {
+        for (const [id, face] of [['63', 'Condensed Bold'], ['65', 'Extra Condensed']] as const) {
+            const issues = parseWith(id).issues.filter(i => i.code === 'univers-condensed-width');
+            expect(issues, `c${id} should warn`).toHaveLength(1);
+            expect(issues[0].level).toBe('warning');
+            expect(issues[0].message).toContain(face);
+        }
+    });
+
+    it('warns once per label, not once per field', () => {
+        const label = parseViewerIPL([
+            stx('<ESC>P'), stx('E1;F1'),
+            stx('H0;o10,10;c63;k12;d3,AAA'),
+            stx('H1;o10,40;c63;k12;d3,BBB'),
+            stx('H2;o10,70;c65;k12;d3,CCC'),
+            stx('R'), stx('<ESC>E1'),
+        ].join(''));
+        expect(label.elements.filter(e => e.kind === 'text')).toHaveLength(3);
+        // One per code, shared across fields — c63 and c65 are the same defect.
+        expect(label.issues.filter(i => i.code === 'univers-condensed-width')).toHaveLength(1);
+    });
+
+    it('states that the factor is unmeasured, and does not state a number', () => {
+        // A confident percentage here would be a fabrication: Arial Narrow's
+        // 0.82x is a different design. The message must say what is unknown.
+        const msg = parseWith('63').issues.find(i => i.code === 'univers-condensed-width')!.message;
+        expect(msg).toMatch(/unmeasured/i);
+        expect(msg).not.toMatch(/\d+(\.\d+)?\s*%/);
+    });
+
+    it('does not fire for the regular Univers ids or the sans family', () => {
+        for (const id of ['61', '62', '68']) {
+            expect(parseWith(id).issues.filter(i => i.code === 'univers-condensed-width'),
+                `c${id} is not a condensed cut`).toEqual([]);
+        }
+    });
+});

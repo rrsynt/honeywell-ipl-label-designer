@@ -642,8 +642,57 @@ angkanya tidak bisa diambil dengan metode yang sama.
 | 28/66 | CG Times (Bold) | serif (Times) | ✅ proxy 0,0 |
 | 67 | Century Schoolbook Roman | schoolbook | ✅ **diperbaiki** (TeX Gyre Schola, 0,0) |
 | **69** | **Letter Gothic** | monospace 600 | ⚠️ **terukur 500 → 20% terlalu lebar; diberitahukan, belum diperbaiki** |
-| 61/62/63/65/68 | Univers (varian) | sans-serif | ⬜ belum diperoleh |
+| **63/65** | **Univers Condensed Bold / Extra Condensed** | sans-serif biasa | ⚠️ **condensed digambar regular → terlalu lebar; diberitahukan, faktor tidak diukur** |
+| 61/62/68 | Univers (regular/bold) | sans-serif | ⬜ **tidak bisa diukur** — lihat di bawah |
 | 50/51 | TBMinPro | sans/mono | ⬜ belum diperoleh |
+
+### 61/62/63/65/68 (varian Univers) — buntu sumber, tapi 63/65 punya cacat ARAH 2026-09-28
+
+Pemetaan dari K10 937-028-003 dikonfirmasi ulang **baris per baris** (tabelnya
+di-parse, bukan dibaca sekilas): 61 → **Univers**, 62 → **Univers Bold**,
+63 → **Univers Condensed Bold**, 65 → **Univers Extra Condensed**, dan
+**68 → Univers** (label "Futura light" itu menyesatkan — face-nya Univers).
+Catatan penting untuk c61/62: **sans-serif yang kita pakai bermetrik
+Helvetica/Arial** — URW Nimbus Sans (klon Helvetica) vs Liberation Sans
+menyimpang hanya **1,49 per-mille rata-rata**, dan Arial vs Liberation Sans
+**0,0**. Jadi keluarga sans kita bukan tebakan; ia Helvetica.
+
+**Tidak ada sumber metrik Univers yang bisa diperoleh — diperiksa, bukan
+diasumsikan:**
+- **Tidak ada fontnya**: tidak di registry font, tidak di `C:/Windows/Fonts`,
+  tidak di instalasi Seagull (`find` atas seluruh pohonnya → **0 file .ttf/.otf**),
+  tidak di Office/Adobe (keduanya terpasang; `*.otf/*.ttf` bernama Univers → 0),
+  dan **tidak ada di dalam `ss#ipl.ddz`** (tidak satu pun berkas ber-magic
+  TTF/OTF di arsip itu).
+- **AFM tidak ada di mana pun**: jalur Adobe core fonts, `urw-base35-fonts` →
+  404; Univers bukan bagian base-35 Adobe.
+- **PFM driver TERTUTUP — dan ini sekarang dibuktikan, bukan diduga.**
+  `Univers[1252].pfm` dll adalah **stub**: ukuran header yang dideklarasikan
+  jauh lebih kecil dari berkasnya, `dfFirstChar`/`dfLastChar` **nol**, dan tidak
+  ada offset mana pun yang memuat tabel lebar yang cocok — decode-nya mencetak
+  **7/95 dan 10/95** terhadap Century dan CG Times, yang metriknya diketahui
+  pasti dari Schola dan Times. Kontras: PFM **URW** tervalidasi **95/95**
+  melawan AFM-nya sendiri, jadi metodenya benar; datanya yang tidak ada.
+- Interop BarTender **tidak mengekspos daftar font printer sama sekali**
+  (`Format`/`Application` tidak punya `PrinterFonts`; hanya tipe
+  `BtFontWeight`/`BtFontScript` yang ada).
+
+**Yang tetap bisa dinyatakan: 63 dan 65 adalah cut CONDENSED.** Manual
+menyebut face-nya "Univers Condensed Bold" dan "Univers Extra Condensed", tapi
+`FONT_MAP` memetakan keduanya ke `sans-serif` **biasa** — jadi keduanya
+digambar **lebih lebar daripada cetakannya**. **Arahnya pasti** (cut condensed
+secara definisi lebih sempit dari regular-nya); **besarannya tidak diukur**, dan
+sengaja **tidak dikarang**. Sebagai pembanding yang *tidak* dipakai: Arial
+Narrow **ada** di mesin ini dan terukur konsisten **0,82× Liberation Sans** —
+tapi Arial Narrow itu Helvetica Narrow, desain yang berbeda dari Univers
+Condensed, jadi menuliskan 0,82 untuk c63/c65 adalah persis tebakan yang EPL
+dan TSPL sudah dua kali buktikan salah.
+
+**Yang diterapkan:** peringatan `univers-condensed-width` (sekali per label,
+dipakai bersama 63 dan 65 karena cacatnya sama) yang menyebut face-nya dan
+**mengatakan bahwa faktornya belum diukur**. Dikunci
+`tests/outlineFontCoverage.test.ts` — termasuk tes yang menolak persentase di
+dalam pesannya; dibuktikan dengan menghapus blok peringatannya → 3 tes gagal.
 
 **Pertanyaan (b) tetap terbuka**, tapi target pencariannya berubah: halaman
 charset K10 menunjuk ke **printer user manual** ("For international character
