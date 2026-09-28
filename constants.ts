@@ -72,11 +72,12 @@ export const UNPRINTABLE_MARGIN_MM: { [model: string]: number } = {
 
 /** The resident outline families the printer actually has faces for.
  *
- *  Four are metric families resolved by an advance table: 'monospace'
+ *  Five are metric families resolved by an advance table: 'monospace'
  *  (Andale Mono), 'sans-serif' (Helvetica metrics — see FONT_FAMILIES),
- *  'serif' (Times/CG Times), 'schoolbook' (Century Schoolbook, c67).
+ *  'serif' (Times/CG Times), 'schoolbook' (Century Schoolbook, c67), and
+ *  'letter-gothic' (c69, a 12-pitch face at 500/1000 em).
  *
- *  'univers-condensed' is the FIFTH and is a different kind of thing: it is a
+ *  'univers-condensed' is the SIXTH and is a different kind of thing: it is a
  *  WIDTH OVERRIDE, not a face. The printer's cuts are Univers Condensed Bold
  *  and Univers Extra Condensed, and their advances come from Adobe's own AFM
  *  for the family — but no free Univers-shaped face exists (Nimbus Sans Narrow
@@ -84,7 +85,7 @@ export const UNPRINTABLE_MARGIN_MM: { [model: string]: number } = {
  *  come from Liberation Sans at the condensed advances. That is safe here in a
  *  way it was NOT for c69: measured against the real AFM, 0 of 67 glyphs
  *  overlap, the tightest leaving 25 units of slack. */
-export type FontFamily = 'monospace' | 'sans-serif' | 'serif' | 'schoolbook' | 'univers-condensed';
+export type FontFamily = 'monospace' | 'sans-serif' | 'serif' | 'schoolbook' | 'univers-condensed' | 'letter-gothic';
 
 // THE single source of font metrics (audit T1: the designer, the viewer
 // renderer and the parser each used to carry their own diverging table).
@@ -122,6 +123,12 @@ export interface FontDef {
 // real face is Monotype's and cannot be shipped. The bare "Century Schoolbook"
 // is kept behind it so a host that has the genuine article uses it; note that
 // would be a LICENSED Windows install, not a redistribution.
+//
+// "letter-gothic" is Inconsolata (SIL OFL, also vendored) for c69. Unlike
+// schoolbook this is NOT a metric clone — Letter Gothic has no free clone — but
+// it is the one free face whose own advance happens to be exactly the printer's
+// 500/1000 em, which is what c69 needed: the advance is now right and the glyphs
+// fit the cell. See fontMetrics.ts.
 export const FONT_FAMILIES: Record<FontFamily, string> = {
     monospace: '"Liberation Mono", "Courier New", monospace',
     'sans-serif': '"Liberation Sans", Arial, Helvetica, sans-serif',
@@ -133,6 +140,13 @@ export const FONT_FAMILIES: Record<FontFamily, string> = {
     // the advance comes from the table either way, but only Arial Narrow has
     // the right glyph shapes.
     'univers-condensed': '"Arial Narrow", "Liberation Sans", Arial, Helvetica, sans-serif',
+    // Letter Gothic is a 12-pitch face: every glyph advances exactly 500/1000 em
+    // (URW's own AFM, ulgb8a.afm, gives WX 500 for every character). Inconsolata
+    // is vendored because it is the one free face whose real advance IS 500/1000
+    // and whose glyphs fit a 500 cell — 0 of 94 overhang, where Liberation Mono
+    // (600) had 25 of 94 wider than the cell and collided, which is why this was
+    // an announced defect until now. SIL Open Font License.
+    'letter-gothic': '"Inconsolata", "Liberation Mono", monospace',
 };
 
 /**
@@ -206,7 +220,7 @@ export const FONT_MAP: { [key: string]: FontDef } = {
     '66': { name: 'Dutch 801 bold', type: 'outline', family: 'serif' },
     '67': { name: 'Century Schoolbook', type: 'outline', family: 'schoolbook' },
     '68': { name: 'Futura light', type: 'outline', family: 'sans-serif' },
-    '69': { name: 'Letter Gothic', type: 'outline', family: 'monospace' },
+    '69': { name: 'Letter Gothic', type: 'outline', family: 'letter-gothic' },
     '70': { name: 'DingDings', type: 'outline', family: 'sans-serif' },
 };
 

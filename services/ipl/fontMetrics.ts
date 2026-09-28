@@ -81,6 +81,25 @@ const UNIVERS_CONDENSED: readonly number[] = [
     500, 500, 333, 444, 278, 500, 444, 778, 500, 444, 389, 274, 250, 274, 500,
 ];
 
+/** Letter Gothic (IPL id c69) — 12-pitch, so every glyph advances exactly
+ *  500/1000 em. Read from URW's own AFM for the face (`ulgb8a.afm`, CTAN
+ *  `fonts/urw/lettergothic.zip`), where every character carries `WX 500`; the
+ *  only other value in the whole file is 490. Consistent with the design's
+ *  definition: 12 characters per inch at a 1/6-inch em is exactly 0.5.
+ *
+ *  This REPLACES a years-long known defect. The table used to fall through to
+ *  the monospace 600 (inherited from Andale Mono), so every c69 field was metered
+ *  20% too wide. It could not simply be corrected, because the renderer draws
+ *  through fillText: at a 500 advance, 25 of Liberation Mono's 94 printable
+ *  glyphs are wider than their own cell (widest `_` at 625), so the glyphs
+ *  collided — the box would have been right while the drawing broke.
+ *
+ *  The fix is a face whose real advance IS 500: Inconsolata, vendored, measured
+ *  0 of 94 glyphs overhanging a 500 cell. Verified at the pixel level by
+ *  rendering eight-glyph runs at the printer's pitch — Liberation Mono merges
+ *  `W` and `%` into one ink run, Inconsolata stays clean on every one. */
+const LETTER_GOTHIC: readonly number[] = new Array(95).fill(500);
+
 /** Fallback advance for codepoints outside printable ASCII (non-Latin text,
  *  control chars): the family's average, so widths stay plausible instead of
  *  collapsing to 0. */
@@ -88,6 +107,7 @@ const SANS_DEFAULT = 524;
 const SERIF_DEFAULT = 478;
 const SCHOOLBOOK_DEFAULT = 558;
 const UNIVERS_CONDENSED_DEFAULT = 461;
+const LETTER_GOTHIC_DEFAULT = 500;
 
 /**
  * Fase 3: a user-uploaded font. The screen renders it by its real face (the
@@ -133,6 +153,7 @@ const tableFor = (family: string | undefined): { t: readonly number[] | null; pe
     if (family === 'serif') return { t: SERIF, perMille: 0, dflt: SERIF_DEFAULT };
     if (family === 'schoolbook') return { t: SCHOOLBOOK, perMille: 0, dflt: SCHOOLBOOK_DEFAULT };
     if (family === 'univers-condensed') return { t: UNIVERS_CONDENSED, perMille: 0, dflt: UNIVERS_CONDENSED_DEFAULT };
+    if (family === 'letter-gothic') return { t: LETTER_GOTHIC, perMille: 0, dflt: LETTER_GOTHIC_DEFAULT };
     // Monospace is the fallthrough, so an unknown family lands on 600. Every
     // FontFamily member must be named explicitly above: a new family that
     // reached this line would be measured as monospace, which for schoolbook

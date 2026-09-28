@@ -35,6 +35,10 @@ export const registerBundledFonts = (): void => {
         // (GUST Font License — the grant is in the file's own name table).
         // CFF outlines, hence .otf.
         'TeXGyreSchola-Regular.otf',
+        // Letter Gothic's substitute for IPL id c69 (SIL Open Font License).
+        // Chosen because its own advance IS 500/1000 em, matching the printer's
+        // 12-pitch face exactly — see services/ipl/fontMetrics.ts.
+        'Inconsolata-Regular.ttf',
     ];
     for (const f of files) {
         const p = path.join(FONTS_DIR, f);

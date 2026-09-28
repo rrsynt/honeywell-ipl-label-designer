@@ -1297,23 +1297,14 @@ export class IPLViewerParser {
         if (!KNOWN_FONTS.has(font)) {
             this.printer.issue('warning', 'unknown-font', `Text field uses unknown font "${font}"; rendered with a fallback face.`, `H${id ?? ''}`);
         }
-        // c69 (Letter Gothic) is the one resident face whose width we know is
-        // wrong and cannot yet correct. Its advance is 500/1000 em — uniform in
-        // URW's AFM for the family, and the arithmetic of the face itself
-        // (Letter Gothic is a 12-pitch design: 1/12" against a 1/6" em) —
-        // while the monospace table we give it is 600, inherited from Andale
-        // Mono. Correcting it needs the face, not just the number: 25 of the 94
-        // printable ASCII glyphs in Liberation Mono are wider than a 500
-        // advance (the widest, "_", is 625), so narrowing the advance while
-        // keeping that face collides the letters. The only free cut of Letter
-        // Gothic is Bold, which contradicts this project's regular-weight rule
-        // for outline ids. So the field prints ~20% narrower than it is drawn,
-        // and that is announced rather than left to be found on the printer.
-        if (font === '69' && !this.printer.hasIssue('letter-gothic-advance')) {
-            this.printer.issue('warning', 'letter-gothic-advance',
-                'Font c69 (Letter Gothic) is drawn with the monospace advance (600/1000 em), but the printer\'s Letter Gothic is a 500/1000 em (12-pitch) face, so this field prints about 20% narrower than the preview. No metric-matching free face is vendored for it.',
-                `H${id ?? ''}`);
-        }
+        // c69 (Letter Gothic) used to warn here that it was metered at the
+        // monospace 600/1000 em while the printer's face is 12-pitch (500), so
+        // the field printed ~20% narrower than the preview. That is now FIXED,
+        // not announced: c69 resolves to the 'letter-gothic' family with a
+        // 500-per-mille table, and Inconsolata is vendored because it is the one
+        // free face whose own advance is 500 and whose glyphs fit the cell
+        // (Liberation Mono's did not — 25 of 94 overhung, so the letters
+        // collided). See fontMetrics.ts.
         // c63/c65 used to warn here ("condensed cut drawn at regular width").
         // That is fixed rather than announced: both now resolve to the
         // 'univers-condensed' family, measured from Adobe's own AFM for the

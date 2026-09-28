@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { FONT_MAP, FONT_FAMILIES, fontStack } from '../constants';
 import { parseViewerIPL, OUTLINE_FONTS } from '../services/ipl/viewerParser';
 import { estimateElementSize } from '../services/ipl/renderer';
+import { outlineTextBlockWidthDots } from '../services/ipl/fontMetrics';
 import type { TextElement } from '../services/ipl/types';
 
 const stx = (f: string) => `<STX>${f}<ETX>`;
@@ -227,56 +228,50 @@ describe('c67 Century Schoolbook routing', () => {
     });
 });
 
-// c69's advance is known wrong and deliberately NOT corrected, because the
-// correction needs a face we cannot ship (see the note in viewerParser.ts).
-// What must hold is that the gap is ANNOUNCED — the alternative is a preview
-// that is quietly 20% wide, which is the failure mode this project exists to
-// prevent. These pin the announcement, not a number we do not trust.
-describe('c69 Letter Gothic advance is announced, not silently wrong', () => {
+// c69 (Letter Gothic) is a 12-pitch face: every glyph advances exactly
+// 500/1000 em, per URW's own AFM (`ulgb8a.afm`, where every character is WX 500)
+// and per the arithmetic of the design (12 chars/inch against a 1/6" em).
+//
+// It used to be metered at the monospace 600, inherited from Andale Mono, so
+// every c69 field was 20% too wide — and the correction was blocked because the
+// renderer draws through fillText: at a 500 advance, 25 of Liberation Mono's 94
+// glyphs are wider than their own cell and collide. The fix is a face whose own
+// advance IS 500 (Inconsolata, vendored), so this is now measured rather than
+// announced. These pin the number and the absence of the old warning.
+describe('c69 Letter Gothic uses the measured 500/1000 em advance', () => {
     const parseWith = (font: string) => parseViewerIPL([
         stx('<ESC>P'), stx('E1;F1'),
         stx(`H0;o10,10;c${font};k12;d3,ABC`),
         stx('R'), stx('<ESC>E1'),
     ].join(''));
 
-    it('warns once for a c69 field', () => {
-        const issues = parseWith('69').issues.filter(i => i.code === 'letter-gothic-advance');
-        expect(issues).toHaveLength(1);
-        expect(issues[0].level).toBe('warning');
-        // The message has to name the size of the error, or it is not an
-        // announcement a user can act on.
-        expect(issues[0].message).toMatch(/500\/1000/);
-        expect(issues[0].message).toMatch(/600\/1000/);
+    it('c69 resolves to the letter-gothic family, not monospace', () => {
+        expect(FONT_MAP['69'].type).toBe('outline');
+        expect(FONT_MAP['69'].family).toBe('letter-gothic');
+        // The face must be one the renderer can actually draw through.
+        expect(fontStack('letter-gothic')).toContain('Inconsolata');
     });
 
-    it('warns once per label, not once per field', () => {
-        // A label can carry many c69 fields; one issue per field would bury
-        // every other warning in the list.
-        const label = parseViewerIPL([
-            stx('<ESC>P'), stx('E1;F1'),
-            stx('H0;o10,10;c69;k12;d3,AAA'),
-            stx('H1;o10,40;c69;k12;d3,BBB'),
-            stx('H2;o10,70;c69;k12;d3,CCC'),
-            stx('R'), stx('<ESC>E1'),
-        ].join(''));
-        expect(label.elements.filter(e => e.kind === 'text')).toHaveLength(3);
-        expect(label.issues.filter(i => i.code === 'letter-gothic-advance')).toHaveLength(1);
+    it('meters c69 at 500 per-mille, not the monospace 600', () => {
+        // Three chars at a 1000-dot em: 3 * 500/1000 * 1000 = 1500 dots.
+        expect(outlineTextBlockWidthDots(['ABC'], 1000, 'letter-gothic')).toBe(1500);
+        // And it must differ from what the old mapping produced.
+        expect(outlineTextBlockWidthDots(['ABC'], 1000, 'letter-gothic'))
+            .not.toBe(outlineTextBlockWidthDots(['ABC'], 1000, 'monospace'));
+        expect(outlineTextBlockWidthDots(['ABC'], 1000, 'monospace')).toBe(1800);
     });
 
-    it('does not fire for the ids whose advance is calibrated or exact', () => {
-        // c25 is Andale Mono (measured 1229/2048 = exactly 600) and c67 is
-        // Century Schoolbook (TeX Gyre Schola, exact). Only c69 is unshipped.
-        for (const id of ['25', '67']) {
-            expect(parseWith(id).issues.filter(i => i.code === 'letter-gothic-advance'),
-                `c${id} should not raise the Letter Gothic warning`).toEqual([]);
-        }
+    it('no longer raises the letter-gothic-advance warning', () => {
+        // The defect it announced is fixed; leaving the warning would now be a
+        // false alarm on every correct c69 field.
+        expect(parseWith('69').issues.filter(i => i.code === 'letter-gothic-advance')).toEqual([]);
     });
 
-    it('c69 still renders — the warning is not a refusal', () => {
+    it('c69 still renders', () => {
         const label = parseWith('69');
         const el = label.elements.find(e => e.kind === 'text');
         expect(el).toBeDefined();
-        expect(FONT_MAP['69'].type).toBe('outline');
+        expect((el as { pointSize?: number }).pointSize).toBe(12);
     });
 });
 

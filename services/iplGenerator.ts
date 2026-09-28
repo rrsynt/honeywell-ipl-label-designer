@@ -21,6 +21,9 @@ const RESIDENT_FONT_ID: Record<FontFamily, string> = {
     schoolbook: '67',
     // c63 — the family's plain member (Univers Condensed Bold).
     'univers-condensed': '63',
+    // c69 — Letter Gothic, the only resident face whose advance is 500/1000 em,
+    // so an upload running that narrow substitutes here rather than to c25.
+    'letter-gothic': '69',
 };
 
 /**

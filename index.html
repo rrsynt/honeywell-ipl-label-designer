@@ -55,6 +55,12 @@
       @font-face { font-family: 'Liberation Serif'; src: url('/fonts/LiberationSerif-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }
       @font-face { font-family: 'Liberation Serif'; src: url('/fonts/LiberationSerif-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; }
       @font-face { font-family: 'TeX Gyre Schola'; src: url('/fonts/TeXGyreSchola-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; }
+      /* Inconsolata (SIL OFL) is vendored for IPL id c69 (Letter Gothic), a
+         12-pitch design whose every glyph advances exactly 500/1000 em. It is
+         the one free face whose own advance IS 500 AND whose glyphs fit a 500
+         cell; Liberation Mono's wider glyphs overhung it, which is why c69
+         could not be corrected before. */
+      @font-face { font-family: 'Inconsolata'; src: url('/fonts/Inconsolata-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }
 
       body {
         font-family: 'Inter', sans-serif;

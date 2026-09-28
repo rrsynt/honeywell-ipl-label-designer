@@ -106,6 +106,9 @@ const RESIDENT_AVERAGE: Record<UploadedFontMetrics['family'], number> = {
     // Univers Condensed Bold / Extra Condensed. Averages 461, so an upload
     // running ~420-500 substitutes to a condensed cut.
     'univers-condensed': 461,
+    // Letter Gothic (c69) is 12-pitch, so its average is 500 by construction
+    // rather than by measurement: every glyph advances exactly 500/1000 em.
+    'letter-gothic': 500,
 };
 
 /**
