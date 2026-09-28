@@ -285,33 +285,52 @@ Verifikasi akhir **7/7 dalam 1 dot** dengan
 (diuji ulang 6/6 termasuk `edges`). **Jangan hardcode 416/424** — hitung dari
 `Stock.Printable.X` model yang bersangkutan.
 
-### BATAS TERUKUR 2026-09-28 — rumus ini SALAH untuk btPortrait non-persegi
+### BT PORTRAIT — TERPECAHKAN 2026-09-28: sumbu raster DITRANSPOSISI driver
 
-Rumus di atas sudah diterapkan di kode (`03edd96`), dan batas yang dulu hanya
-"belum diuji" sekarang **terbukti salah**. Fixture yang sengaja dibuat
-(`tools/bartender/_p/BuildPortrait.cs`, halaman 3×2 dan 2×3 in portrait):
+Batasan yang tadinya "belum diuji" lalu "terukur salah ~42 dot" sekarang
+**terpecahkan**. Akar masalahnya bukan konstanta, melainkan **driver menulis
+sumbu raster ter-transposisi untuk format `btPortrait`**:
 
-| fixture | prediksi | terukur | galat |
+| fixture | orientasi | payload | seharusnya |
 |---|---|---|---|
-| `por-3x2` | 90,5 | 49 | **41,5 dot** |
-| `por-2x3` | 91,0 | 49 | **42,0 dot** |
+| `por-3x2`, `por-2x3` | btPortrait | 146×268 | 268×146 |
+| **`one-box`** | btPortrait (persegi) | 328×430 | 430×328 |
+| `landscape`, `grid`, `sep-*` | btLandscape | benar | — |
 
-**Sebabnya:** suku setengah-halaman memakai `W` (sumbu **lebar** printhead).
-Di semua fixture lain sumbu itu **berimpit** dengan sumbu feed halaman — karena
-semuanya landscape atau persegi — sehingga kedua bacaan tak terbedakan. Halaman
-portrait non-persegi memisahkannya.
+`one-box` **juga** ter-transposisi. Selama ini tak terlihat karena halamannya
+persegi: memutar 90° dan mentransposisi memberi hasil identik. `por-*` yang
+pertama non-persegi memisahkannya. **Jadi yang selama ini disebut "page turn"
+sebenarnya transposisi sumbu**, yang kebetulan benar untuk halaman persegi.
 
-**Yang sudah GUGUR** (jangan diulang): `pageY/2`, `pageX/2`, `pageW/2`,
-`pageH/2`, min/max/rata-rata kedua sumbu, dan `W/2` dengan 416 maupun 424. Satu
-kandidat sempat terlihat sempurna — `pageX/2 − 49` cocok **tepat** di kedua
-fixture portrait — dan **gagal 100–360 dot** di setiap fixture landscape. Dua
-titik selalu bisa memuat dua parameter; itu bukan model.
+**Rumus portrait, terverifikasi 7/7 dalam 1 dot** — termasuk fixture validasi
+yang halaman, posisi objek, DAN ukuran objeknya semuanya berbeda dari set
+derivasi:
 
-**Orientasi halaman juga tidak ada di stream** (tidak ada frame `q`, tidak ada
-`<SI>L`), jadi apakah kasus ini bisa dipecahkan dari stream saja masih
-pertanyaan terbuka. Penjaga: `tests/dgPortraitLimit.test.ts` memaku **besar
-galatnya** (bukan menegaskan jawaban yang salah), supaya celah ini tidak
-terlupakan dan perbaikan yang benar akan ketahuan.
+```
+ink_left = originY − maxBit + (W + 18)/2 − 424
+ink_top  = pageHeightDots − originX − inkWidth − 8
+```
+
+Payload ditranspose: kolom data → baris visual, bit → kolom visual.
+
+**Dua input dari pemanggil**, karena stream tidak membawa keduanya:
+orientasi halaman (memilih rumus mana) dan **tinggi halaman** — sebuah stream
+portrait hanya berbunyi `<ESC>C<SI>W591`, tanpa `<SI>L` dan tanpa tinggi.
+Keduanya sekarang jadi kontrol viewer (`Page`, dan `Paper mm` yang sudah ada);
+kalau kosong, graphics **ditandai di daftar issues**, tidak ditempatkan diam-diam.
+
+**Yang tetap GUGUR** (jangan diulang): `pageY/2`, `pageX/2`, `pageW/2`,
+`pageH/2`, min/max/rata-rata kedua sumbu, `W/2` dengan 416 maupun 424, dan
+transpose sederhana dengan rumus landscape. Satu kandidat sempat tampak
+sempurna — `pageX/2 − 49` cocok **tepat** di kedua fixture portrait — dan
+**gagal 100–360 dot** di setiap fixture landscape. Dua titik selalu bisa memuat
+dua parameter.
+
+**Yang menyelamatkan dari kesalahan:** model pertama cocok **6/6** di set
+derivasi dan **gagal 20,8 dot** di fixture validasi. Angka "154" di dalamnya
+adalah fit, bukan konstanta. Model final lulus uji validasi yang sama — itu
+yang membedakannya. Penjaga: `tests/dgPortrait.test.ts` (dibuktikan dengan
+mematikan jalur portrait: gagal 113 dot).
 
 ## DPL (Datamax) — DITUNDA, menunggu sumber (2026-09-26)
 DPL adalah satu-satunya bahasa dari daftar rencana induk yang **tidak dibangun**,

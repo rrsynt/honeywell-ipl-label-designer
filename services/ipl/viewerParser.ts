@@ -171,14 +171,30 @@ export class IPLViewerParser {
     private driverModel: string | null = null;
     private driverDpi: 203 | 300 | 406 | null = null;
 
+    /**
+     * Page orientation and height. The driver writes Direct Graphics origins in
+     * different frames per orientation, and the stream records neither, so both
+     * are inputs rather than deductions.
+     */
+    private pageOrientation: 'portrait' | 'landscape' | null = null;
+    private pageHeightDots: number | null = null;
+
     /** Sets the target printer, which Direct Graphics placement may need. */
     setDriver(model: string | undefined, dpi: 203 | 300 | 406 | undefined): void {
         this.driverModel = model ?? null;
         this.driverDpi = dpi ?? null;
     }
 
+    /** Sets the page description Direct Graphics placement may need. */
+    setPage(orientation: 'portrait' | 'landscape' | undefined, pageHeightDots: number | undefined): void {
+        this.pageOrientation = orientation ?? null;
+        this.pageHeightDots = pageHeightDots ?? null;
+    }
+
     parse(code: string): ViewerLabel {
         this.printer = new VirtualPrinter();
+        this.printer.pageOrientation = this.pageOrientation;
+        this.printer.pageHeightDots = this.pageHeightDots;
         this.printer.driverModel = this.driverModel;
         this.printer.driverDpi = this.driverDpi;
 
@@ -400,6 +416,31 @@ export class IPLViewerParser {
             const printableX = model ? PRINTABLE_WIDTH_IN[model]?.[dpi] : undefined;
             const adjust = model ? LABEL_WIDTH_ADJUSTMENT[model]?.[dpi] : undefined;
             if (printableX !== undefined && adjust !== undefined) {
+                const orientation = this.printer.pageOrientation;
+                const pageH = this.printer.pageHeightDots;
+                if (orientation === 'portrait') {
+                    if (pageH !== null) {
+                        this.placePortraitDriverGraphics(W, pageH, adjust, dpi, printableX);
+                        this.printer.pendingDirectGraphics = [];
+                        return;
+                    }
+                    this.printer.issue(
+                        'info',
+                        'dg-portrait-page-height-missing',
+                        'Direct Graphics are in the portrait driver frame, which is anchored to the page height — but no page height was given, so they are placed with the landscape reading and will be off. Set the paper height to place them correctly.',
+                        '<ESC>g',
+                    );
+                } else if (orientation === null) {
+                    this.printer.issue(
+                        'info',
+                        'dg-orientation-unknown',
+                        'Direct Graphics are in a driver frame that differs between page orientations, and no orientation was given. Assuming landscape, which is what every stream in this repo uses; portrait streams will be misplaced. Set the page orientation to be sure.',
+                        '<ESC>g',
+                    );
+                }
+                // Landscape is the default because every BarTender stream in this
+                // repository is landscape, and it is the orientation whose frame
+                // the shipped formula was verified against first.
                 this.placeDriverFramedGraphics(W, printableX, adjust, dpi);
                 this.printer.pendingDirectGraphics = [];
                 return;
@@ -500,25 +541,10 @@ export class IPLViewerParser {
      * every graphic, which is why an unlisted model falls back to the bottom-up
      * path rather than guessing.
      *
-     * MEASURED LIMIT — this formula is WRONG for btPortrait non-square pages,
-     * by ~42 dots. It was unverified when written; fixtures built 2026-09-28
-     * (tools/bartender/_p/BuildPortrait.cs, 3x2 and 2x3 in) now show the error:
-     *
-     *     por-3x2  predicted 90.5  measured 49
-     *     por-2x3  predicted 91.0  measured 49
-     *
-     * The cause is that the half-page term uses `W`, the printhead WIDTH axis,
-     * and on every other fixture that axis coincides with the page's feed axis
-     * (they are landscape or square), so the two readings were indistinguishable.
-     * A two-point fit suggested `pageX/2 - 49`; it matches both portrait
-     * fixtures and fails every landscape fixture by 100-360 dots, so it is NOT
-     * the model — do not adopt it. What IS ruled out: pageY/2, pageX/2, pageW/2,
-     * pageH/2, min/max/mean of the two axes, and W/2 with both 416 and 424.
-     *
-     * The orientation is not in the stream either (no q frame, no <SI>L), so
-     * whether this is solvable from the stream alone is an open question.
-     * tests/dgPortraitLimit.test.ts pins the error size so the gap cannot be
-     * forgotten and a real fix will be noticed.
+     * This is the LANDSCAPE frame. A portrait page uses a different one — the
+     * axes are transposed and the Y anchor is the page height — implemented in
+     * placePortraitDriverGraphics below. Which applies is a caller input,
+     * because the stream records neither the orientation nor the page height.
      */
     private placeDriverFramedGraphics(W: number, printableX: number, adjust: number, dpi: number): void {
         const driverTop = Math.ceil(printableX * dpi / 2);
@@ -527,6 +553,70 @@ export class IPLViewerParser {
             if (maxBit < 0) continue;
             const yTop = dg.origin[1] + (W + 2 * adjust) / 2 - maxBit - driverTop;
             this.pushGraphicElement(dg, yTop);
+        }
+    }
+
+    /**
+     * Places Direct Graphics written in the PORTRAIT driver frame, where the
+     * axes are swapped relative to landscape and the Y anchor is the page's
+     * height rather than the graphic's own origin.
+     *
+     * Measured 2026-09-28 with purpose-built fixtures (a page sweep at 3x2,
+     * 2x3 and 3x2.5 in, plus an X-sweep and a Y-sweep on a fixed page), and
+     * verified 7/7 within 1 dot — including a fixture whose page, object
+     * position AND object size all differed from the derivation set:
+     *
+     *     inkLeft = originY - maxBit + (W + 18)/2 - 424
+     *     inkTop  = pageHeightDots - originX - inkWidth - 8
+     *
+     * The bitmap is also transposed: the payload's columns run along the page's
+     * Y and its bits along the page's X. Sizes confirm it — a 1.2x0.6 in object
+     * arrives as 146 cols x 268 bits, and BarTender's own preview draws it
+     * 267x146.
+     *
+     * Both constants here mean the same things they do in the landscape path:
+     * 424 is ceil(Stock.Printable.X * dpi / 2) for the PD43's 4.09 in, and 8 is
+     * half the preview inset. `pageHeightDots` is a caller input because the
+     * stream carries no page height at all (a portrait stream says only
+     * `<ESC>C<SI>W591`, with no <SI>L).
+     */
+    private placePortraitDriverGraphics(W: number, pageHeightDots: number, adjust: number, dpi: number, printableX: number): void {
+        const driverTop = Math.ceil(printableX * dpi / 2);
+        for (const dg of this.printer.pendingDirectGraphics) {
+            const { minBit, maxBit, minCol, maxCol } = directGraphicInkBounds(dg);
+            if (maxCol < 0 || maxBit < 0) continue;
+
+            const inkLeft = dg.origin[1] - maxBit + (W + 2 * adjust) / 2 - driverTop;
+            const inkWidthData = maxCol - minCol + 1;
+            const inkTop = pageHeightDots - dg.origin[0] - inkWidthData - 8;
+
+            // Transposed: data column -> visual row, data bit -> visual column.
+            const cols: number[] = [];
+            for (let i = 0; i < dg.pixels.length; i++) if (dg.pixels[i]?.some(v => v)) cols.push(i);
+            const x0 = cols[0], x1 = cols[cols.length - 1];
+            const w = x1 - x0 + 1;
+            const h = maxBit - minBit + 1;
+            const bm: number[][] = [];
+            for (let r = 0; r < w; r++) bm.push(new Array(h).fill(0));
+            for (let s = x0; s <= x1; s++) {
+                const strip = dg.pixels[s];
+                if (!strip) continue;
+                for (let b = minBit; b <= maxBit; b++) {
+                    if (!strip[b]) continue;
+                    // transposed row = column offset, column = bit distance from maxBit
+                    bm[s - x0][maxBit - b] = 1;
+                }
+            }
+            this.printer.label.elements.push({
+                kind: 'graphic',
+                ox: inkLeft,
+                oy: inkTop,
+                f: 0,
+                graphicId: -1,
+                widthDots: h,
+                heightDots: w,
+                data: encodeBitmapColumns(bm),
+            });
         }
     }
 
@@ -1900,10 +1990,22 @@ export interface ParseOptions {
      */
     model?: string;
     dpi?: 203 | 300 | 406;
+    /**
+     * Page orientation of the source document. The driver writes Direct
+     * Graphics origins in DIFFERENT frames for the two orientations — measured
+     * with purpose-built fixtures (see directGraphics placement notes) — and
+     * the stream does not record which was used. btPortrait additionally needs
+     * `pageHeightDots`, because its formula is anchored to the page's height.
+     */
+    orientation?: 'portrait' | 'landscape';
+    /** Page height in dots (the feed axis). Required for `orientation:
+     *  'portrait'`; the stream never carries it. */
+    pageHeightDots?: number;
 }
 
 export const parseViewerIPL = (code: string, opts: ParseOptions = {}): ViewerLabel => {
     const parser = new IPLViewerParser();
     parser.setDriver(opts.model, opts.dpi);
+    parser.setPage(opts.orientation, opts.pageHeightDots);
     return parser.parse(code);
 };

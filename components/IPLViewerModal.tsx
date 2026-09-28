@@ -191,6 +191,19 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
      * an info in the issue list saying so. Persisted: the target printer rarely
      * changes between sessions.
      */
+    /**
+     * Page orientation of the source document. The driver writes Direct
+     * Graphics origins in a DIFFERENT frame per orientation and the stream
+     * records neither, so this is an input. Portrait additionally needs the
+     * paper height below, because its formula is anchored to the page's height.
+     */
+    const [pageOrientation, setPageOrientation] = useState<'portrait' | 'landscape' | ''>(() => {
+        try {
+            const raw = localStorage.getItem('ipl-viewer-orientation');
+            return raw === 'portrait' || raw === 'landscape' ? raw : '';
+        } catch { return ''; }
+    });
+
     const [driverModel, setDriverModel] = useState<string>(() => {
         try { return localStorage.getItem('ipl-viewer-driver-model') ?? ''; } catch { return ''; }
     });
@@ -210,6 +223,14 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
             else localStorage.removeItem('ipl-viewer-driver-model');
         } catch { /* storage unavailable */ }
     }, [driverModel]);
+
+    // Persist the page orientation whenever it changes.
+    useEffect(() => {
+        try {
+            if (pageOrientation) localStorage.setItem('ipl-viewer-orientation', pageOrientation);
+            else localStorage.removeItem('ipl-viewer-orientation');
+        } catch { /* storage unavailable */ }
+    }, [pageOrientation]);
 
     // Persist the rotation choice whenever it changes.
     useEffect(() => {
@@ -280,8 +301,17 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
         () => (language === 'zpl' ? parseZPL(debouncedCode)
             : language === 'epl' ? parseEPL(debouncedCode)
             : language === 'tspl' ? parseTSPL(debouncedCode)
-            : parseViewerIPL(debouncedCode, { model: driverModel || undefined, dpi })),
-        [debouncedCode, language, bwipReady, driverModel, dpi],
+            : parseViewerIPL(debouncedCode, {
+                model: driverModel || undefined,
+                dpi,
+                orientation: pageOrientation || undefined,
+                // The page height the portrait frame is anchored to. Only the
+                // manual "Paper mm" control can supply it — the stream never
+                // carries a page height (a portrait stream says only
+                // `<ESC>C<SI>W…`, with no <SI>L).
+                pageHeightDots: paperMm && paperMm.h > 0 ? Math.round(paperMm.h / 25.4 * dpi) : undefined,
+            })),
+        [debouncedCode, language, bwipReady, driverModel, dpi, pageOrientation, paperMm],
     );
     // Importing a design back out of a stream is IPL-only.
     const isZpl = language !== 'ipl';
@@ -833,6 +863,18 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                                     <option value="">(unset)</option>
                                     {Object.keys(PRINTER_MODELS).filter(m => m !== 'Generic').map(m =>
                                         <option key={m} value={m}>{m}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-400 mb-1"
+                                    title="Page orientation of the document the stream came from. The driver writes Direct Graphics origins in a different frame for portrait and landscape, and the stream records neither — so graphic placement needs this. Portrait also needs Paper mm's height, since its frame is anchored to the page height.">
+                                    Page
+                                </label>
+                                <select value={pageOrientation} onChange={e => setPageOrientation(e.target.value as 'portrait' | 'landscape' | '')}
+                                    className="w-28 text-sm p-1.5 bg-gray-700 rounded-md border border-gray-600 focus:ring-1 focus:ring-blue-500 outline-none">
+                                    <option value="">(unset)</option>
+                                    <option value="landscape">Landscape</option>
+                                    <option value="portrait">Portrait</option>
                                 </select>
                             </div>
                             <div>

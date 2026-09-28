@@ -55,6 +55,15 @@ export class VirtualPrinter {
     driverModel: string | null = null;
     driverDpi: 203 | 300 | 406 | null = null;
 
+    /**
+     * Page orientation and height. The driver writes Direct Graphics origins in
+     * a different frame per orientation and the stream records neither, so they
+     * are supplied by the caller. Used only for the driver-stream placement
+     * path; a stream with <SI>L keeps its own bottom-up reading.
+     */
+    pageOrientation: 'portrait' | 'landscape' | null = null;
+    pageHeightDots: number | null = null;
+
     /** In-format flag: field commands only count inside E#;F#...R. */
     inFormat = false;
     /** Program mode (<ESC>P) seen — formats before it are a warning condition. */
