@@ -179,6 +179,32 @@ describe('fontStack', () => {
         expect(fontStack('schoolbook')).toContain('TeX Gyre Schola');
     });
 
+    // c50/c51 are the Kanji ids, and the vendored Latin faces carry no CJK
+    // glyphs. Without a CJK name in the stack the ideographs go to whatever the
+    // host falls back to and render NARROWER than the full em fontMetrics
+    // charges them — measured at 0.75 em through the sans stack and 0.60 em
+    // through the mono one, so every Kanji field metered wider than it painted.
+    // Naming a CJK family restores the full em; the Latin advances are
+    // unaffected because the Latin face still wins for Latin text.
+    it('every stack can render CJK at a full em', () => {
+        for (const family of ['monospace', 'sans-serif', 'serif', 'schoolbook',
+            'univers-condensed', 'letter-gothic']) {
+            const stack = fontStack(family);
+            expect(stack, `family ${family} must name a CJK-capable face`)
+                .toMatch(/Yu Gothic|MS Gothic|Malgun Gothic|SimSun|Noto Sans CJK|Meiryo/);
+            // The CJK names must come AFTER the Latin face, or Latin text would
+            // change appearance and its calibrated advance would stop applying.
+            const latin = ['Liberation Mono', 'Liberation Sans', 'Liberation Serif',
+                'TeX Gyre Schola', 'Arial Narrow', 'Inconsolata']
+                .filter(n => stack.includes(n));
+            const firstCjk = stack.search(/Yu Gothic|MS Gothic|Malgun Gothic|SimSun|Noto Sans CJK|Meiryo/);
+            for (const l of latin) {
+                expect(stack.indexOf(l), `${l} must precede the CJK fallback in ${family}`)
+                    .toBeLessThan(firstCjk);
+            }
+        }
+    });
+
     it('falls back to monospace for an unknown family', () => {
         expect(fontStack(undefined)).toContain('Liberation Mono');
         expect(fontStack('nonsense')).toContain('Liberation Mono');

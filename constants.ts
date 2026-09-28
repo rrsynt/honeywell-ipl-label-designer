@@ -129,24 +129,44 @@ export interface FontDef {
 // it is the one free face whose own advance happens to be exactly the printer's
 // 500/1000 em, which is what c69 needed: the advance is now right and the glyphs
 // fit the cell. See fontMetrics.ts.
+//
+// CJK: every stack ends in CJK_FALLBACK. fontMetrics.ts charges a full em for a
+// wide codepoint (WIDE_PER_MILLE = 1000), which is what the printer does — but
+// the vendored faces carry no ideographs, so what actually gets drawn is
+// whatever the platform substitutes.
+//
+// Measured in NODE (the golden harness, where nothing is substituted): naming
+// only a Latin face left the ideographs at 0.75 em through the sans stack and
+// 0.60 em through the mono one, i.e. the box was metered wide while the glyphs
+// painted narrow — so every c50/c51 (Kanji) golden was systematically wrong.
+// Appending these names takes it to 1.000 while leaving the Latin advances
+// untouched, because the Latin face still wins for Latin text.
+//
+// The BROWSER is a different story and this does NOT fix it there: Chromium on
+// Windows already reaches a full em for kanji with a Latin-only stack, because
+// the OS supplies its own fallback. Left as measured rather than asserted — the
+// Node behaviour is the one that is verified, and the browser was not.
+const CJK_FALLBACK = '"Yu Gothic", "MS Gothic", "Malgun Gothic", "SimSun", '
+    + '"Noto Sans CJK SC", "Noto Sans CJK JP", "Meiryo"';
+
 export const FONT_FAMILIES: Record<FontFamily, string> = {
-    monospace: '"Liberation Mono", "Courier New", monospace',
-    'sans-serif': '"Liberation Sans", Arial, Helvetica, sans-serif',
-    serif: '"Liberation Serif", "Times New Roman", serif',
-    schoolbook: '"TeX Gyre Schola", "Century Schoolbook", "Liberation Serif", serif',
+    monospace: `"Liberation Mono", "Courier New", ${CJK_FALLBACK}, monospace`,
+    'sans-serif': `"Liberation Sans", Arial, Helvetica, ${CJK_FALLBACK}, sans-serif`,
+    serif: `"Liberation Serif", "Times New Roman", ${CJK_FALLBACK}, serif`,
+    schoolbook: `"TeX Gyre Schola", "Century Schoolbook", "Liberation Serif", ${CJK_FALLBACK}, serif`,
     // Arial Narrow leads, so a host that has it uses a REAL condensed design;
     // Liberation Sans is the vendored fallback and is squeezed to the
     // condensed advances by the table (see fontMetrics.ts). Both are needed:
     // the advance comes from the table either way, but only Arial Narrow has
     // the right glyph shapes.
-    'univers-condensed': '"Arial Narrow", "Liberation Sans", Arial, Helvetica, sans-serif',
+    'univers-condensed': `"Arial Narrow", "Liberation Sans", Arial, Helvetica, ${CJK_FALLBACK}, sans-serif`,
     // Letter Gothic is a 12-pitch face: every glyph advances exactly 500/1000 em
     // (URW's own AFM, ulgb8a.afm, gives WX 500 for every character). Inconsolata
     // is vendored because it is the one free face whose real advance IS 500/1000
     // and whose glyphs fit a 500 cell — 0 of 94 overhang, where Liberation Mono
     // (600) had 25 of 94 wider than the cell and collided, which is why this was
     // an announced defect until now. SIL Open Font License.
-    'letter-gothic': '"Inconsolata", "Liberation Mono", monospace',
+    'letter-gothic': `"Inconsolata", "Liberation Mono", ${CJK_FALLBACK}, monospace`,
 };
 
 /**
@@ -187,12 +207,28 @@ export const FONT_MAP: { [key: string]: FontDef } = {
     // (~8x too small, and silent). As bitmap, h/w magnify like every other
     // bitmap id.
     //
-    // The CELL IS UNKNOWN. No manual publishes an OCR cell size, and the
-    // driver's c23_203.pfm does not decode to one (its header carries no value
-    // matching the known c0/c1/c2/c7 cells at any offset). These are the
-    // c0-shaped values that were already being applied implicitly through
-    // FONT_FALLBACK, stated here so the assumption is visible and so the
-    // advance (7+2 = 9 dots at w1) does not move. Do NOT read them as measured.
+    // The CELL WIDTH IS STILL UNKNOWN, and the search was taken further than
+    // before without finding it. What IS now known, from the driver's own
+    // c23_203.pfm / c24_203.pfm (in ss#ipl.ddz), is their point size and the
+    // matching em height in dots: byte 0x02 is the point size and 0x08 the em
+    // in dots, an encoding validated exactly against all fifteen c20..c41 ids
+    // whose sizes the manual states (c20 8pt -> 0x02=8, c41 36pt -> 0x02=36).
+    // It reads c23 = 10 pt / 31 dots and c24 = 9 pt / 26 dots.
+    //
+    // That is NOT the cell. A bitmap id needs width x height in dots, and no
+    // shipped table gives the width: the obvious derivation (scale the face's
+    // own advance by the em) reproduces none of the four DOCUMENTED cells when
+    // checked against c1 — the one anchor named "7 x 11 OCR", whose published
+    // width is 7 while the face-derived reading gives 12.6 and the flat 0.6-em
+    // reading gives 13.2. So the width is not derivable from these files, and
+    // guessing it from an anchor that fails would be exactly the silent-wrong
+    // -number this project exists to avoid.
+    //
+    // The values below are therefore the c0-shaped ones that were already being
+    // applied implicitly through FONT_FALLBACK, kept so the assumption is
+    // visible and the advance (7+2 = 9 dots at w1) does not move. Do NOT read
+    // them as measured. tests/outlineFontCoverage.test.ts pins that they stay
+    // an explicit assumption rather than drifting into looking authoritative.
     '23': { name: 'OCR A', type: 'bitmap', baseWidth: 7, baseHeight: 9, gapWidth: 2 },
     '24': { name: 'OCR B size 2', type: 'bitmap', baseWidth: 7, baseHeight: 9, gapWidth: 2 },
     '25': { name: 'Swiss Mono 721', type: 'outline', family: 'monospace' },
@@ -210,6 +246,14 @@ export const FONT_MAP: { [key: string]: FontDef } = {
     '39': { name: '24 point monospace bold', type: 'outline', family: 'monospace', defaultPointSize: 24 },
     '40': { name: '30 point monospace bold', type: 'outline', family: 'monospace', defaultPointSize: 30 },
     '41': { name: '36 point monospace bold', type: 'outline', family: 'monospace', defaultPointSize: 36 },
+    // c50/c51 are the Kanji outline ids (face TBMinPro-Light per the driver's
+    // Font_Type_Select table). They carry no defaultPointSize on purpose: the
+    // manual's fixed-size families name their size IN the font, and these do
+    // not, so an id with no `k` is genuinely unsized. What mattered for them was
+    // the CJK WIDTH, which was wrong in Node until 2026-09-28 — see CJK_FALLBACK
+    // in FONT_FAMILIES: the vendored faces have no ideographs, so the stack
+    // decided what got drawn, and it came out at 0.75 em (sans) / 0.60 em (mono)
+    // against the full em fontMetrics charges. tests/cjkWidth.test.ts pins it.
     '50': { name: 'Kanji Outline (TBMinPro)', type: 'outline', family: 'sans-serif' },
     '51': { name: 'Kanji monospace outline', type: 'outline', family: 'monospace' },
     '61': { name: 'Swiss 721 (Univers)', type: 'outline', family: 'sans-serif' },

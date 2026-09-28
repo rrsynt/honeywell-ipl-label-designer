@@ -48,7 +48,15 @@ describe('outline "bold" fonts are drawn at regular weight', () => {
     });
 
     it('c26 paints with the regular stack', () => {
-        expect(fontStack(FONT_MAP['26'].family)).toBe('"Liberation Mono", "Courier New", monospace');
+        // Assert the PROPERTIES, not one frozen string. The stack legitimately
+        // grows (a CJK fallback was appended for c50/c51), and pinning the
+        // literal made that unrelated change look like a regression here.
+        const stack = fontStack(FONT_MAP['26'].family);
+        expect(stack).toContain('Liberation Mono');
+        expect(stack).not.toMatch(/(^|,\s*)bold\s/);
+        // The Latin face leads, so c26's calibrated 600/1000 em advance still
+        // governs its text; anything appended must come after it.
+        expect(stack.trimStart().startsWith('"Liberation Mono"')).toBe(true);
     });
 
     // The export CANNOT be the oracle for weight, and this pins why, so the
