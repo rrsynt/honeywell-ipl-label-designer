@@ -226,3 +226,56 @@ describe('c67 Century Schoolbook routing', () => {
         expect(checked.size).toBeGreaterThanOrEqual(4);
     });
 });
+
+// c69's advance is known wrong and deliberately NOT corrected, because the
+// correction needs a face we cannot ship (see the note in viewerParser.ts).
+// What must hold is that the gap is ANNOUNCED — the alternative is a preview
+// that is quietly 20% wide, which is the failure mode this project exists to
+// prevent. These pin the announcement, not a number we do not trust.
+describe('c69 Letter Gothic advance is announced, not silently wrong', () => {
+    const parseWith = (font: string) => parseViewerIPL([
+        stx('<ESC>P'), stx('E1;F1'),
+        stx(`H0;o10,10;c${font};k12;d3,ABC`),
+        stx('R'), stx('<ESC>E1'),
+    ].join(''));
+
+    it('warns once for a c69 field', () => {
+        const issues = parseWith('69').issues.filter(i => i.code === 'letter-gothic-advance');
+        expect(issues).toHaveLength(1);
+        expect(issues[0].level).toBe('warning');
+        // The message has to name the size of the error, or it is not an
+        // announcement a user can act on.
+        expect(issues[0].message).toMatch(/500\/1000/);
+        expect(issues[0].message).toMatch(/600\/1000/);
+    });
+
+    it('warns once per label, not once per field', () => {
+        // A label can carry many c69 fields; one issue per field would bury
+        // every other warning in the list.
+        const label = parseViewerIPL([
+            stx('<ESC>P'), stx('E1;F1'),
+            stx('H0;o10,10;c69;k12;d3,AAA'),
+            stx('H1;o10,40;c69;k12;d3,BBB'),
+            stx('H2;o10,70;c69;k12;d3,CCC'),
+            stx('R'), stx('<ESC>E1'),
+        ].join(''));
+        expect(label.elements.filter(e => e.kind === 'text')).toHaveLength(3);
+        expect(label.issues.filter(i => i.code === 'letter-gothic-advance')).toHaveLength(1);
+    });
+
+    it('does not fire for the ids whose advance is calibrated or exact', () => {
+        // c25 is Andale Mono (measured 1229/2048 = exactly 600) and c67 is
+        // Century Schoolbook (TeX Gyre Schola, exact). Only c69 is unshipped.
+        for (const id of ['25', '67']) {
+            expect(parseWith(id).issues.filter(i => i.code === 'letter-gothic-advance'),
+                `c${id} should not raise the Letter Gothic warning`).toEqual([]);
+        }
+    });
+
+    it('c69 still renders — the warning is not a refusal', () => {
+        const label = parseWith('69');
+        const el = label.elements.find(e => e.kind === 'text');
+        expect(el).toBeDefined();
+        expect(FONT_MAP['69'].type).toBe('outline');
+    });
+});

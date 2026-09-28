@@ -506,10 +506,52 @@ didistribusikan** (pola sama dengan `CENSCBK.TTF`), `OCRAEXT.TTF` ternyata
 monospace datar 604 (bukan OCR asli), dan CTAN hanya menyediakan METAFONT yang
 butuh compiler tidak ada di mesin ini.
 
-**c69 (Letter Gothic) TIDAK disentuh.** Ia memang outline, dan ia hanya muncul
-di grup `outline_idp_*` driver — yang menurut `Font.d` **tidak dipakai model
-PD43/PM43/PC43 mana pun** (seksi di file itu hanya 3240/3400/4x30/86xx), jadi
-tidak ada metrik yang bisa dipercaya. Tes mengunci bahwa 69 **tetap** outline.
+**c69 (Letter Gothic) TIDAK disentuh tipenya** — ia memang outline, dan tes
+mengunci itu. Tapi advancenya **terukur salah, dan itu sekarang diberitahukan.**
+
+### c69 (Letter Gothic) — advance 20% terlalu lebar, DIBERITAHUKAN 2026-09-28
+
+Face-nya **500/1000 em**, bukan 600. Buktinya AFM URW Letter Gothic
+(`ulgb8a.afm`): **`WX 500` untuk setiap glyph** (dua nilai saja di seluruh
+ASCII, 500 dan 490), dan metode baca AFM-nya **tervalidasi 95/95 glyph**
+melawan PFM face yang sama. Angka itu juga konsisten dengan definisi face ini:
+Letter Gothic adalah desain **12-pitch** (1/12 inci per karakter terhadap em
+1/6 inci → 0,5 em). Tabel kita memakai 600 (warisan Andale Mono), jadi field
+c69 **tergambar ~20% terlalu lebar**.
+
+**Kenapa TIDAK diperbaiki dengan mengubah angkanya saja — ini yang menentukan.**
+Renderer menggambar teks outline lewat `ctx.fillText`, jadi tinta mengikuti
+**font yang ter-resolve**, bukan tabel kita. Dengan face Liberation Mono
+(advanced 600) tetapi tabel 500, **25 dari 94 glyph ASCII tintanya melebihi
+pitch** — terlebar `_` = 625, lalu `% A V W` = 609, `w` = 594. Hurufnya
+**bertumpuk sampai ~20%**. Jadi memperbaiki kotak tanpa mengganti face justru
+merusak gambarnya.
+
+**Kenapa face-nya tidak di-vendor:** satu-satunya cut bebas yang ditemukan
+adalah **URW Letter Gothic Bold** (Aladdin Free Public License — bukan permisif
+seperti GUST-nya Schola), sementara proyek ini melukis **semua** id outline
+pada **regular weight** dan itu dipaku `tests/outlineBoldWeight.test.ts` serta
+export BarTender. Cut regular-nya **tidak didistribusikan** (README URW
+menyebutnya rusak).
+
+**Yang dilakukan:** peringatan `letter-gothic-advance` di daftar issues,
+**sekali per label** (bukan sekali per field — label bisa memuat banyak field
+c69 dan itu akan menenggelamkan peringatan lain). Pesannya menyebut kedua
+angka dan besar galatnya, supaya bisa ditindaklanjuti. Dikunci
+`tests/outlineFontCoverage.test.ts`; dibuktikan dengan menghapus peringatannya
+→ 2 tes gagal.
+
+**Jalur yang GUGUR** (jangan diulang): decode `.pfm` driver untuk c69 —
+metodenya **gagal validasi** melawan Century dan CG Times (14/95 dan 16/95),
+padahal kedua face itu metriknya sudah diketahui pasti dari Schola dan Times.
+Jadi angka apa pun dari `LetterGothic[1252].pfm` tidak boleh dipakai.
+
+**Catatan yang SEMPAT salah dan dikoreksi:** saya sempat menyimpulkan dari
+`Font.d` bahwa PD43 tidak punya font selain c26, karena seksi `[Asterix]`
+(hanya 6 grup) terlihat seperti daftar font printer. **Itu salah** — seksi itu
+tentang font yang di-*download*/disubstitusi, bukan daftar resident; sumber
+PD43/PM43 justru menyatakan Letter Gothic, OCR A, CG Times, dan Schoolbook
+**resident di printer** ([[ipl-source-hunt-2026-09]]).
 
 **Cara mengulang:** `hmtx` + `unitsPerEm` dari `head` memberi advance mentah
 tanpa perlu rasterisasi sama sekali.
@@ -591,12 +633,17 @@ pertama adalah face komersial/bundel printer yang tidak ada di mesin ini;
 OCR A/B adalah face bitmap printer yang tidak diedarkan sebagai TrueType, jadi
 angkanya tidak bisa diambil dengan metode yang sama.
 
-**Prioritas yang tersisa, bila mau dilanjutkan:** **69 (Letter Gothic)** —
-masih dipetakan ke 600 tanpa bukti, dan ia satu-satunya yang belum tersentuh
-sama sekali. Kalau pola TeX Gyre berlaku lagi (lihat Schola untuk c67), layak
-dicari pengganti bebasnya lebih dulu sebelum menyimpulkan "butuh printer".
-**23/24 sudah selesai** (bukan masalah metrik — tipenya salah, lihat bagian di
-atas).
+**Status seluruh id yang diukur:**
+
+| id | face printer | advance kita | status |
+|---|---|---|---|
+| 20/21/22/25/32/35/38 + varian bold | Andale Mono (Bold) | 600 | ✅ **eksak** (1229/2048) |
+| 23/24 | OCR A / OCR B | — | ✅ **tipe diperbaiki** (bitmap); ukuran sel masih asumsi |
+| 28/66 | CG Times (Bold) | serif (Times) | ✅ proxy 0,0 |
+| 67 | Century Schoolbook Roman | schoolbook | ✅ **diperbaiki** (TeX Gyre Schola, 0,0) |
+| **69** | **Letter Gothic** | monospace 600 | ⚠️ **terukur 500 → 20% terlalu lebar; diberitahukan, belum diperbaiki** |
+| 61/62/63/65/68 | Univers (varian) | sans-serif | ⬜ belum diperoleh |
+| 50/51 | TBMinPro | sans/mono | ⬜ belum diperoleh |
 
 **Pertanyaan (b) tetap terbuka**, tapi target pencariannya berubah: halaman
 charset K10 menunjuk ke **printer user manual** ("For international character
