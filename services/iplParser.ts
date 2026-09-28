@@ -362,7 +362,15 @@ export const parseIPL = (rawInput: string, dpi: PrinterSettings['dpi']): Design 
     // Simple data extraction from print block. Both notations for the
     // delimiters (viewer extractPrintBlockData parity — raw captures import
     // just like literal listings).
-    const printDataMatch = iplCode.match(/(?:<CAN>|\x18)([\s\S]*?)(?:<(?:ETB|RS)>|[\x17\x1e])/);
+    // The terminator is guarded against being the TARGET of a Data Shift
+    // escape: PRM p.99-100's own example prints control codes as data
+    // ("<SUB><ETB> ... <SUB><RS> <SUB><US>"), so an escaped terminator is a
+    // literal character the field prints, not the end of the block. Without the
+    // lookbehind the block ended early and discarded the rest of the field's
+    // data (viewer extractPrintBlockData carries the same guard, so the two
+    // parsers agree on where a block ends).
+    const printDataMatch = iplCode.match(
+        /(?:<CAN>|\x18)([\s\S]*?)(?:(?<!<SUB>)(?<!\x1a)(?:<(?:ETB|RS)>|[\x17\x1e]))/);
     if (printDataMatch && variableFields.length > 0) {
         // The generator (and human-readable IPL listings) spell control characters
         // as literal placeholders; real printer streams use raw bytes. Accept both.

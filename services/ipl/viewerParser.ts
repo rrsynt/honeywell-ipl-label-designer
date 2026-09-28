@@ -176,14 +176,14 @@ export const readFieldStep = (slice: string): number | undefined => {
 /**
  * Control characters inside a print block's field data that CHANGE what the
  * field prints, for reporting. They are stripped either way (a control
- * character is not printable text), but these three make the preview differ
- * from the printer, so silence about them would be the exact failure this
- * project fights.
+ * character is not printable text), but these make the preview differ from the
+ * printer, so silence about them would be the exact failure this project
+ * fights.
  *
- * The other ~20 control commands (<BEL> error code, <ENQ> status, <BS> warm
- * boot, the DC1-4 handshakes, …) are status/comms: they cannot change the
- * label, so they are stripped without a word. That split is why this returns
- * only the three rather than every control character it removed.
+ * The other control commands (<BEL> error code, <ENQ> status, <BS> warm boot,
+ * the DC1-3 handshakes, …) are status/comms: they cannot change the label, so
+ * they are stripped without a word. That split is why this returns only the
+ * output-changing few rather than every control character it removed.
  *
  * Names and semantics from PRM 2.70's "Print Commands (t = 0)" table (p.250)
  * and the definition bodies:
@@ -194,6 +194,16 @@ export const readFieldStep = (slice: string): number | undefined => {
  *   <CR>  p.111 "Moves the field pointer to the next data entry field" — the
  *               following data belongs to a DIFFERENT field than the one this
  *               viewer bound it to.
+ *   <DLE> p.92  "Executes a printer power-up reset immediately… erases all
+ *               data and commands in the input buffer" — the job does not
+ *               print at all, so this is more destructive than <EM>.
+ *
+ * NOT here, and the manual is explicit about why: <BS> (p.118) is a warm boot
+ * that "does not take effect immediately. The printer executes all previous
+ * commands before the warm boot takes effect" — the label still prints, so it
+ * cannot change the output and stays silent. That is the reason the immediate
+ * commands cannot be lumped together: three of them (EM/DEL/DLE) change what
+ * prints and one (BS) does not.
  */
 const BLOCK_COMMANDS_THAT_CHANGE_OUTPUT: Array<[RegExp, string]> = [
     [/<EM>|\x19/, '<EM>'],
@@ -203,13 +213,41 @@ const BLOCK_COMMANDS_THAT_CHANGE_OUTPUT: Array<[RegExp, string]> = [
     // text-field \n), so it is a literal character and not the "next field"
     // command. Reporting it would fire on every multi-line label.
     [/(?<!<SUB>)<CR>|(?<!\x1a)\x0d/, '<CR>'],
+    // A <DLE> is the Reset command (p.92). A DOUBLED <DLE> still resets, and
+    // the manual is unusually explicit: "<STX><DLE><DLE><ETX> ... the first
+    // DLE is a transparency character. It instructs the printer to use the
+    // <DLE> as a reset command." The escapes that turn a DLE into DATA are
+    // removed before this list runs (see withoutDataShiftEscapes).
+    [/<DLE>|\x10/, '<DLE>'],
 ];
 
+/**
+ * Removes Data Shift escapes from a raw field slice, so what remains is only
+ * characters that ARE commands rather than data.
+ *
+ * <SUB> (p.99) escapes EVERY command character except <DC1>/<DC3>/<STX>/<ETX>,
+ * so "<SUB>" + anything is an escape pair and is consumed whole.
+ *
+ * <DLE> (p.100) is the reverse: it escapes exactly those four. But it is ALSO
+ * the Reset command on its own, and the manual's own example
+ * ("<STX><DLE><DLE><ETX>", p.92) shows a DOUBLED <DLE> still performing the
+ * reset. So only a <DLE> followed by one of the four is an escape; any other
+ * <DLE> — bare, doubled, or before an unrelated field byte — is a command and
+ * must survive this function to be reported.
+ */
+const withoutDataShiftEscapes = (slice: string): string =>
+    slice
+        .replace(/<SUB>(?:<[A-Z]{2,4}>|[\s\S])|\x1a[\s\S]/g, '')
+        .replace(/<DLE>(?=<(?:STX|ETX|DC1|DC3)>)/g, '')
+        .replace(/\x10(?=[\x02\x03\x11\x13])/g, '');
+
 /** Which output-changing control commands appear in a block field's raw slice. */
-const findBlockControlChars = (slice: string): string[] =>
-    BLOCK_COMMANDS_THAT_CHANGE_OUTPUT
-        .filter(([re]) => re.test(slice))
+const findBlockControlChars = (slice: string): string[] => {
+    const effective = withoutDataShiftEscapes(slice);
+    return BLOCK_COMMANDS_THAT_CHANGE_OUTPUT
+        .filter(([re]) => re.test(effective))
         .map(([, name]) => name);
+};
 
 /**
  * Extracts variable-field data from EVERY print block, keyed by the format id
@@ -230,7 +268,19 @@ export const extractPrintBlockData = (
 ): Map<number, Map<number, PrintBlockEntry>> => {
     const byFormat = new Map<number, Map<number, PrintBlockEntry>>();
     // Optional <ESC>E<id> prefix (both notations); terminator <ETB>/<RS>/<FF>.
-    const blockRe = /(?:<ESC>E(\d*)|\x1bE(\d*))?(?:<CAN>|\x18)([\s\S]*?)(?:<(?:ETB|RS|FF)>|[\x17\x1e\x0c])/gi;
+    //
+    // Each terminator is guarded against being the TARGET of a Data Shift
+    // escape: PRM p.99-100's own example prints control codes as data
+    // ("<SUB><ETB> <SUB><CAN> ... <SUB><FS> <SUB><GS> <SUB><RS> <SUB><US>"), so
+    // an escaped terminator is a literal character the field prints, not the
+    // end of the block. Without the lookbehind the block ended early and threw
+    // the rest of the field's data away — "AB<SUB><FF>CD" captured as "AB".
+    const blockTerminator =
+        /(?:(?<!<SUB>)(?<!\x1a)(?:<(?:ETB|RS|FF)>|[\x17\x1e\x0c]))/;
+    const blockRe = new RegExp(
+        '(?:<ESC>E(\\d*)|\\x1bE(\\d*))?(?:<CAN>|\\x18)([\\s\\S]*?)' + blockTerminator.source,
+        'gi',
+    );
     let bm: RegExpExecArray | null;
     while ((bm = blockRe.exec(code)) !== null) {
         const formatId = parseInt(bm[1] ?? bm[2] ?? '0', 10) || 0;
@@ -255,23 +305,32 @@ export const extractPrintBlockData = (
             const cleaned = m[2]
                 .replace(/<ESC>[A-Z]\d*/g, '')
                 .replace(/\x1b[A-Z]\d*/g, '')
-                .replace(/<(US|RS)>\d*/g, '')
-                .replace(/[\x1f\x1e]\d*/g, '')
+                // Data Shift escapes are consumed FIRST, before any other strip.
+                // They must be: "<SUB><RS>" is a literal RS escaped into data,
+                // and if the <RS> strip below ran first it would delete the RS
+                // and leave a bare <SUB> that then ate the NEXT real character —
+                // "AB<SUB><RS>CD" lost its C that way.
+                //
                 // <SUB> is Data Shift (PRM p.99): it escapes the NEXT character
                 // into data, so "<SUB><GS>" is a LITERAL GS that prints as a
-                // character — NOT an alphanumeric field separator. The pair must
-                // be consumed together and BEFORE the sweep below: dropping only
-                // the <SUB> would leave a <GS> standing, turning data into a live
-                // odometer region that the printer never intended.
+                // character — NOT an alphanumeric field separator. The pair is
+                // consumed together; dropping only the <SUB> would leave a <GS>
+                // standing, turning data into a live odometer region the printer
+                // never intended.
                 //
                 // <SUB><CR> is this project's own newline convention (the
                 // generator emits it for a text-field \n), so it becomes a real
                 // newline rather than being dropped with the rest.
+                //
+                // The escaped character is one LOGICAL character: a whole <XXX>
+                // placeholder or one raw byte.
                 .replace(/<SUB><CR>|\x1a\r/g, '\n')
-                // The escaped character is one LOGICAL character, which in this
-                // notation is either a whole <XXX> placeholder or one raw byte
-                // (or, for Data Shift's own case, one plain character).
                 .replace(/<SUB>(?:<[A-Z]{2,4}>|[\s\S])|\x1a[\s\S]/g, '')
+                // <DLE> escaping <STX>/<ETX>/<DC1>/<DC3> into data (p.100).
+                .replace(/<DLE>(?=<(?:STX|ETX|DC1|DC3)>)/g, '')
+                .replace(/\x10(?=[\x02\x03\x11\x13])/g, '')
+                .replace(/<(US|RS)>\d*/g, '')
+                .replace(/[\x1f\x1e]\d*/g, '')
                 .replace(IN_BLOCK_CONTROL_CHARS, '');
             // Removing a command is right (it is not printable text), but doing
             // it SILENTLY is the failure mode this project exists to prevent:

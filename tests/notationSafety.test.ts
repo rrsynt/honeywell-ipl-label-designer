@@ -219,17 +219,46 @@ describe('control characters in a print block are not printed as text', () => {
     const reported = (block: string): (string | undefined)[] =>
         parseViewerIPL(block).issues.filter(i => i.code === 'block-control-command').map(i => i.command);
 
-    it('reports the three that change what prints, and stays quiet for the rest', () => {
+    it('reports the four that change what prints, and stays quiet for the rest', () => {
         // <EM> aborts the job, <DEL> clears the field, <CR> moves the field
-        // pointer — in each case the printer's output differs from the preview,
-        // so silence would be the failure mode this project exists to prevent.
+        // pointer, <DLE> resets the printer and "erases all data and commands
+        // in the input buffer" (p.92) — in each case the printer's output
+        // differs from the preview, so silence would be the failure mode this
+        // project exists to prevent.
         expect(reported(blockWith('AA<EM>BB'))).toEqual(['<EM>']);
         expect(reported(blockWith('AA<DEL>BB'))).toEqual(['<DEL>']);
         expect(reported(blockWith('AA<CR>BB'))).toEqual(['<CR>']);
+        expect(reported(blockWith('AA<DLE>BB'))).toEqual(['<DLE>']);
         // Status/comms commands cannot change the label: no report.
+        //
+        // <BS> (Warm Boot) is here, not above, and the manual is explicit about
+        // why: it "does not take effect immediately. The printer executes all
+        // previous commands before the warm boot takes effect" (p.118) — the
+        // label still prints. The immediate commands cannot be lumped together;
+        // three of the four change the output and one does not.
         for (const quiet of ['<BEL>', '<ENQ>', '<BS>', '<DC1>', '<NUL>', '<CAN>']) {
             expect(reported(blockWith(`AA${quiet}BB`)), `${quiet} should not report`).toEqual([]);
         }
+    });
+
+    it('reports <DLE> as a Reset even when doubled, per the manual\'s own example', () => {
+        // PRM p.92: "<STX><DLE><DLE><ETX> ... the first DLE is a transparency
+        // character. It instructs the printer to use the <DLE> as a reset
+        // command." So the pair still resets — unlike <SUB><CR>, where the pair
+        // means literal DATA.
+        expect(reported(blockWith('AA<DLE><DLE>BB'))).toEqual(['<DLE>']);
+        expect(reported(blockWith('AA\x10\x10BB'))).toEqual(['<DLE>']);
+    });
+
+    it('does not report a <DLE> that is only escaping a character into data', () => {
+        // PRM p.100: "Use <DLE> to send these command characters as data:
+        // <DC1> <DC3> <STX> <ETX>." A DLE before one of those four is an escape,
+        // so a stream merely PRINTING a literal STX must not look like a reset.
+        for (const esc of ['<STX>', '<ETX>', '<DC1>', '<DC3>']) {
+            expect(reported(blockWith(`AA<DLE>${esc}BB`)), `<DLE>${esc} is data`).toEqual([]);
+        }
+        // and <SUB> escapes a DLE into data the same way (p.99-100)
+        expect(reported(blockWith('AA<SUB><DLE>BB'))).toEqual([]);
     });
 
     it('does not mistake the <SUB><CR> newline for the <CR> field command', () => {
@@ -250,5 +279,62 @@ describe('control characters in a print block are not printed as text', () => {
         const code = [stx('<ESC>P'), stx('E1;F1;'), stx('H1;o20,20;c25;k14;d3,LITERAL<EM>HERE'), stx('R')].join('');
         const label = parseViewerIPL(code);
         expect(label.issues.filter(i => i.code === 'block-control-command')).toHaveLength(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// An ESCAPED terminator is data, not the end of the block
+// ---------------------------------------------------------------------------
+//
+// PRM 2.70 pp.99-100 teaches Data Shift with an example that prints control
+// codes as data, and it contains "<SUB><ETB> ... <SUB><RS> <SUB><US>" — an
+// escaped BLOCK TERMINATOR. The block regexes looked for <ETB>/<RS>/<FF>
+// without knowing about the escape, so the block ended mid-field and the rest
+// of the data was discarded: "AB<SUB><FF>CD" captured as "AB".
+//
+// The same trap sits one level down: an escape pair must be consumed BEFORE
+// any other strip runs. "<SUB><RS>" with the <RS> strip first loses the RS and
+// leaves a bare <SUB> that then eats the NEXT real character — the C in
+// "AB<SUB><RS>CD".
+describe('a Data Shift-escaped terminator does not end the print block', () => {
+    const stx = (f: string) => `<STX>${f}<ETX>`;
+    const blockWith = (data: string): string => [
+        stx('<ESC>P'), stx('E1;F1;'), stx('H1;o20,20;c25;k14'), stx('R'),
+        stx('<ESC>E1<CAN>') + '<ESC>F1<NUL>' + data + '<US>1<RS>1<ETB>',
+    ].join('');
+
+    const rendered = (data: string): string => {
+        const el = parseViewerIPL(blockWith(data)).elements.find(e => e.kind === 'text');
+        return el ? (el.source as { data: string }).data : '';
+    };
+
+    it('keeps the data that follows an escaped terminator', () => {
+        // Each of these would previously truncate to "AB".
+        expect(rendered('AB<SUB><FF>CD')).toBe('ABCD');
+        expect(rendered('AB<SUB><ETB>CD')).toBe('ABCD');
+        expect(rendered('AB\x1a\x0cCD')).toBe('ABCD');
+        expect(rendered('AB\x1a\x17CD')).toBe('ABCD');
+    });
+
+    it('does not let an escaped separator eat the next real character', () => {
+        // The escape pair is consumed first, so the C survives. Stripping the
+        // <RS> before the pair left a bare <SUB> that consumed it: "ABD".
+        expect(rendered('AB<SUB><RS>CD')).toBe('ABCD');
+        expect(rendered('AB<SUB><US>CD')).toBe('ABCD');
+        expect(rendered('AB<SUB><GS>CD')).toBe('ABCD');
+    });
+
+    it('still ends the block at an UNESCAPED terminator', () => {
+        // The guard must not disable the terminator itself.
+        expect(rendered('AB<ETB>')).toBe('AB');
+        expect(rendered('AB<FF>')).toBe('AB');
+    });
+
+    it('still advances \\x1c regions — escaping must not disarm the odometer', () => {
+        const label = parseViewerIPL(blockWith('<FS>0001<FS><ESC>I5'));
+        const at = (b: number) =>
+            (resolveLabelAtBatch(label, b, 203).elements[0] as { source: { data: string } }).source.data;
+        expect(at(0)).toBe('0001');
+        expect(at(1)).toBe('0006');
     });
 });
