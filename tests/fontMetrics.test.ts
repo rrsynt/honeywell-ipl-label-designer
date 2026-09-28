@@ -100,6 +100,38 @@ describe('outlineTextBlockWidthDots calibration', () => {
         expect(outSans).not.toBeCloseTo(1.8 * hDots, 2);
     });
 
+    // Wide (UAX #11) codepoints are a full em, and the family AVERAGE is not.
+    // Charging 524 for a kanji measured a c50 field ~48% narrow: the box came
+    // out 53 dots around 97 dots of ink, and the text ran past the label's
+    // right edge. Measured in the browser, these are exactly 1000 per-mille in
+    // both the sans and the mono stack, so the number is a property of the
+    // glyphs rather than a fit.
+    it('measures wide (CJK) codepoints at a full em, not the family average', () => {
+        const hDots = Math.round((12 / 72) * 203); // 34
+        for (const family of ['sans-serif', 'serif', 'schoolbook', 'monospace', undefined]) {
+            // 3 chars -> 3.0 em exactly, whatever the family. The width helper
+            // returns an unrounded dot count; callers round.
+            expect(outlineTextBlockWidthDots(['日本語'], hDots, family),
+                `3 kanji in ${family ?? 'undefined'}`).toBeCloseTo(3 * hDots, 6);
+            // And it must NOT be the old average, which gave 53 dots instead
+            // of 102 — the defect this pins.
+            expect(outlineTextBlockWidthDots(['日本語'], hDots, family),
+                `3 kanji in ${family ?? 'undefined'} must not use the ${family} average`)
+                .not.toBeCloseTo(3 * 0.524 * hDots, 3);
+        }
+        // Fullwidth forms and Hangul are wide too; accented Latin is NOT.
+        expect(outlineTextBlockWidthDots(['Ａ'], hDots, 'monospace')).toBeCloseTo(hDots, 6);
+        expect(outlineTextBlockWidthDots(['가'], hDots, 'monospace')).toBeCloseTo(hDots, 6);
+        expect(outlineTextBlockWidthDots(['é'], hDots, 'sans-serif')).toBeCloseTo(0.524 * hDots, 6);
+    });
+
+    it('the wide rule survives a mixed ASCII + CJK line', () => {
+        const hDots = Math.round((12 / 72) * 203);
+        // 'A'=667 (SANS), then two kanji at 1000 each.
+        expect(outlineTextBlockWidthDots(['A日本'], hDots, 'sans-serif'))
+            .toBeCloseTo((667 + 1000 + 1000) / 1000 * hDots, 6);
+    });
+
     it('tables are scale-invariant (verify at 20,40,100px)', () => {
         const c = newRealCanvas(100, 100);
         const ctx = c.getContext('2d');

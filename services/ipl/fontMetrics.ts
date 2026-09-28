@@ -116,6 +116,41 @@ const tableFor = (family: string | undefined): { t: readonly number[] | null; pe
 };
 
 /**
+ * Codepoints that occupy a full em — UAX #11 East Asian Wide/Fullwidth, the
+ * standard property for exactly this question. Kanji, Kana, Hangul, the
+ * fullwidth forms, CJK punctuation and the CJK planes.
+ *
+ * They matter because the fallback below is the family's AVERAGE, which is
+ * tuned for punctuation and accented Latin: charging 524 for a kanji measured
+ * its box ~48% narrow, and a c50 (Kanji outline) field drew 97 dots of ink
+ * inside a 53-dot box. Measured in the browser, every one of these is exactly
+ * 1000 per-mille in both the sans and mono stacks, so this is a fact about the
+ * glyphs rather than a fudge factor.
+ */
+const WIDE_RANGES: readonly (readonly [number, number])[] = [
+    [0x1100, 0x115F],  // Hangul Jamo
+    [0x2E80, 0x303E],  // CJK radicals, Kangxi, CJK punctuation
+    [0x3041, 0x33FF],  // Hiragana, Katakana, Bopomofo, Hangul Compat, CJK Compat
+    [0x3400, 0x4DBF],  // CJK Extension A
+    [0x4E00, 0x9FFF],  // CJK Unified Ideographs
+    [0xA000, 0xA4CF],  // Yi
+    [0xAC00, 0xD7A3],  // Hangul syllables
+    [0xF900, 0xFAFF],  // CJK Compatibility Ideographs
+    [0xFE10, 0xFE19],  // Vertical forms
+    [0xFE30, 0xFE6F],  // CJK Compatibility Forms, Small Form Variants
+    [0xFF00, 0xFF60],  // Fullwidth forms
+    [0xFFE0, 0xFFE6],  // Fullwidth signs
+    [0x1F300, 0x1F64F], [0x1F900, 0x1F9FF], // emoji that render double-wide
+    [0x20000, 0x2FFFD], [0x30000, 0x3FFFD], // CJK Extension B and beyond
+];
+const WIDE_PER_MILLE = 1000;
+
+const isWideCodePoint = (cp: number): boolean => {
+    for (const [lo, hi] of WIDE_RANGES) if (cp >= lo && cp <= hi) return true;
+    return false;
+};
+
+/**
  * Width in dots of one text line drawn at cap-height `hDots` (the renderer's
  * outline convention: glyph box height in printer dots) in the given family.
  * Monospace collapses to length × 0.6h — identical to the old estimate, so
@@ -127,11 +162,22 @@ export const outlineTextWidthDots = (
     family: string | undefined,
 ): number => {
     const { t, perMille, dflt } = tableFor(family);
-    if (!t) return line.length * hDots * perMille / 1000;
     let sumPerMille = 0;
-    for (let i = 0; i < line.length; i++) {
-        const code = line.charCodeAt(i);
-        sumPerMille += code >= 32 && code <= 126 ? t[code - 32] : dflt;
+    for (const ch of line) {
+        const cp = ch.codePointAt(0)!;
+        // Wide codepoints are checked BEFORE the per-family table, because the
+        // monospace family has no table and would otherwise take the fast path
+        // below: c51 is the Kanji MONOSPACE outline id, so its kanji must not
+        // inherit the uniform 600 that suits its Latin glyphs.
+        if (isWideCodePoint(cp)) {
+            sumPerMille += WIDE_PER_MILLE;
+        } else if (!t) {
+            sumPerMille += perMille;
+        } else if (cp >= 32 && cp <= 126) {
+            sumPerMille += t[cp - 32];
+        } else {
+            sumPerMille += dflt;
+        }
     }
     return sumPerMille * hDots / 1000;
 };

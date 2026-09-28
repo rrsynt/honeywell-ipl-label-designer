@@ -644,7 +644,44 @@ angkanya tidak bisa diambil dengan metode yang sama.
 | **69** | **Letter Gothic** | monospace 600 | ⚠️ **terukur 500 → 20% terlalu lebar; diberitahukan, belum diperbaiki** |
 | **63/65** | **Univers Condensed Bold / Extra Condensed** | sans-serif biasa | ⚠️ **condensed digambar regular → terlalu lebar; diberitahukan, faktor tidak diukur** |
 | 61/62/68 | Univers (regular/bold) | sans-serif | ⬜ **tidak bisa diukur** — lihat di bawah |
-| 50/51 | TBMinPro | sans/mono | ⬜ belum diperoleh |
+| **50/51** | **TBMinPro-Light (Kanji)** | sans / monospace | ✅ **bug lebar CJK DIPERBAIKI** — lihat di bawah |
+
+### 50/51 (TBMinPro / Kanji) — DIPERBAIKI 2026-09-28: lebar CJK dihitung setengah
+
+Bukan masalah face-nya, melainkan **cara kita mengukur karakter di luar ASCII**.
+`outlineTextWidthDots` membebankan **rata-rata keluarga** (524/1000 em untuk
+sans, 478 untuk serif) ke setiap kode di luar ASCII 32–126 — angka yang
+disetel untuk tanda baca dan huruf beraksen. Tapi glyph CJK itu **selebar satu
+em penuh**:
+
+| | sebelum | sesudah |
+|---|---|---|
+| c50 `日本語` (k12) | kotak **53**, tinta **97** (−45%) | kotak **102**, tinta **97** |
+| c51 `日本語` | kotak **61**, tinta **97** | kotak **102**, tinta **97** |
+| c51 `カタカナ` | kotak **82**, tinta **127** | kotak **136**, tinta **127** |
+
+Jadi sebuah field c50/c51 **digambar keluar dari kotaknya** dan teksnya lari ke
+luar tepi kanan label — persis pola yang sama dengan bug magnifikasi `h` di
+c23/c24.
+
+**Perbaikannya memakai properti standar, bukan angka karangan:** rentang
+**UAX #11 East Asian Width** (Kanji, Kana, Hangul, fullwidth forms, tanda baca
+CJK, bidang CJK tambahan) dibebankan **1000 per-mille**. Diukur di browser,
+setiap karakter itu memang **tepat 1000 per-mille** di kedua stack (sans dan
+mono), jadi ini fakta tentang glyph-nya.
+
+**Dua jebakan yang ketemu saat mengerjakan:**
+1. **Keluarga `monospace` keluar lebih awal** dari fungsi — dan **c51 justru
+   id Kanji MONOSPACE**, jadi perbaikan pertama saya melewatkannya (c51 tetap
+   61 dot). Cek lebar harus **mendahului** cabang per-keluarga.
+2. **Nilai yang dikembalikan tidak dibulatkan** (pemanggil yang membulatkan),
+   jadi tes yang membandingkan dengan `toBe` gagal karena `17.816` vs `18` —
+   cacat di tes saya, bukan di kode.
+
+Ditutup `tests/fontMetrics.test.ts` (termasuk baris campuran ASCII+CJK);
+dibuktikan dengan mematikan cabang lebarnya → 2 tes gagal. **Tidak ada golden
+yang berubah** dan Latin/aksen sama sekali tidak bergeser (c50 Latin 185 vs
+tinta 184; c61 `Café Ünïcode` 208 vs 205).
 
 ### 61/62/63/65/68 (varian Univers) — buntu sumber, tapi 63/65 punya cacat ARAH 2026-09-28
 
