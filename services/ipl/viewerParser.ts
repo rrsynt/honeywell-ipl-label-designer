@@ -29,6 +29,36 @@ const OUTLINE_DEFAULT_POINT_SIZE = 12;
 // Frames are normalized by the tokenizer, so ESC always appears literally.
 const LITERAL_ESC = '<ESC>';
 
+/**
+ * Control characters that cannot print, stripped from a print block's captured
+ * field data. A block's data is <ESC>F-delimited, so it is NOT masked by
+ * maskFieldPayloads — the whole stream reaches this sweep — and it used to
+ * clean only <ESC>/<US>/<RS>. Everything else (<EM> Abort Print Job, <DEL>
+ * Clear Data From Current Field, <CR> Next Data Entry Field, and 20 more) was
+ * captured as LITERAL TEXT and painted onto the label with no warning: a
+ * field's data reading "AAAA<EM><DEL>".
+ *
+ * The names come from PRM 2.70's "Print Commands (t = 0)" table (p.250), not
+ * from memory — an earlier hand-written list MISSED <CR> and <SI>, both of
+ * which are commands in that table, and <CR> is exactly the character this
+ * sweep exists to catch.
+ *
+ * <FS> and <GS> are deliberately EXCLUDED — they are the odometer's region
+ * markers, read by resolveLabelAtBatch, and stripping them here would delete
+ * the serial counters. Both spellings are covered: the literal placeholder and
+ * the raw byte (a raw capture keeps \x1c/\x1d as bytes).
+ *
+ * LF (0x0A) is excluded from the raw-byte range too, but for a different
+ * reason: this data model USES a real newline for a multi-line text field (the
+ * generator emits <SUB><CR>, and the sweep above rewrites it to "\n"). A range
+ * covering every byte from 0x00 would delete the newline it had just created —
+ * which is exactly what the first cut of this fix did, silently collapsing
+ * "AA\nBB" to "AABB". The <LF> PLACEHOLDER is still stripped: that is the
+ * command, while the raw byte here is the data model's separator.
+ */
+const IN_BLOCK_CONTROL_CHARS =
+    /<(?:NUL|SOH|STX|ETX|EOT|ENQ|ACK|BEL|BS|HT|LF|VT|FF|CR|SO|SI|DLE|DC1|DC2|DC3|DC4|NAK|SYN|ETB|CAN|EM|SUB|RS|US|DEL)>|[\x00-\x09\x0b-\x1b\x1e\x1f\x7f]/g;
+
 // Resource caps for untrusted streams. A hand-authored .ipl is small; a hostile
 // one can declare a G raster or box spanning the full 5-digit field (x99999) or
 // stream thousands of Direct-Graphics frames, each forcing a huge canvas alloc
@@ -144,6 +174,44 @@ export const readFieldStep = (slice: string): number | undefined => {
 };
 
 /**
+ * Control characters inside a print block's field data that CHANGE what the
+ * field prints, for reporting. They are stripped either way (a control
+ * character is not printable text), but these three make the preview differ
+ * from the printer, so silence about them would be the exact failure this
+ * project fights.
+ *
+ * The other ~20 control commands (<BEL> error code, <ENQ> status, <BS> warm
+ * boot, the DC1-4 handshakes, …) are status/comms: they cannot change the
+ * label, so they are stripped without a word. That split is why this returns
+ * only the three rather than every control character it removed.
+ *
+ * Names and semantics from PRM 2.70's "Print Commands (t = 0)" table (p.250)
+ * and the definition bodies:
+ *   <EM>  p.91  "Stops batch printing" — a job that is aborted prints fewer
+ *               labels than the preview shows.
+ *   <DEL> p.98  "Deletes data from the current field" — the field prints
+ *               empty here, not with the data the block carries.
+ *   <CR>  p.111 "Moves the field pointer to the next data entry field" — the
+ *               following data belongs to a DIFFERENT field than the one this
+ *               viewer bound it to.
+ */
+const BLOCK_COMMANDS_THAT_CHANGE_OUTPUT: Array<[RegExp, string]> = [
+    [/<EM>|\x19/, '<EM>'],
+    [/<DEL>|\x7f/, '<DEL>'],
+    // NOT preceded by <SUB>: "<SUB><CR>" is Data Shift escaping a CR into data
+    // (this project's own newline convention, emitted by the generator for a
+    // text-field \n), so it is a literal character and not the "next field"
+    // command. Reporting it would fire on every multi-line label.
+    [/(?<!<SUB>)<CR>|(?<!\x1a)\x0d/, '<CR>'],
+];
+
+/** Which output-changing control commands appear in a block field's raw slice. */
+const findBlockControlChars = (slice: string): string[] =>
+    BLOCK_COMMANDS_THAT_CHANGE_OUTPUT
+        .filter(([re]) => re.test(slice))
+        .map(([, name]) => name);
+
+/**
  * Extracts variable-field data from EVERY print block, keyed by the format id
  * its <ESC>E<id> invocation names (blocks without one key to 0). Scoping by
  * format matters: a page composing formats 1 and 2 (each with its own field 1)
@@ -158,6 +226,7 @@ export const readFieldStep = (slice: string): number | undefined => {
 export const extractPrintBlockData = (
     code: string,
     codePageAt: (offset: number) => number | undefined = () => undefined,
+    onBlockCommand?: (cmd: string) => void,
 ): Map<number, Map<number, PrintBlockEntry>> => {
     const byFormat = new Map<number, Map<number, PrintBlockEntry>>();
     // Optional <ESC>E<id> prefix (both notations); terminator <ETB>/<RS>/<FF>.
@@ -176,15 +245,41 @@ export const extractPrintBlockData = (
             // Read the step before stripping: it lives in the same slice, and
             // the strip below removes it from the printable data.
             const serialStep = readFieldStep(m[2]);
-            // Strip in-block printer commands (<ESC>x, <US>/<RS> counts, raw
-            // control bytes) from the captured data; they configure the job, not
-            // print as text.
+            // Strip in-block printer commands and control characters from the
+            // captured data; they configure the job, they are not printable
+            // text. A print block bypasses maskFieldPayloads (its data is
+            // <ESC>F-delimited, so the d3 masking rule does not apply), and it
+            // used to clean only <ESC>/<US>/<RS> — so <EM> (abort), <DEL>
+            // (clear field), <CR> (next field) and 20 others were captured as
+            // LITERAL TEXT and painted onto the label, with no warning at all.
             const cleaned = m[2]
                 .replace(/<ESC>[A-Z]\d*/g, '')
                 .replace(/\x1b[A-Z]\d*/g, '')
                 .replace(/<(US|RS)>\d*/g, '')
                 .replace(/[\x1f\x1e]\d*/g, '')
-                .replace(/<SUB><CR>/g, '\n');
+                // <SUB> is Data Shift (PRM p.99): it escapes the NEXT character
+                // into data, so "<SUB><GS>" is a LITERAL GS that prints as a
+                // character — NOT an alphanumeric field separator. The pair must
+                // be consumed together and BEFORE the sweep below: dropping only
+                // the <SUB> would leave a <GS> standing, turning data into a live
+                // odometer region that the printer never intended.
+                //
+                // <SUB><CR> is this project's own newline convention (the
+                // generator emits it for a text-field \n), so it becomes a real
+                // newline rather than being dropped with the rest.
+                .replace(/<SUB><CR>|\x1a\r/g, '\n')
+                // The escaped character is one LOGICAL character, which in this
+                // notation is either a whole <XXX> placeholder or one raw byte
+                // (or, for Data Shift's own case, one plain character).
+                .replace(/<SUB>(?:<[A-Z]{2,4}>|[\s\S])|\x1a[\s\S]/g, '')
+                .replace(IN_BLOCK_CONTROL_CHARS, '');
+            // Removing a command is right (it is not printable text), but doing
+            // it SILENTLY is the failure mode this project exists to prevent:
+            // three of these change what prints — <EM> aborts the job, <DEL>
+            // clears the field's data, <CR> moves the field pointer — so the
+            // preview differs from the printer and must say why. Collected here
+            // and reported by the caller, which owns the issue sink.
+            for (const hit of findBlockControlChars(m[2])) onBlockCommand?.(hit);
             fields.set(parseInt(m[1], 10), { data: decodePrintData(cleaned, codePage), serialStep });
         }
         if (fields.size > 0) byFormat.set(formatId, fields);
@@ -320,6 +415,10 @@ export class IPLViewerParser {
         // that reuse the same field ids). A 0-keyed block (no <ESC>E id) or a
         // field whose format has no dedicated block falls back to the 0 map.
         const codePageMarks = buildCodePageTimeline(code);
+        // A control command inside a print block changes what the field prints
+        // and is stripped from the data, so report it: the preview shows the
+        // field's contents, the printer would not.
+        const blockCommandsSeen = new Set<string>();
         const varData = extractPrintBlockData(code, offset => {
             let page: number | undefined;
             for (const mark of codePageMarks) {
@@ -327,7 +426,17 @@ export class IPLViewerParser {
                 page = mark.page;
             }
             return page;
-        });
+        }, cmd => blockCommandsSeen.add(cmd));
+        for (const cmd of blockCommandsSeen) {
+            const effect = cmd === '<EM>'
+                ? 'it aborts the print job, so fewer labels come out than this preview shows'
+                : cmd === '<DEL>'
+                    ? 'it clears the field\'s data, so the printer prints the field empty'
+                    : 'it moves the field pointer, so the printer puts this data in a different field';
+            this.printer.issue('warning', 'block-control-command',
+                `${cmd} appears in the field data of a print block; ${effect}.`,
+                cmd);
+        }
         if (varData.size > 0) {
             const fallback = varData.get(0);
             for (const el of this.printer.label.elements) {
