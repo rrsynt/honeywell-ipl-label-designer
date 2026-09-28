@@ -13,7 +13,7 @@ import { resolveLabelAtBatch, totalLabelCount } from '../services/ipl/odometer';
 import { streamBatchPages, batchPageCount, MAX_BATCH_EXPORT } from '../services/batchExport';
 import { createZipBlob, zipEntryBytes, numberedPngName, sanitizeBaseName, type ZipEntry } from '../services/zipStore';
 import { bytesToByteString, detectMojibake, convertDirectGraphicsToHex } from '../services/ipl/fileBytes';
-import { describeCodePage } from '../services/ipl/codePages';
+import { describeCodePage, ensureCjkReady } from '../services/ipl/codePages';
 import { notify, requestConfirm } from '../services/uiDialogs';
 import { sendIplViaBridge, pingBridge } from '../services/bridgeSend';
 import { getPrinterTarget, setPrinterTarget } from '../services/printerTarget';
@@ -153,6 +153,8 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
     const [openedFile, setOpenedFile] = useState<string | null>(null);
     const [dropActive, setDropActive] = useState(false);
     const [bwipReady, setBwipReady] = useState(false);
+    /** Set once the CJK code page tables have loaded; re-runs the parse. */
+    const [cjkReady, setCjkReady] = useState(false);
     const [caretHelp, setCaretHelp] = useState<CommandHelp | null>(null);
     const [previewBatch, setPreviewBatch] = useState(0);
     /** Warn about potential mojibake when user pastes cp1252/ANSI-encoded IPL into the textarea. */
@@ -266,6 +268,16 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
         return () => { alive = false; };
     }, []);
 
+    // The four CJK code page tables are ~190 KB and load the same lazy way. A
+    // stream that selects one (<SI>l30..33) parsed before they arrive keeps its
+    // bytes raw, so the parse has to run AGAIN once they land — otherwise the
+    // label stays mojibake for the rest of the session.
+    useEffect(() => {
+        let alive = true;
+        ensureCjkReady().then(() => { if (alive) setCjkReady(true); });
+        return () => { alive = false; };
+    }, []);
+
     // Live parse while typing (debounced)
     useEffect(() => {
         const t = setTimeout(() => setDebouncedCode(iplCode), 300);
@@ -311,7 +323,7 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                 // `<ESC>C<SI>W…`, with no <SI>L).
                 pageHeightDots: paperMm && paperMm.h > 0 ? Math.round(paperMm.h / 25.4 * dpi) : undefined,
             })),
-        [debouncedCode, language, bwipReady, driverModel, dpi, pageOrientation, paperMm],
+        [debouncedCode, language, bwipReady, cjkReady, driverModel, dpi, pageOrientation, paperMm],
     );
     // Importing a design back out of a stream is IPL-only.
     const isZpl = language !== 'ipl';

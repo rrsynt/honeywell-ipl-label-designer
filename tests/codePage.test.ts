@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { decodeCodePage, CODE_PAGES, describeCodePage } from '../services/ipl/codePages';
+import { decodeCodePage, CODE_PAGES, describeCodePage, ensureCjkReady } from '../services/ipl/codePages';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
 import type { TextElement } from '../services/ipl/types';
 
@@ -81,9 +81,14 @@ describe('decodeCodePage', () => {
         }
     });
 
-    it('does not guess for CJK pages (n=30..33)', () => {
+    it('decodes CJK pages (n=30..33) from their own tables, not this one', async () => {
+        // These are double-byte pages whose tables live in codePagesCjkData.ts
+        // and are loaded on demand. Byte 0x84 is a lead byte on all four, so a
+        // bare 0x84 is an ERROR (U+FFFD), never the raw byte — which is what a
+        // pass-through would return. Full coverage in codePageCjk.test.ts.
+        await ensureCjkReady();
         for (const n of [30, 31, 32, 33]) {
-            expect(decodeCodePage(bytes(0x84), n)).toBe(bytes(0x84));
+            expect(decodeCodePage(bytes(0x84), n)).toBe('�');
         }
     });
 
@@ -157,11 +162,11 @@ describe('<SI>l parsing', () => {
         expect(textEl(withDefault).source).toEqual(textEl(without).source);
     });
 
-    it('warns for a CJK page and still renders', () => {
+    it('does not warn for a CJK page, which now decodes', () => {
         const label = parseViewerIPL(
             [stx('<ESC>P'), stx('<SI>l30'), stx('E1;F1'), stx('H0;o10,10;c25;k12;d3,ABC'), stx('R'), stx('<ESC>E1')].join(''),
         );
-        expect(label.issues.some(i => i.code === 'code-page-cjk')).toBe(true);
+        expect(label.issues.some(i => i.code === 'code-page-cjk')).toBe(false);
         expect(textEl(label).source).toEqual({ type: 'fixed', data: 'ABC' });
     });
 
@@ -233,7 +238,8 @@ describe('describeCodePage', () => {
     it('flags resident substitution separately from decoding', () => {
         expect(describeCodePage(2)).toContain('resident');
     });
-    it('says when a page is not decoded', () => {
-        expect(describeCodePage(31)).toContain('not decoded');
+    it('names a CJK page without claiming it is undecoded', () => {
+        expect(describeCodePage(31)).toContain('CP936');
+        expect(describeCodePage(31)).not.toContain('not decoded');
     });
 });

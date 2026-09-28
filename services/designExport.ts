@@ -15,6 +15,7 @@
 import { generateIPL } from './iplGenerator';
 import { parseViewerIPL } from './ipl/viewerParser';
 import { ensureBarcodesReady } from './ipl/barcodes';
+import { ensureCjkReady } from './ipl/codePages';
 import { totalLabelCount } from './ipl/odometer';
 import { streamBatchPages, MAX_BATCH_EXPORT, type BatchPage, type BatchRenderOptions } from './batchExport';
 import { createZipBlob, zipEntryBytes, numberedPngName, sanitizeBaseName, type ZipEntry } from './zipStore';
@@ -25,7 +26,10 @@ export { MAX_BATCH_EXPORT };
 
 /** Prepare the shared engine, then parse the design's own IPL stream. */
 const labelOf = async (design: Design) => {
-    await ensureBarcodesReady(); // the parser measures barcodes via bwip
+    // Both engines are async-only: bwip because the parser measures barcodes
+    // through it, the CJK tables because a parse that runs before they land
+    // leaves <SI>l30..33 data as raw bytes — and an export cannot re-parse.
+    await Promise.all([ensureBarcodesReady(), ensureCjkReady()]);
     return parseViewerIPL(await generateIPL(design));
 };
 

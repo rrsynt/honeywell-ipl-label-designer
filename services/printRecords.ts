@@ -20,6 +20,7 @@
 import { generateIPL } from './iplGenerator';
 import { parseViewerIPL } from './ipl/viewerParser';
 import { ensureBarcodesReady } from './ipl/barcodes';
+import { ensureCjkReady } from './ipl/codePages';
 import { resolveLabelAtBatch } from './ipl/odometer';
 import { planDesignTableJob } from './tableSource';
 import { rowBatchData, type JobPlan } from './csvJob';
@@ -58,7 +59,8 @@ export const labelAtRecord = async (
     recordIndex: number,
     dpi: number,
 ): Promise<ViewerLabel> => {
-    await ensureBarcodesReady();
+    // An export cannot re-parse, so both lazy engines are awaited here.
+    await Promise.all([ensureBarcodesReady(), ensureCjkReady()]);
     if (plan) {
         const index = Math.max(0, Math.min(recordIndex, plan.batch.rows.length - 1));
         return parseViewerIPL(await generateIPL(design, rowBatchData(plan, index)));

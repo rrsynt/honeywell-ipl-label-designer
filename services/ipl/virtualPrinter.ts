@@ -12,7 +12,7 @@
 
 import type { ViewerElement, ViewerIssue, ViewerLabel } from './types';
 import type { DirectGraphic } from './directGraphics';
-import { CODE_PAGES } from './codePages';
+import { CODE_PAGES, isCjkReady } from './codePages';
 
 export interface DownloadedGraphic {
     name?: string;
@@ -112,8 +112,15 @@ export class VirtualPrinter {
 
     /**
      * Printer Language, Select `<SI>ln` (PRM p.133). Records the language so
-     * print data can be decoded from bytes, and reports the families we do not
-     * decode rather than rendering mojibake without explanation.
+     * print data can be decoded from bytes, and reports the one family we
+     * cannot decode rather than rendering mojibake without explanation.
+     *
+     * All four CJK pages (n=30..33) now decode from bundled WHATWG tables, so
+     * they are silent here. They are the only pages whose decode is DEFERRED —
+     * the table arrives by dynamic import — and if it has not landed by the
+     * time a field is read, the bytes pass through raw. That is reported once
+     * per label as `code-page-cjk-pending` so a transient state is never
+     * mistaken for a decoding bug.
      */
     setCodePage(n: number): void {
         this.label.settings.codePage = n;
@@ -122,9 +129,9 @@ export class VirtualPrinter {
             this.issue('warning', 'code-page-unknown',
                 `Printer language <SI>l${n} is not a documented code page; print data is left as raw bytes.`,
                 `<SI>l${n}`);
-        } else if (info.cjk) {
-            this.issue('warning', 'code-page-cjk',
-                `Printer language <SI>l${n} (${info.label}) is a CJK code page and is not decoded; non-ASCII print data may render incorrectly.`,
+        } else if (info.dbcs && !isCjkReady()) {
+            this.issue('info', 'code-page-cjk-pending',
+                `Printer language <SI>l${n} (${info.label}) is still loading; non-ASCII print data will re-render once it arrives.`,
                 `<SI>l${n}`);
         }
     }

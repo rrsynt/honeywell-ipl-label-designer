@@ -30,6 +30,10 @@ testdata/golden/diffs/
 *.crosscheck.zpl
 *.crosscheck.png
 
+# WHATWG Encoding index files, fetched on demand by tools/gen-cjk-codepages.mjs.
+# Upstream artifacts, not ours: the generated tables they produce ARE committed.
+.tmp-whatwg/
+
 # Shared library server data (tools/library-server.mjs). Designs saved here are
 # the shop's, not the repository's.
 library-data/
