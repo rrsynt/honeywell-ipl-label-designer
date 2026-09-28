@@ -398,16 +398,6 @@ Pertanyaannya menyempit dari *"apakah Liberation cukup dekat?"* menjadi
 **"seberapa jauh Andale Mono dari Liberation Mono?"** — dan itu bisa diukur
 sekarang.
 
-**Jalan mengerjakannya, tanpa printer:**
-
-1. Dapatkan face **Andale Mono** (Microsoft mendistribusikannya; juga tersedia
-   di paket `fonts-crosextra-*` / corefonts). **Catatan: tidak terpasang di
-   mesin ini** — sudah dicek, registry font tidak punya entri Andale.
-2. Ukur tabel advance-nya per-glyph dengan metode yang sudah ada di
-   `tests/fontMetrics.test.ts` (metode yang sama yang menghasilkan tabel
-   sekarang).
-3. Bandingkan dengan `MONO_PER_MILLE = 600` di `fontMetrics.ts`.
-
 **Prediksi yang harus diuji, bukan diasumsikan:** Andale Mono adalah face
 monospace, jadi advance-nya **seragam** untuk setiap glyph — yang berarti
 perbedaan face **tidak mengubah lebar field**, hanya bentuk glyph. Kalau
@@ -420,6 +410,112 @@ mengukurnya.
 **Jangan mengerjakan ini dari ingatan.** Angka advance Andale harus diukur dari
 file fontnya, bukan dikutip.
 
+### JAWABAN 2026-09-28 — advance EKSAK 600; yang berbeda bentuk glyph, bukan lebar
+
+Face-nya diunduh dari paket corefonts Microsoft (`andale32.exe` — self-extractor
+berisi CAB; `7zr` yang dibundel tidak punya codec CAB, jadi arsipnya di-carve
+dari PE-nya lalu dibuka dengan `expand.exe`). Angka di bawah dibaca langsung
+dari tabel `hmtx` + `unitsPerEm` di `head` — **bukan dari ingatan, bukan dari
+rasterisasi:**
+
+| face | unitsPerEm | advance mentah | per-mille |
+|---|---|---|---|
+| **Andale Mono** (face printer) | 2048 | **1229 — sama untuk SETIAP glyph ASCII 32–126** | **600** |
+| Liberation Mono (milik kita) | 2048 | 1229 | 600 |
+| Liberation Mono Bold | 2048 | 1229 | 600 |
+
+**Advance Andale identik integer demi integer dengan Liberation Mono.** Jadi
+prediksinya benar: `MONO_PER_MILLE = 600` **eksak** untuk seluruh id yang
+dipetakan ke Andale Mono (20, 21, 22, 25, 32, 35, 38, plus varian "bold"
+26/30/31/33/34/36/37/39/40/41/64 — yang tetap digambar regular weight karena
+itu yang terbukti dipakai printer, lihat `tests/outlineBoldWeight.test.ts`).
+**Tidak ada satu baris kode pun yang berubah**, dan **lebar field monospace
+tidak terpengaruh sama sekali** oleh penggantian face.
+
+**Yang BERBEDA adalah bentuk glyph — dan itu juga terukur.** Pada em yang sama,
+tinta Andale rata-rata **6,7% lebih sempit** dan **4,0% lebih pendek** dari
+Liberation Mono (H 80 vs 88 px, A 110 vs 120, x 89 vs 102, pada em 200 px).
+Ini tidak menggeser apa pun karena advance-nya sama, tapi artinya **tes muat
+margin-tipis terhadap Liberation bukan jaminan**: label yang pas dengan selisih
+<6% bisa meleset di printer. Itu batas sisa akurasi untuk id monospace, dan
+sekarang angkanya tertulis.
+
+**Kontrol yang menyelamatkan saya dari angka palsu — dan nilainya umum.**
+`ctx.font` dengan family yang **tidak terdaftar** jatuh ke face default **tanpa
+error apa pun**. Perbandingan pertama saya ("Andale vs Liberation") sebenarnya
+membandingkan Andale dengan *fallback* — karena `"Liberation Mono"` belum
+didaftarkan di proses itu — dan memberi selisih **39,3%**, bukan 6,7%. Yang
+membongkarnya: dua nama family **palsu** menghasilkan tinta yang **identik
+satu piksel pun**. Sebelum mempercayai perbandingan `ctx.font` apa pun,
+**bandingkan dulu dua family palsu**; kalau keduanya sama, family aslinya juga
+tidak resolve. Di repo ini pendaftarannya `GlobalFonts.registerFromPath` seperti
+di `tests/golden/fonts.ts`.
+
+**Yang BELUM diukur, dan sengaja tidak diklaim:** 23/24 (OCR A/B), 69 (Letter
+Gothic), dan 50/51 (TBMinPro) **bukan** Andale Mono — dan di `FONT_MAP`
+ketiganya memang `type: 'outline'` dengan `family: 'monospace'`, jadi **ikut
+memakai `MONO_PER_MILLE = 600`** (bukan jalur bitmap). Advance OCR A/B dan
+Letter Gothic adalah pertanyaan terbuka yang sama seperti c67 — dan justru
+**lebih berisiko terlihat**, karena ketiganya masih dipetakan ke 600 tanpa
+dasar. Jadi hasil di atas menutup id **Andale** (12 dari 18 id monospace),
+bukan seluruh keluarga.
+
+**Cara mengulang:** `hmtx` + `unitsPerEm` dari `head` memberi advance mentah
+tanpa perlu rasterisasi sama sekali.
+
+### TEMUAN TERPISAH 2026-09-28 — c67 (Century Schoolbook) advance-nya SALAH keluarga
+
+Diukur dari face sungguhan, `CENSCBK.TTF` bawaan Windows (Monotype,
+"Century Schoolbook Regular: 1991", `unitsPerEm` 2048) versus Liberation Serif
+milik kita. **Kontrol dulu**, karena seluruh argumen bergantung padanya: proxy
+yang kita pakai memang benar — Arial ↔ Liberation Sans dan Times New Roman ↔
+Liberation Serif keduanya **selisih rata-rata 0,0 per-mille, maksimum 0** — jadi
+"Liberation cuma proxy" tidak menjelaskan apa pun, dan selisih di bawah nyata.
+
+| pasangan | rata-rata \|Δ\| | maksimum |
+|---|---|---|
+| Arial ↔ Liberation Sans | **0,0** | 0 |
+| Times New Roman ↔ Liberation Serif | **0,0** | 0 |
+| **Century Schoolbook ↔ Liberation Serif** | **59,8** | **406** |
+
+Pada teks label sungguhan @12pt/203dpi (`hDots` 34): `PRODUCT NAME` **+9,8%**
+(+26 dot), `Best Before` **+12,7%** (+20,5 dot), `Net Weight: 500g` **+12,7%**
+(+31 dot). **Field c67 tergambar ~10–13% lebih sempit dari yang dicetak
+printer.** Berbeda dari kasus Andale: di sana advance-nya sama dan hanya bentuk
+glyph yang beda; **di sini advance-nya memang beda, jadi ini kesalahan LEBAR
+FIELD**, bukan sekadar rupa huruf.
+
+Kenapa tak pernah terlihat: `c67` **tidak dipakai satu kali pun** di
+`testdata/` maupun `samples/` (yang muncul hanya c20/21/22/25/26), dan tidak ada
+fixture paritas BarTender yang menyentuhnya — jadi tidak ada tes yang bisa
+gagal. Polanya sama dengan pelajaran "perintah tanpa jalur keputusan": bukan
+dihitung salah, melainkan **tidak pernah dilihat**.
+
+**Konteks keluarga — dua id serif lain justru aman.** c28 dan c66 memetakan ke
+**CG Times** dan **CG Times Bold**, bukan Century Schoolbook. MGW Software
+mengembangkan CG Times dari Times New Roman, jadi pemetaan serif Times-compatible
+kita **tetap benar** untuk keduanya. c67 berdiri sendiri.
+
+**Jalur yang ditempuh: TIDAK diubah sekarang.** Menambah keluarga advance
+keempat ke `fontMetrics.ts` mekanisnya lurus (preseden `UploadedFontMetrics` /
+`registerUploadedFontMetrics` sudah ada, hanya ditanam sebagai resident), tapi
+keputusan itu milik pengguna: face-nya komersial, `c67` nol pemakaian, dan
+setiap keluarga baru menambah tabel yang harus dijaga. Yang dilakukan sekarang
+adalah **mencatat angkanya** supaya tidak hilang, plus menyisakan opsi terbuka.
+
+**Cakupan face yang sekarang tertutup:** Andale Mono ✅ (diukur, eksak),
+Century Schoolbook ✅ (diukur, **beda**), CG Times (Times-compatible,
+didukung proxy 0,0). **Belum diperoleh sama sekali:** Univers (61/62/63/65/68),
+Letter Gothic (69), TBMinPro (50/51), **dan OCR A/B (23/24)** — semuanya masih
+memakai `MONO_PER_MILLE = 600` atau tabel serif tanpa dasar pengukuran. Empat id
+pertama adalah face komersial/bundel printer yang tidak ada di mesin ini;
+OCR A/B adalah face bitmap printer yang tidak diedarkan sebagai TrueType, jadi
+angkanya tidak bisa diambil dengan metode yang sama.
+
+**Prioritas yang tersisa, bila mau dilanjutkan:** 23/24 dan 69 paling berisiko
+karena **masih dipetakan ke 600 tanpa bukti**, sedangkan c67 sudah diukur dan
+sekadar menunggu keputusan.
+
 **Pertanyaan (b) tetap terbuka**, tapi target pencariannya berubah: halaman
 charset K10 menunjuk ke **printer user manual** ("For international character
 sets, see your printer user manual"), bukan mendaftar sendiri. Itu target yang
@@ -427,10 +523,15 @@ belum dicoba. Ada juga jalur yang lebih kuat yang ditemukan riset: program
 Fingerprint `asciitbl_*.prn` bisa **mencetak tabel substitusi langsung dari
 printer fisik** — resep untuk menutupnya definitif kalau ada akses printer.
 
-**Kapan dikerjakan:** (a) sekarang, tanpa printer. (b) setelah ada akses printer
-atau setelah pencarian user manual gagal. Checklist di
-`docs/HONEYWELL-SIMULATOR.md` sudah siap — satu sesi printer cukup untuk
-mengonfirmasi kedelapannya.
+**Kapan dikerjakan:** (a) ✅ **SELESAI 2026-09-28, tanpa printer** — Andale Mono
+600 eksak (tidak ada perubahan kode), plus temuan c67 yang advance-nya beda.
+(b) tetap setelah ada akses printer atau setelah pencarian user manual gagal.
+Checklist di `docs/HONEYWELL-SIMULATOR.md` sudah siap — satu sesi printer cukup
+untuk mengonfirmasi kedelapannya.
+
+**Yang masih menggantung dari (a)** — semuanya menunggu keputusan, bukan
+pengukuran: tabel advance c67 bila ingin diperbaiki; face Univers/Letter
+Gothic/TBMinPro bila ingin diperoleh.
 
 ---
 
@@ -920,7 +1021,10 @@ sebelumnya.
 7. **Guard paritas posisi absolut** — tindak lanjut Tahap 5. ✅ 2026-09-28
    (`tests/bartenderAbsolute.test.ts`: 6 tes, ukuran konten + offset terpaku +
    geometri kisi vs ground truth build-script)
-8. **Tahap 4** — hanya setelah ada printer.
+8. **Tahap 4(a)** — pertanyaan face outline: **dijawab 2026-09-28 tanpa printer**
+   (Andale Mono advance eksak 600 → tidak ada perubahan kode; **c67 Century
+   Schoolbook advance-nya beda ~10–13%** → perlu keputusan). ✅
+9. **Tahap 4(b)** — tabel substitusi resident: hanya setelah ada printer.
 
 Tahap 1 dan 2 adalah satu unit kerja: memperbaiki tanpa memperkuat guard
 berarti mengundang bug yang sama terulang ketiga kalinya.

@@ -76,7 +76,15 @@ perilaku firmware). Opsi realistis:
 - [x] Lebar karakter outline (c20–c28) — aproksimasi 0.6 em sudah DIGANTI tabel
   advance per-glyph hasil ukur font Liberation (Batch U,
   `services/ipl/fontMetrics.ts`); monospace eksak, proporsional ≤0.3%.
-  **Perlu konfirmasi printer:** apakah face outline printer selebar Liberation.
+  **TERJAWAB 2026-09-28 dari file font, tanpa printer:** face printer adalah
+  **Andale Mono / CG Times** (tabel `Font_Type_Select_K10_937-028-003.htm`), dan
+  Andale Mono ternyata **1229/2048 = 600 per-mille — identik integer demi
+  integer dengan Liberation Mono kita**, jadi lebar field monospace
+  (c20/21/22/25/26/30–41/64) **benar apa adanya**; yang masih beda hanya bentuk
+  glyph (~6,7% lebar tinta, tidak menggeser). **Sisa yang perlu printer hanya
+  konfirmasi** bahwa firmware memakai face itu apa adanya. **Temuan c67**
+  (Century Schoolbook, `CENSCBK.TTF`, ~10–13% lebih sempit) tercatat di
+  `docs/research/IMPLEMENTATION-BREAKDOWN-2026-09-26.md` Tahap 4(a).
 - [x] Titik jangkar rotasi f1/f2/f3 — dikunci kontrak `tests/rotationWysiwyg.test.ts`
   (12 kasus) dan disepakati DevGuide p.27; sudah diverifikasi terhadap export
   BarTender (90° CCW).
@@ -125,10 +133,12 @@ perilaku firmware). Opsi realistis:
   `docs/manuals/IPL_Migration_Considerations_PM43_PC43_TechBrief.pdf`,
   `docs/manuals/IPL_Command_Reference_K10_937-028-003/Label_Origin_X_Y_Adjust_K10.htm`.
 
-Yang **belum** bisa diputuskan tanpa printer: apakah metrik face outline printer
-persis menyamai Liberation, dan apakah firmware memakai tabel substitusi
-resident yang sama dengan Appendix B. Keduanya adalah pertanyaan akurasi, bukan
-pertanyaan struktur — struktur sudah teruji.
+Yang **belum** bisa diputuskan tanpa printer: apakah firmware memakai tabel
+substitusi resident yang sama dengan Appendix B. Pertanyaan satunya — apakah
+metrik face outline printer menyamai Liberation — **sudah dijawab 2026-09-28**
+dari file fontnya (Andale Mono 600 eksak; c67 berbeda ~10–13%), jadi yang
+tersisa untuk printer cuma konfirmasi. Keduanya pertanyaan akurasi, bukan
+struktur — struktur sudah teruji.
 
 ### Kalau printer nyata berperilaku beda dari preview — periksa versi firmware dulu
 

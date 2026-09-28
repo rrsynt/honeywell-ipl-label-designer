@@ -15,7 +15,7 @@
 | Renderer stateless | ya, opsi per panggilan | `renderLabel(canvas,label,extent,opts)` murni (dipakai headless vitest); `canvasDrawer` khusus UI designer | ✅ terpisah |
 | Semua koordinat dalam dots | ya, sejak parse time | ya (pt→dots hanya outline `k`, butuh dpi renderer — disengaja) | ✅ diaudit |
 | Golden-file testing | ~109 tes, threshold per-pixel, diff overlay, toleransi didokumentasikan | harness golden 8 kasus + parity suite BarTender (geometry, sweep, auto, golden-pair) + codeword decode | ✅ Fase 3 |
-| Kalibrasi font | tabel tuning per-karakter vs referensi | tabel advance per-glyph Liberation (fontMetrics.ts, ASCII 32–126, per-mille em) dipakai estimateElementSize + border b + import designer | ✅ Batch U 2026-09-24 (mono byte-stable, proporsional ≤0.3% vs measureText) |
+| Kalibrasi font | tabel tuning per-karakter vs referensi | tabel advance per-glyph Liberation (fontMetrics.ts, ASCII 32–126, per-mille em) dipakai estimateElementSize + border b + import designer | ✅ Batch U 2026-09-24 (mono byte-stable, proporsional ≤0.3% vs measureText). **Face printer andal 2026-09-28:** Andale Mono = 600/1000 em eksak (cocok); c67 Century Schoolbook beda ~10–13% pada lebar field |
 | Semantik command yang tak terdokumentasi | — | seluruh 10 pertanyaan terbuka IPL-RENDER-SPEC §15 tertutup 2026-09-25 (jawaban dari manual, export BarTender, atau invarian terukur) | ✅ §15 kosong |
 | Print data non-ASCII | — | code page `<SI>l` (cp850/1250-1258/874/UTF-8) + substitusi resident n=0-9, satu entry point `decodePrintData` | ✅ 2026-09-24 |
 
@@ -107,6 +107,18 @@ Dokumentasi lengkap: [GOLDEN-TESTING.md](GOLDEN-TESTING.md).
       nol. Dua pertanyaan yang benar-benar tersisa: (a) apakah face outline
       printer selebar Liberation, (b) apakah firmware memakai tabel substitusi
       resident yang sama dengan Appendix B.
+      STATUS 2026-09-28: **(a) TERJAWAB TANPA PRINTER.** Face printer
+      sesungguhnya adalah **Andale Mono / CG Times** (tabel
+      `Font_Type_Select_K10_937-028-003.htm`). Andale Mono diukur dari file
+      fontnya: advance **1229/2048 = 600 per-mille, identik integer demi
+      integer** dengan Liberation Mono kita — jadi `MONO_PER_MILLE = 600`
+      **eksak**, tidak ada perubahan kode (bentuk glyph masih beda ~6,7%
+      lebar tinta; angkanya tercatat). **Temuan sampingan yang nyata:** id
+      **c67 Century Schoolbook** (face `CENSCBK.TTF`, Monotype) advance-nya
+      **beda 59,8 per-mille rata-rata (maks 406)** → field c67 tergambar
+      **~10–13% lebih sempit** dari cetakan; belum diperbaiki (c67 nol
+      pemakaian, keputusan pengguna). Dua id serif lain (c28/c66 → CG Times)
+      tetap benar. **Sisa (b)** masih menunggu printer.
       CATATAN: Honeywell resmi menyatakan TIDAK ADA simulator (artikel
       000075988) — jalur: cross-check Labelary (`npm run crosscheck`), akses
       printer fisik (vendor demo/pinjam), kurasi contoh Developer's Guide.
