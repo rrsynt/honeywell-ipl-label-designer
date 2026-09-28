@@ -376,11 +376,49 @@ describe('c63/c65 condensed cuts use measured Univers advances', () => {
         expect(condensed / regular).toBeLessThan(0.9);
     });
 
-    it('no longer warns — the width is now measured, not estimated', () => {
-        for (const id of ['63', '65']) {
-            expect(parseWith(id).issues.filter(i => i.code === 'univers-condensed-width'),
-                `c${id} should no longer warn`).toEqual([]);
-        }
+    it('the old "drawn at regular width" warning is gone for c63', () => {
+        // That warning fired when c63 was metered like the regular sans ids.
+        // c63's width is measured now, so it must not fire.
+        expect(parseWith('63').issues.filter(i => i.code === 'univers-condensed-width')).toEqual([]);
+    });
+
+    // c65 shares c63's table, but the printer's Extra Condensed cut is a
+    // different design about 32% narrower. The table cannot simply be scaled,
+    // because the PAINTING face is shared — narrowing the box would leave the
+    // ink overrunning it, the wall c69 hit. So c65 announces the gap, exactly
+    // as c69 did before a fitting face was found.
+    describe('c65 announces the Extra Condensed gap', () => {
+        it('warns once, and names both the cause and the size', () => {
+            const issues = parseWith('65').issues.filter(i => i.code === 'c65-extra-condensed-width');
+            expect(issues).toHaveLength(1);
+            expect(issues[0].level).toBe('warning');
+            // The message has to be actionable: what is drawn, what is wrong,
+            // and how far off — or it is not an announcement.
+            expect(issues[0].message).toMatch(/32%/);
+            expect(issues[0].message).toMatch(/Condensed Bold|condensed bold/i);
+        });
+
+        it('warns once per LABEL, not once per field', () => {
+            const label = parseViewerIPL([
+                stx('<ESC>P'), stx('E1;F1'),
+                stx('H0;o10,10;c65;k12;d3,AAA'),
+                stx('H1;o10,40;c65;k12;d3,BBB'),
+                stx('H2;o10,70;c65;k12;d3,CCC'),
+                stx('R'), stx('<ESC>E1'),
+            ].join(''));
+            expect(label.elements.filter(e => e.kind === 'text')).toHaveLength(3);
+            expect(label.issues.filter(i => i.code === 'c65-extra-condensed-width')).toHaveLength(1);
+        });
+
+        it('does not fire for c63, whose width IS the measured one', () => {
+            expect(parseWith('63').issues.filter(i => i.code === 'c65-extra-condensed-width')).toEqual([]);
+        });
+
+        it('the warning is not a refusal — c65 still renders', () => {
+            const el = parseWith('65').elements.find(e => e.kind === 'text');
+            expect(el).toBeDefined();
+            expect(FONT_MAP['65'].type).toBe('outline');
+        });
     });
 
     it('the regular Univers ids keep the sans family', () => {

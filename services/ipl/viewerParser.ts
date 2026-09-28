@@ -1310,12 +1310,27 @@ export class IPLViewerParser {
         // free face whose own advance is 500 and whose glyphs fit the cell
         // (Liberation Mono's did not — 25 of 94 overhung, so the letters
         // collided). See fontMetrics.ts.
-        // c63/c65 used to warn here ("condensed cut drawn at regular width").
-        // That is fixed rather than announced: both now resolve to the
-        // 'univers-condensed' family, measured from Adobe's own AFM for the
-        // cuts, so the field is sized at the printer's width. See
+        // c63 used to warn here ("condensed cut drawn at regular width"). That
+        // is fixed rather than announced: c63 resolves to the
+        // 'univers-condensed' family, measured from Adobe's own AFM for that
+        // exact cut, so the field is sized at the printer's width. See
         // fontMetrics.ts for why no face is vendored for it, and why relying on
         // the sans glyphs at those advances is safe here but was not for c69.
+        //
+        // c65 is the other half of that pair and is NOT fixed. It shares c63's
+        // table, but the printer's cut is a different design about 32% narrower
+        // — see fontMetrics.ts for the measurement and for why the table cannot
+        // simply be scaled (the painting face is shared, so the ink would
+        // overrun the narrowed box). This is the situation c69 was in before a
+        // fitting face turned up, announced for the same reason: a knowingly
+        // wrong width is recoverable, a silent one is not. Once per label, not
+        // per field — a label can carry many c65 fields, and one issue each
+        // would bury every other warning.
+        if (font === '65' && !this.printer.hasIssue('c65-extra-condensed-width')) {
+            this.printer.issue('warning', 'c65-extra-condensed-width',
+                'Font c65 (Zurich extra condensed / Univers Extra Condensed) is drawn with c63\'s CONDENSED BOLD advances, the only Univers cut whose metrics could be sourced. The printer\'s Extra Condensed cut is a different design about 32% narrower, so this field prints roughly 32% narrower than the preview. No free face with those metrics exists to correct it.',
+                `H${id ?? ''}`);
+        }
         // "Code pages 11 through 33 do not work with resident fonts" (PRM
         // p.134). Resident bitmap fonts ignore the printer language, so bytes
         // above 0x7F print as whatever the font's own table holds.

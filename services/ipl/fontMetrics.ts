@@ -58,20 +58,48 @@ const SCHOOLBOOK: readonly number[] = [
     574, 556, 444, 463, 389, 611, 537, 778, 537, 537, 481, 333, 606, 333, 606,
 ];
 
-/** Univers Condensed Bold (c63) and Univers Extra Condensed (c65) — the printer's
- *  condensed cuts. Read from Adobe's own AFM for the family
+/** Univers CONDENSED BOLD (c63) — read from Adobe's own AFM for that cut
  *  (`Univers-CondensedBold.afm`, Copyright 1987/1991 Adobe Systems, FullName
  *  "Univers 67 Condensed Bold"), so these are measured, not fitted.
  *
- *  No free face is vendored for it, deliberately: Nimbus Sans Narrow matches the
- *  family only to 40.3 per-mille, and the closest available face (Arial Narrow)
- *  is Windows-only and is a Helvetica Narrow derivative, not Univers. So the
- *  glyphs come from the sans stack at these advances.
+ *  c65 (Zurich extra condensed -> Univers Extra Condensed) SHARES this table.
+ *  That is an approximation, and it is a LARGE one: the two cuts are about 32%
+ *  apart. The driver bundles a separate record for c65's cut
+ *  (`Univers_ExtraCondensed[1252].pfm`; `Zurich_ExtraCondensed[1252].pfm` holds
+ *  the same bytes), and against the Condensed Bold record it measures:
  *
- *  That is safe HERE in a way it was not for Letter Gothic: measured against
- *  these advances, 0 of 67 Liberation Sans glyphs overlap, the tightest (`a`,
- *  531 ink against 556) leaving 25 units of slack. c69's 500 per-mille had 25 of
- *  94 glyphs wider than their own advance. */
+ *      digits   CB 0.5071 em   EC 0.3455 em   -> EC 31.9% narrower
+ *      median per-glyph EC/CB ratio 0.680     -> EC 32.0% narrower
+ *
+ *  The digit figure is the trustworthy one, because Adobe states the Condensed
+ *  Bold digit exactly (0.500 em) so the anchor needs no fitting, and it is
+ *  corroborated by an em-independent check: space/digit is 2.00 in the CB record
+ *  and 2.01 in the EC record, so the two files share proportions and the scale
+ *  difference between them is real rather than an artefact of reading them.
+ *  Alignment is confirmed separately — both files are 672 bytes with identical
+ *  structure, a shift search puts the correct pairing at offset +0 by a wide
+ *  margin (variance 0.014 against 0.10+ for every other shift), and both give
+ *  ten uniform digit widths, which a misread offset would not.
+ *
+ *  Why the c65 table is NOT corrected here. The painting face is the SAME for
+ *  both ids (this stack), so narrowing the box would not narrow the glyphs — the
+ *  ink would overrun it. Measured: at these advances Liberation Sans just fits
+ *  (0 of 67 glyphs overlap, the tightest `a` leaving 25 units of slack); at 68%
+ *  of them it would overflow badly. This is exactly the wall c69 hit, and c69
+ *  only escaped it by finding a face whose own advance was already correct.
+ *  There is no free Univers Extra Condensed face, so that escape is unavailable.
+ *  Deriving one from these files is not trustworthy either: applying the
+ *  within-encoding ratio to Adobe's anchor inherits the anchor's own per-glyph
+ *  error, which reaches 66 per-mille on some glyphs — a fifth of the correction.
+ *
+ *  So c65 keeps this table and ANNOUNCES the gap instead (issue
+ *  `c65-extra-condensed-width`, once per label). Same choice c69 made before a
+ *  face was found for it, and for the same reason.
+ *
+ *  No free face is vendored for this family, deliberately: Nimbus Sans Narrow
+ *  matches it only to 40.3 per-mille, and the closest available face (Arial
+ *  Narrow) is Windows-only and is a Helvetica Narrow derivative, not Univers.
+ *  So the glyphs come from the sans stack at these advances. */
 const UNIVERS_CONDENSED: readonly number[] = [
     222, 333, 333, 444, 444, 778, 667, 222, 278, 278, 444, 500, 222, 333, 222, 278,
     444, 444, 444, 444, 444, 444, 444, 444, 444, 444, 222, 222, 500, 500, 500, 444,
