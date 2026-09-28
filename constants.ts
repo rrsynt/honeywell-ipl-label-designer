@@ -90,9 +90,34 @@ export type FontFamily = 'monospace' | 'sans-serif' | 'serif' | 'schoolbook' | '
 // THE single source of font metrics (audit T1: the designer, the viewer
 // renderer and the parser each used to carry their own diverging table).
 // baseHeight/baseWidth are the GLYPH CELL in dots (PRM270 §7.3: c0 is 7×9,
-// c1 7×11, c2 10×14, c7 5×7); gapWidth is the intercharacter gap (PRM270
-// p.54: c0 prints "with a 1-dot gap"; 2 dots for the rest). Horizontal
+// c1 7×11, c2 10×14, c7 5×7); gapWidth is the intercharacter gap. Horizontal
 // advance = baseWidth + gapWidth — use fontAdvanceDots(), never baseWidth.
+//
+// THE GAP IS DOCUMENTED FOR c0 ONLY. PRM270 p.54 (and DevGuide p.30) state it
+// for c0 alone — "the letters in font c0 are 7 dots wide by 9 dots high, with a
+// 1-dot gap between characters", which the manual's own worked example pins:
+// 10 c0 characters are 79 dots, i.e. 10 × (7+1) − 1. That example is a test in
+// this repo, so c0's 1 is measured against a published number.
+//
+// Every OTHER cell takes 2, and that value is an ASSUMPTION, not a measurement.
+// No manual publishes a gap for c1/c2/c7 or for the c52..c56 CJK cells; there
+// is no per-font gap table; and the driver's per-id PFMs contain no byte or u16
+// reading 1,2,2,2 for c0/c1/c2/c7 at any aligned offset, so it is not in the
+// files either. The nearest published figure is the `z` command's default
+// ("Intercharacter Space for UDF, n = 2"), which is stated for USER-DEFINED
+// fonts and never claimed to govern resident cells.
+//
+// Two sources disagree about the default when `c`'s optional m is absent: the
+// PRMs say "the printer uses the default value of the selected font" (i.e.
+// these per-font values) while the K10 command reference says "Default is 0".
+// The font default is used, because the 79-dot example pins that model for c0;
+// the disagreement is recorded in docs/HONEYWELL-SIMULATOR.md rather than
+// silently resolved — see tests/bitmapTextAdvance.test.ts.
+//
+// Exposure is bounded: for c1 it is 1 dot per character (10 chars meter 88 at
+// gap 2 vs 79 at gap 1). Kept as-is because no source contradicts it, changing
+// it would silently move every existing golden, and an announced assumption is
+// recoverable while a measured-looking wrong number is not.
 export interface FontDef {
     name: string;
     type: 'bitmap' | 'outline';
@@ -177,8 +202,16 @@ export const FONT_FAMILIES: Record<FontFamily, string> = {
 export const fontStack = (family: string | undefined): string =>
     FONT_FAMILIES[family as keyof typeof FONT_FAMILIES] ?? FONT_FAMILIES.monospace;
 
-// Outline font ids per PRM 2.70 p.206 (the authoritative list). c27 exists in
-// 3240-era docs but is absent from the 2.70 table, so it stays out.
+// Outline font ids per PRM 2.70 p.206 (the authoritative list).
+//
+// c27 and c29 are NOT missing fonts — they are RESERVED GAPS. Every manual's
+// per-printer range for the `c` (Font Type, Select) command skips both:
+// "0 to 26, 28, 30 to 41" and "0 to 28, 30 to 41" appear 7-8 times in each of
+// PRM 2.70, the 4400 manual and the older PRM, so an id of 27 or 29 is outside
+// the printer's valid range rather than a face we have not found. The two ids
+// are also absent from every "Values for n" font table and the driver ships no
+// c27.pfm / c29.pfm. They stay out, and the range evidence — not a missing
+// source — is the reason.
 //
 // On the "bold" in these names: measured against a real BarTender export
 // (testdata/bartender-tes1-export.png, whose c26 fields are named "Swiss Mono
@@ -266,10 +299,9 @@ export const FONT_MAP: { [key: string]: FontDef } = {
     // they read 8/11, 16/22, 12/17, 6/9 against published 7x9, 7x11, 10x14,
     // 5x7 — so the PFM template differs and the manual is the authority here.)
     //
-    // The intercharacter gap is NOT published for these ids anywhere in the
-    // manuals, and no sample stream uses them. 2 dots is the convention for
-    // every resident bitmap cell EXCEPT c0 (which is 1), so these take 2 and
-    // the assumption is stated rather than hidden. Advance = width + gap.
+    // The intercharacter gap is NOT published for these ids — same situation as
+    // c1/c2/c7, see the note on the FONT_MAP metrics above. They take the same
+    // 2-dot assumption, stated rather than hidden. Advance = width + gap.
     '52': { name: 'Katakana 12 x 16 bitmap', type: 'bitmap', baseWidth: 12, baseHeight: 16, gapWidth: 2 },
     '53': { name: 'Katakana 16 x 24 bitmap', type: 'bitmap', baseWidth: 16, baseHeight: 24, gapWidth: 2 },
     '54': { name: 'Katakana 24 x 36 bitmap', type: 'bitmap', baseWidth: 24, baseHeight: 36, gapWidth: 2 },

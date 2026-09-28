@@ -455,3 +455,99 @@ describe('c57..c60 stay unknown — not in the authoritative font table', () => 
         }
     });
 });
+
+// c1 and c7 are documented 86XX cells (7x11 and 5x7) and were already correct.
+// What was NOT correct was the metadata around them: constants.ts claimed the
+// intercharacter gap as "2 dots for the rest" with no source. The manuals state
+// a gap for c0 ONLY. These pin the cells (no source needed — the manual's font
+// table names them) and pin that c0's gap is tied to a PUBLISHED number, so the
+// distinction between measured and assumed survives.
+describe('c1/c7 86XX cells, and which gaps are actually documented', () => {
+    it('the cells match the manual table', () => {
+        // PRM 2.70 p.206: "1 7 x 11 OCR (86XX font)", "7 5 x 7 Standard".
+        expect(FONT_MAP['1'].baseWidth).toBe(7);
+        expect(FONT_MAP['1'].baseHeight).toBe(11);
+        expect(FONT_MAP['1'].type).toBe('bitmap');
+        expect(FONT_MAP['7'].baseWidth).toBe(5);
+        expect(FONT_MAP['7'].baseHeight).toBe(7);
+        expect(FONT_MAP['7'].type).toBe('bitmap');
+    });
+
+    it('the id names still state their cells', () => {
+        expect(FONT_MAP['1'].name).toContain('7x11');
+        expect(FONT_MAP['7'].name).toContain('5x7');
+    });
+
+    it('c0 holds the one gap that is published, and the manual example checks it', () => {
+        // PRM270 p.54: "the letters in font c0 are 7 dots wide by 9 dots high,
+        // with a 1-dot gap between characters ... 10 letters ... 79 dots wide".
+        // This is the only gap in the table with a published number behind it.
+        expect(FONT_MAP['0'].gapWidth).toBe(1);
+        expect(FONT_MAP['0'].baseWidth + FONT_MAP['0'].gapWidth).toBe(8);
+        expect(10 * 8 - 1).toBe(79);
+    });
+
+    it('every other bitmap cell carries the assumed gap explicitly', () => {
+        // Not a correctness claim — these values have no published source. The
+        // test exists so that the assumption is visible in one place and cannot
+        // silently become "measured" by a later edit.
+        const ASSUMED_GAP = ['1', '2', '7', '23', '24', '52', '53', '54', '55', '56'];
+        for (const id of ASSUMED_GAP) {
+            expect(FONT_MAP[id].gapWidth, `c${id} must state a gap`).toBe(2);
+        }
+    });
+
+    it('c1 and c7 meter cell+gap, with the last gap dropped', () => {
+        for (const [id, cell] of [['1', 7], ['7', 5]] as [string, number][]) {
+            const label = parseViewerIPL([
+                stx('<ESC>P'), stx('E1;F1'),
+                stx(`H0;o10,10;c${id};h1;w1;d3,ABCDE`), stx('R'), stx('<ESC>E1'),
+            ].join(''));
+            const size = estimateElementSize(textEl(label), 203);
+            expect(size.lengthDots, `c${id} length`).toBe(5 * (cell + 2) - 2);
+            expect(size.crossDots, `c${id} height`).toBe(FONT_MAP[id].baseHeight);
+        }
+    });
+});
+
+// c27 and c29 are RESERVED GAPS in the printer's font-id range, not fonts we
+// failed to find. Every manual's per-printer range for the `c` command skips
+// both — "0 to 26, 28, 30 to 41" and "0 to 28, 30 to 41" appear 7-8 times each
+// across PRM 2.70, the 4400 manual and the older PRM. Neither id appears in any
+// "Values for n" font table, and the driver ships no c27.pfm / c29.pfm.
+//
+// This pins the distinction, because the two cases call for different
+// responses: a MISSING font should be hunted for, while an OUT-OF-RANGE id
+// should stay out. Treating 27/29 as "not yet found" is what would eventually
+// produce invented metrics.
+describe('c27 and c29 are out of range, not missing', () => {
+    it('neither is in FONT_MAP', () => {
+        expect(FONT_MAP['27'], 'c27 is a reserved gap, not a font').toBeUndefined();
+        expect(FONT_MAP['29'], 'c29 is a reserved gap, not a font').toBeUndefined();
+    });
+
+    it('a field using one warns rather than rendering silently', () => {
+        for (const id of ['27', '29']) {
+            const label = parseViewerIPL([
+                stx('<ESC>P'), stx('E1;F1'),
+                stx(`H0;o10,10;c${id};k12;d3,ABC`), stx('R'), stx('<ESC>E1'),
+            ].join(''));
+            const unknown = label.issues.filter(i => i.code === 'unknown-font');
+            expect(unknown, `c${id} must warn`).toHaveLength(1);
+        }
+    });
+
+    it('the neighbouring ids that DO exist are unaffected', () => {
+        // 26 and 28 bracket the 27 gap; 28 and 30 bracket 29. All four are real
+        // and must keep working, or the gap evidence would have been misread as
+        // a reason to remove neighbours.
+        for (const id of ['26', '28', '30']) {
+            const label = parseViewerIPL([
+                stx('<ESC>P'), stx('E1;F1'),
+                stx(`H0;o10,10;c${id};k12;d3,ABC`), stx('R'), stx('<ESC>E1'),
+            ].join(''));
+            expect(label.issues.filter(i => i.code === 'unknown-font'),
+                `c${id} should be known`).toEqual([]);
+        }
+    });
+});
