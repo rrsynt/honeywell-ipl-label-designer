@@ -97,14 +97,55 @@ describe('nominal point sizes for the fixed-size families', () => {
         expect(el.pointSize).toBe(24);
     });
 
-    it('a font with no documented size gets none (does not invent one)', () => {
+    it('a font that documents no size carries none of its own', () => {
+        // c25 names no size, so FONT_MAP must not invent one. This is about the
+        // FONT's metadata only — see the next test for what the FIELD falls back
+        // to, which is a separate question this test used to conflate.
         expect(FONT_MAP['25'].defaultPointSize).toBeUndefined();
+    });
+
+    // The printer has a published default for a field that specifies no size, so
+    // an unsized outline field is NOT an error and must not be left undefined.
+    // `k` (Point Size, Set) reads "n = 12" on every printer (PRM 2.70 p.207).
+    //
+    // Leaving it undefined used to send the field down the renderer's last
+    // branch, which treats it as a BITMAP cell — all fifteen ids without a
+    // nominal size (c25, c26, c28, c50-c70 apart from the numbered monospace
+    // ones) came out drawn as a 7x9 cell, ~a third of the printer's size, and
+    // silently. Measured: c28 with no k metered 50x18 dots where k12 gives 59x22.
+    it('an unsized outline field falls back to the documented 12pt, not to bitmap math', () => {
+        for (const id of ['25', '26', '28', '50', '51', '61', '66', '67', '69']) {
+            const label = parseViewerIPL([
+                stx('<ESC>P'), stx('E1;F1'),
+                stx(`H0;o10,10;c${id};d3,ABC`),
+                stx('R'), stx('<ESC>E1'),
+            ].join(''));
+            expect(textEl(label).pointSize, `c${id} with no k must resolve to 12pt`).toBe(12);
+            expect(label.issues.filter(i => i.code === 'unknown-font'), `c${id}`).toEqual([]);
+        }
+    });
+
+    it('an unsized field meters the same as an explicit k12', () => {
+        // The point of the fallback: identical layout, so a stream that omits k
+        // is not laid out differently from one that states the default.
+        for (const id of ['25', '28', '67']) {
+            const mk = (params: string) => estimateElementSize(textEl(parseViewerIPL([
+                stx('<ESC>P'), stx('E1;F1'),
+                stx(`H0;o10,10;c${id};${params}d3,ABC`),
+                stx('R'), stx('<ESC>E1'),
+            ].join(''))), 203);
+            expect(mk(''), `c${id} unsized vs k12`).toEqual(mk('k12;'));
+        }
+    });
+
+    it('a nominal size still wins over the fallback', () => {
+        // c20 names 8pt, so it must NOT be dragged up to 12 by the new default.
         const el = textEl(parseViewerIPL([
             stx('<ESC>P'), stx('E1;F1'),
-            stx('H0;o10,10;c25;d3,ABC'),
+            stx('H0;o10,10;c20;d3,ABC'),
             stx('R'), stx('<ESC>E1'),
         ].join('')));
-        expect(el.pointSize).toBeUndefined();
+        expect(el.pointSize).toBe(8);
     });
 });
 

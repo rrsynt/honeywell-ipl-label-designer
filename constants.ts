@@ -127,10 +127,16 @@ export interface FontDef {
     gapWidth?: number;
     family?: FontFamily;
     /**
-     * Nominal size in points for the fixed-size families (c20 8pt, c21 12pt,
-     * c22 20pt, c30-c41 …). The printer uses this when the field carries no
-     * `k` point size; without it every member of that family would render at
-     * one indistinguishable size.
+     * Nominal size in points for the families that name one (c20 8pt, c21 12pt,
+     * c22 20pt, c30-c41 …). The printer uses this when the field carries no `k`
+     * point size; without it every member of that family would render at one
+     * indistinguishable size.
+     *
+     * ABSENT means the font documents no size — it does NOT mean the field is
+     * unsized. Fifteen outline ids have none (c25, c26, c28, c50-c70 apart from
+     * the numbered monospace ones), and for those the field falls back to the
+     * `k` command's own published default of 12pt. See
+     * OUTLINE_DEFAULT_POINT_SIZE in services/ipl/viewerParser.ts.
      */
     defaultPointSize?: number;
 }

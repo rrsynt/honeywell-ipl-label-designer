@@ -21,6 +21,11 @@ export const OUTLINE_FONTS = new Set(
     Object.entries(FONT_MAP).filter(([, f]) => f.type === 'outline').map(([id]) => id),
 );
 
+// The point size an outline field falls back to when the stream gives it nothing
+// to go on. `k` (Point Size, Set) is documented as "n = 12" for every printer
+// (PRM 2.70 p.207), so that is the size the printer itself would use.
+const OUTLINE_DEFAULT_POINT_SIZE = 12;
+
 // Frames are normalized by the tokenizer, so ESC always appears literally.
 const LITERAL_ESC = '<ESC>';
 
@@ -1400,6 +1405,19 @@ export class IPLViewerParser {
             // that family would paint at one identical size, so the id would
             // carry no meaning at all.
             if (pointSize === undefined) pointSize = FONT_MAP[font]?.defaultPointSize;
+            // Still nothing: the printer has a published default for exactly
+            // this case. `k` (Point Size, Set) is "n = 12" on EVERY printer
+            // (PRM 2.70 p.207), so an outline field with no k, no h/w and no
+            // nominal size the font itself carries prints at 12 points.
+            //
+            // This used to fall through with pointSize undefined, and the
+            // renderer's last branch then treated the field as a BITMAP cell —
+            // every one of the fifteen ids that lack a nominal size (c25, c26,
+            // c28, c50-c70 minus the numbered monospace ones) came out drawn as
+            // a 7x9 cell, roughly a third the size the printer would use, and
+            // without any warning. Measured: c28 with no k metered 50x18 dots
+            // against 59x22 at k12.
+            if (pointSize === undefined) pointSize = OUTLINE_DEFAULT_POINT_SIZE;
         } else {
             if (hMag < 1 || wMag < 1 || hMag > 99 || wMag > 99) {
                 this.printer.issue('warning', 'magnification-invalid', `Bitmap font magnification h${hMag}/w${wMag} is outside 1-99.`, `H${id ?? ''}`);
