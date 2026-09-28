@@ -758,20 +758,20 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
             commands.push(`<STX><ESC>E${formatId}<CAN>${dataForPrintBlock.join('')}<RS>1<ETB><FF><ETX>`);
         }
     } else {
-        let printJobBlock = '';
         const dataForPrintBlock: string[] = [];
         // Batch Q: printer-side serial odometer. IPL advances <FS>…<FS>
-        // (numeric) regions of entered data by the job's <ESC>In step after
-        // EVERY printed label (PRM pp.98-99,104,111) — so quantity N prints
-        // start, start+step, … without the host resending. The step is
-        // job-level (one per stream), so if several serial counters disagree
-        // the first one (lowest field id) wins; the viewer's
-        // resolveLabelAtBatch simulates the same advance for preview/export.
-        let serialStep: number | null = null;
+        // (numeric) regions of entered data by the field's <ESC>In step after
+        // EVERY printed label (PRM pp.98-99,103-104,111) — so quantity N prints
+        // start, start+step, … without the host resending. The step belongs to
+        // the FIELD it follows ("Sets the increment value for the selected
+        // field", PRM p.104), so it is emitted inside that field's own slice:
+        // two counters may then run in opposite directions, which a single
+        // block-level step could not express. The viewer's resolveLabelAtBatch
+        // simulates the same per-field advance for preview/export.
 
         variableFieldsForPrint.sort((a,b) => a.field.id - b.field.id).forEach(({ field, source }) => {
             let data = '';
-            let serialWrap = false;
+            let serialStep: number | null = null;
             const fieldDataSource = field.dataSource;
 
             if (source) {
@@ -782,8 +782,7 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
                 } else if (source.type === 'counter') {
                     data = source.start.toString().padStart(source.padding, '0');
                     if (source.serial && source.step !== 0) {
-                        serialWrap = true; // numeric region (PRM p.111)
-                        if (serialStep === null) serialStep = source.step;
+                        serialStep = source.step;
                     }
                 }
             } else if (fieldDataSource.type === 'variable') {
@@ -797,13 +796,18 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
             data = sanitizePrintData(dataOrSuppressed(field, data, design));
 
             // The sanitizer strips <FS> too — odometer markers go on LAST.
-            if (serialWrap) data = `<FS>${data}<FS>`;
+            if (serialStep !== null) data = `<FS>${data}<FS>`;
 
             if (field.type === 'text') {
                 data = data.replace(/\n/g, '<SUB><CR>');
             }
 
-            dataForPrintBlock.push(`<ESC>F${field.id}<NUL>${data}`);
+            // The step rides inside the field's slice, so the printer applies
+            // it to THIS field and the parser attributes it back.
+            const stepCommand = serialStep === null
+                ? ''
+                : serialStep > 0 ? `<ESC>I${serialStep}` : `<ESC>D${Math.abs(serialStep)}`;
+            dataForPrintBlock.push(`<ESC>F${field.id}<NUL>${data}${stepCommand}`);
         });
 
         const { formatId } = formatForLabel(design, conditionalGroupIds);
@@ -811,15 +815,11 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
         if (dataForPrintBlock.length > 0) {
             printCommands += dataForPrintBlock.join('');
         }
-        if (serialStep !== null) {
-            printCommands += serialStep > 0 ? `<ESC>I${serialStep}` : `<ESC>D${Math.abs(serialStep)}`;
-        }
         if (quantity > 1) {
             printCommands += `<RS>${quantity}`;
         }
         printCommands += `<ETB><FF>`;
-        printJobBlock = `<STX>${printCommands}<ETX>`;
-        commands.push(printJobBlock);
+        commands.push(`<STX>${printCommands}<ETX>`);
     }
 
     return commands.filter(Boolean).join(EOL);

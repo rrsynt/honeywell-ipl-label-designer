@@ -131,8 +131,8 @@ describe('extractPrintBlockData', () => {
             const byFormat = extractPrintBlockData(code);
             const map = byFormat.get(1);
             expect(map, 'data keyed under format 1 (from <ESC>E1)').toBeDefined();
-            expect(map!.get(1)).toBe('AAA');
-            expect(map!.get(2)).toBe('BBB');
+            expect(map!.get(1)?.data).toBe('AAA');
+            expect(map!.get(2)?.data).toBe('BBB');
         }
     });
 
@@ -140,8 +140,8 @@ describe('extractPrintBlockData', () => {
         const code = '<STX><ESC>E1<CAN><ESC>F1<NUL>FROM-ONE<ETB><FF><ETX>'
             + '<STX><ESC>E2<CAN><ESC>F1<NUL>FROM-TWO<ETB><FF><ETX>';
         const byFormat = extractPrintBlockData(code);
-        expect(byFormat.get(1)?.get(1)).toBe('FROM-ONE');
-        expect(byFormat.get(2)?.get(1)).toBe('FROM-TWO');
+        expect(byFormat.get(1)?.get(1)?.data).toBe('FROM-ONE');
+        expect(byFormat.get(2)?.get(1)?.data).toBe('FROM-TWO');
     });
 });
 
@@ -298,7 +298,9 @@ describe('fase 2 completion: interpretive, border, inc/dec', () => {
         const label = parseViewerIPL(code);
         expect(label.settings.batchCount).toBe(3);
         expect(label.settings.quantity).toBe(2);
-        expect(label.settings.increment).toBe(5);
+        // The step is per field (PRM p.104), carried on the element it was set
+        // on — here <ESC>I5 sits inside field 0's slice.
+        expect((label.elements[0] as { serialStep?: number }).serialStep).toBe(5);
         void code;
     });
 });

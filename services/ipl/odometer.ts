@@ -10,6 +10,18 @@ import type { ViewerLabel, ViewerElement } from './types';
 const FS = '<FS>';
 const GS = '<GS>';
 
+/**
+ * The viewer keeps a raw printer capture's control BYTES as bytes (Direct
+ * Graphics payloads are read byte-wise), so an <FS> region may arrive as
+ * \x1c rather than the literal placeholder. Fold both spellings onto the
+ * literal form so the region matcher below sees one shape; the delimiters are
+ * control markers and are stripped from the display either way.
+ */
+const literalizeSeparators = (data: string): string =>
+    data.includes('\x1c') || data.includes('\x1d')
+        ? data.replace(/\x1c/g, FS).replace(/\x1d/g, GS)
+        : data;
+
 /** Numeric odometer: digits advance by n; 9→0 carries left. */
 const advanceNumeric = (digits: string, step: number, sign: 1 | -1): string => {
     const width = digits.length;
@@ -59,22 +71,32 @@ export const resolveLabelAtBatch = (
         const elements = label.elements.map(el => {
             if (el.kind !== 'text' && el.kind !== 'barcode') return el;
             const src = el.source;
-            if ((src.type !== 'fixed' && src.type !== 'variable') ||
-                (!src.data.includes(FS) && !src.data.includes(GS))) return el;
-            return { ...el, source: { ...src, data: src.data.replace(/<(FS|GS)>/g, '') } } as ViewerElement;
+            if (src.type !== 'fixed' && src.type !== 'variable') return el;
+            const data = literalizeSeparators(src.data);
+            if (!data.includes(FS) && !data.includes(GS)) return el;
+            return { ...el, source: { ...src, data: data.replace(/<(FS|GS)>/g, '') } } as ViewerElement;
         });
         return { ...label, elements };
     }
-    const step = label.settings.increment ?? label.settings.decrement ?? 1;
-    const sign: 1 | -1 = label.settings.increment !== undefined ? 1 : -1;
-
     const elements: ViewerElement[] = label.elements.map(el => {
         if (el.kind !== 'text' && el.kind !== 'barcode') return el;
         const src = el.source;
         if (src.type !== 'fixed' && src.type !== 'variable') return el;
-        if (!src.data.includes(FS) && !src.data.includes(GS)) return el;
+        const data = literalizeSeparators(src.data);
+        if (!data.includes(FS) && !data.includes(GS)) return el;
 
-        const advanced = src.data.replace(/<FS>([^<]*)<FS>|<FS>([^<]*)<GS>/g, (_m, a: string, b: string) => {
+        // A field advances by ITS OWN step. When the field carries none, the
+        // printer's documented default of 1 applies (PRM p.104 "Printer Default
+        // Values for n: All n = 1") — NOT some other field's step, which is the
+        // leak that used to make every field in a job move together. A step of
+        // 0 is <ESC>N, whose command name is "Increment and Decrement, Disable"
+        // (p.109): the field stops.
+        const own = el.serialStep;
+        const step = own === undefined ? 1 : Math.abs(own);
+        const sign: 1 | -1 = own !== undefined && own < 0 ? -1 : 1;
+        if (step === 0) return { ...el, source: { ...src, data: data.replace(/<(FS|GS)>/g, '') } } as ViewerElement;
+
+        const advanced = data.replace(/<FS>([^<]*)<FS>|<FS>([^<]*)<GS>/g, (_m, a: string, b: string) => {
             const region = a ?? b;
             const isNumeric = a !== undefined;
             const delta = step * batchIndex;

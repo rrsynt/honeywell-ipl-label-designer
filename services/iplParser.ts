@@ -2,6 +2,7 @@ import type { Design, Field, TextField, BarcodeField, LineField, BoxField, Image
 import { DPI_MAP, FONT_MAP, POINTS_TO_MM } from '../constants';
 import { decodeGraphicColumns } from './ipl/graphics';
 import { normalizeAllControlChars, maskFieldPayloads } from './ipl/tokenizer';
+import { readFieldStep } from './ipl/viewerParser';
 
 const dotsToMm = (dots: number, dpi: PrinterSettings['dpi']): number => {
     return dots / DPI_MAP[dpi];
@@ -366,23 +367,23 @@ export const parseIPL = (rawInput: string, dpi: PrinterSettings['dpi']): Design 
         // The generator (and human-readable IPL listings) spell control characters
         // as literal placeholders; real printer streams use raw bytes. Accept both.
         const dataBlock = printDataMatch[1].replace(/<ESC>/g, '\x1b').replace(/<NUL>/g, '\x00');
-        // Batch Q: the job-level odometer step — <ESC>In increments the
-        // <FS>…<FS> numeric region after every printed label, <ESC>Dn
-        // decrements. Read it once for the whole block (printer semantics:
-        // one step per job, PRM p.104).
-        const incMatch = /\x1bI(\d+)/.exec(dataBlock);
-        const decMatch = /\x1bD(\d+)/.exec(dataBlock);
-        const serialStep = incMatch ? parseInt(incMatch[1], 10) : decMatch ? -parseInt(decMatch[1], 10) : null;
+        // Batch Q: the odometer step — <ESC>In increments the <FS>…<FS> numeric
+        // region after every printed label, <ESC>Dn decrements, <ESC>N cancels.
+        // The step is read from EACH field's own slice, because it belongs to
+        // the field it follows (PRM p.104 "Sets the increment value for the
+        // selected field"): a job may advance one counter up and another down.
         const serialCounters = new Map<string, string>(); // region|step -> counter id
 
         const fieldDataRegex = /\x1bF(\d+)\x00([\s\S]*?)(?=\x1bF\d+\x00|$)/g;
         const fieldDataMap = new Map<string, string>();
+        const fieldStepMap = new Map<string, number | undefined>();
         let match;
         while((match = fieldDataRegex.exec(dataBlock)) !== null) {
-            // Strip the job-level odometer command from the LAST field's
-            // capture — it configures the print, it is not printable data
-            // (the viewer's extractPrintBlockData does the same).
-            fieldDataMap.set(match[1], match[2].replace(/\x1b[DI]\d*/g, ''));
+            // Read this field's step before stripping; the strip removes the
+            // command from the capture — it configures the print, not printable
+            // data (the viewer's extractPrintBlockData does the same).
+            fieldStepMap.set(match[1], readFieldStep(match[2]));
+            fieldDataMap.set(match[1], match[2].replace(/\x1b[DIN]\d*/g, ''));
         }
 
         variableFields.sort((a,b) => a.id - b.id).forEach(field => {
@@ -400,7 +401,11 @@ export const parseIPL = (rawInput: string, dpi: PrinterSettings['dpi']): Design 
                     // the lot-template pattern) share ONE counter.
                     const region = /^(?:<FS>|\x1c)([0-9]+)(?:<FS>|\x1c)$/.exec(parsedData.trim());
                     if (region) {
-                        const key = `${region[1]}|${serialStep ?? 1}`;
+                        // This field's OWN step; 0 is <ESC>N's cancel, which
+                        // survives the fallback because ?? only replaces
+                        // undefined. A stream that sets no step gets the default.
+                        const step = fieldStepMap.get(field.id.toString()) ?? 1;
+                        const key = `${region[1]}|${step}`;
                         let counterId = serialCounters.get(key);
                         if (!counterId) {
                             counterId = `cnt-imp-${field.id}`;
@@ -410,7 +415,7 @@ export const parseIPL = (rawInput: string, dpi: PrinterSettings['dpi']): Design 
                                 type: 'counter',
                                 name: `Counter ${design.dataSources.filter(s => s.type === 'counter').length + 1}`,
                                 start: parseInt(region[1], 10),
-                                step: serialStep ?? 1, // printer default when the stream omits <ESC>I
+                                step, // printer default when the stream sets no step
                                 padding: region[1].length,
                                 serial: true,
                             };

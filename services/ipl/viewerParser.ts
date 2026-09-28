@@ -102,6 +102,48 @@ const applyPlacement = (el: ViewerElement, p: PagePlacement): ViewerElement => {
 
 
 /**
+ * One `<ESC>F<id>` slice of a print block: the data the host sent for that
+ * field, plus the odometer step the field was given.
+ */
+export interface PrintBlockEntry {
+    data: string;
+    /**
+     * Signed step from `<ESC>In` / `<ESC>Dn` found inside THIS field's slice
+     * (positive increments, negative decrements), or 0 when `<ESC>N` cleared
+     * the field's flags. Undefined when the field set no step of its own.
+     *
+     * The step is per field, not per job: PRM p.104 "Sets the increment value
+     * for the selected field", p.103 the same for decrement, p.97 "Each region
+     * independently increments or decrements according to the increment or
+     * decrement value specified for the field". A job may therefore advance one
+     * field upward by 1 while another runs downward by 10.
+     */
+    serialStep?: number;
+}
+
+/**
+ * Reads the odometer step a field's slice assigns it, in command order: a
+ * later `<ESC>In`/`<ESC>Dn` supersedes an earlier one, and `<ESC>N` (PRM p.109
+ * "Resets any increment or decrement flags for the current field") clears
+ * whatever came before it.
+ *
+ * A bare `<ESC>I` with no value is malformed — the syntax is `<ESC>In where n
+ * is the increment value` — so it leaves the step untouched rather than
+ * inventing the documented default of 1.
+ */
+export const readFieldStep = (slice: string): number | undefined => {
+    let step: number | undefined;
+    const re = /(?:<ESC>|\x1b)([IDN])(\d*)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(slice)) !== null) {
+        if (m[1] === 'N') { step = 0; continue; }
+        if (m[2] === '') continue;
+        step = m[1] === 'I' ? parseInt(m[2], 10) : -parseInt(m[2], 10);
+    }
+    return step;
+};
+
+/**
  * Extracts variable-field data from EVERY print block, keyed by the format id
  * its <ESC>E<id> invocation names (blocks without one key to 0). Scoping by
  * format matters: a page composing formats 1 and 2 (each with its own field 1)
@@ -116,8 +158,8 @@ const applyPlacement = (el: ViewerElement, p: PagePlacement): ViewerElement => {
 export const extractPrintBlockData = (
     code: string,
     codePageAt: (offset: number) => number | undefined = () => undefined,
-): Map<number, Map<number, string>> => {
-    const byFormat = new Map<number, Map<number, string>>();
+): Map<number, Map<number, PrintBlockEntry>> => {
+    const byFormat = new Map<number, Map<number, PrintBlockEntry>>();
     // Optional <ESC>E<id> prefix (both notations); terminator <ETB>/<RS>/<FF>.
     const blockRe = /(?:<ESC>E(\d*)|\x1bE(\d*))?(?:<CAN>|\x18)([\s\S]*?)(?:<(?:ETB|RS|FF)>|[\x17\x1e\x0c])/gi;
     let bm: RegExpExecArray | null;
@@ -127,10 +169,13 @@ export const extractPrintBlockData = (
         const block = bm[3]
             .replace(new RegExp(LITERAL_ESC, 'g'), '\x1b')
             .replace(/<NUL>/g, '\x00');
-        const fields = byFormat.get(formatId) ?? new Map<number, string>();
+        const fields = byFormat.get(formatId) ?? new Map<number, PrintBlockEntry>();
         const fieldRegex = /\x1bF(\d+)\x00([\s\S]*?)(?=\x1bF\d+\x00|$)/g;
         let m: RegExpExecArray | null;
         while ((m = fieldRegex.exec(block)) !== null) {
+            // Read the step before stripping: it lives in the same slice, and
+            // the strip below removes it from the printable data.
+            const serialStep = readFieldStep(m[2]);
             // Strip in-block printer commands (<ESC>x, <US>/<RS> counts, raw
             // control bytes) from the captured data; they configure the job, not
             // print as text.
@@ -140,7 +185,7 @@ export const extractPrintBlockData = (
                 .replace(/<(US|RS)>\d*/g, '')
                 .replace(/[\x1f\x1e]\d*/g, '')
                 .replace(/<SUB><CR>/g, '\n');
-            fields.set(parseInt(m[1], 10), decodePrintData(cleaned, codePage));
+            fields.set(parseInt(m[1], 10), { data: decodePrintData(cleaned, codePage), serialStep });
         }
         if (fields.size > 0) byFormat.set(formatId, fields);
     }
@@ -245,12 +290,12 @@ export class IPLViewerParser {
         const usMatch = /(?:<US>|\x1f)(\d+)/.exec(jobCode);
         if (usMatch) this.printer.label.settings.batchCount = parseInt(usMatch[1], 10);
 
-        // Increment/decrement steps, applied to <FS>/<GS> regions once per
-        // batch after it prints (PRM pp.98-99). <ESC>N resets both.
-        const inc = /(?:<ESC>I|\x1bI)(\d*)/.exec(jobCode.replace(new RegExp(LITERAL_ESC, 'g'), '\x1b'));
-        if (inc && inc[1] !== '') this.printer.label.settings.increment = Math.min(parseInt(inc[1], 10) || 1, 9999);
-        const dec = /(?:<ESC>D|\x1bD)(\d*)/.exec(jobCode.replace(new RegExp(LITERAL_ESC, 'g'), '\x1b'));
-        if (dec && dec[1] !== '') this.printer.label.settings.decrement = Math.min(parseInt(dec[1], 10) || 1, 9999);
+        // Increment/decrement steps are NOT read here. They are per field
+        // (<ESC>In "Sets the increment value for the selected field", PRM
+        // p.104), so they are attributed to the field that owns them in
+        // extractPrintBlockData and travel on the element as serialStep.
+        // Scanning the whole stream for the first <ESC>I — as this used to —
+        // gave every field in the job one shared step.
 
         if (this.printer.label.elements.length === 0 && this.printer.pendingDirectGraphics.length === 0 && !this.printer.hasIssue('no-format')) {
             this.printer.issue(
@@ -276,10 +321,17 @@ export class IPLViewerParser {
         if (varData.size > 0) {
             const fallback = varData.get(0);
             for (const el of this.printer.label.elements) {
-                if ((el.kind === 'text' || el.kind === 'barcode') && el.source.type === 'variable' && el.id !== undefined) {
+                if ((el.kind === 'text' || el.kind === 'barcode') && el.id !== undefined) {
                     const fmtFields = varData.get(this.printer.formatIdOf(el));
-                    const data = (fmtFields ?? fallback)?.get(el.id);
-                    if (data !== undefined) el.source = { type: 'variable', data };
+                    const entry = (fmtFields ?? fallback)?.get(el.id);
+                    if (entry === undefined) continue;
+                    // The step is a property of the FIELD, so it attaches even
+                    // when the field carries no entered data (a stored-data field
+                    // may hold its own <FS> region). It travels with the element
+                    // rather than the label so two fields can advance
+                    // differently — see PrintBlockEntry.serialStep.
+                    if (entry.serialStep !== undefined) el.serialStep = entry.serialStep;
+                    if (el.source.type === 'variable') el.source = { type: 'variable', data: entry.data };
                 }
             }
         }

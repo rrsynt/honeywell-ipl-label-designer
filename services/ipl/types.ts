@@ -22,6 +22,16 @@ interface ElementBase {
     oy: number;
     /** Rotation quadrant 0-3 (IPL f parameter). */
     f: number;
+    /**
+     * Signed per-field odometer step for this field's <FS>/<GS> regions
+     * (<ESC>In / <ESC>Dn, PRM pp.103-104). The step belongs to the field it was
+     * set on — "Sets the increment value for the selected field" — so two
+     * fields in one job may advance in opposite directions by different
+     * amounts. Positive increments, negative decrements; 0 means <ESC>N
+     * cancelled the field's flags. Absent when the field set no step of its
+     * own, which falls back to the printer's documented default of 1.
+     */
+    serialStep?: number;
 }
 
 export type FieldSource =
@@ -192,10 +202,6 @@ export interface LabelSettingsInfo {
     quantity?: number;
     /** Copies per batch (<US>n). Total labels = batches x copies. */
     batchCount?: number;
-    /** Field increment step (<ESC>In). Default 1. */
-    increment?: number;
-    /** Field decrement step (<ESC>Dn). */
-    decrement?: number;
     formatNumber?: number;
     /** Page id when a page (Sn) is defined. */
     pageNumber?: number;

@@ -78,7 +78,11 @@ describe('B: d3 fixed text cannot hijack job commands', () => {
     it('viewer: "<ESC>I9" inside fixed text does not fake an odometer step', async () => {
         const ipl = await generateIPL(designWith('SERIAL <ESC>I9 HERE', 1));
         const label = parseViewerIPL(ipl);
-        expect(label.settings.increment).toBeUndefined();
+        // The step lives on the element now (per-field, PRM p.104), so the
+        // fixed-text field must carry none.
+        for (const el of label.elements) {
+            expect((el as { serialStep?: number }).serialStep).toBeUndefined();
+        }
     });
 
     it('importer: quantity from text "<RS>77" ignored; real <RS> still read', async () => {
