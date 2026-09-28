@@ -107,3 +107,63 @@ describe('setup commands that change the image but are not modelled', () => {
         }
     });
 });
+
+// ---------------------------------------------------------------------------
+// The <ESC> surface — the sweep that found these is tests/commandSurface.test.ts
+// ---------------------------------------------------------------------------
+describe('<ESC> commands that change the image but are not modelled', () => {
+    // These arrived the same way the <SI> ones did: the manual's command index
+    // swept against the parser's dispatch. Every unmatched <ESC> command used
+    // to fall through to one generic `esc-command` info, so a command that
+    // changes the picture looked exactly like one that does not.
+    const escStream = (...frames: string[]): string =>
+        ['<STX><ESC>P<ETX>', '<STX>E1;F1;<ETX>', ...frames.map(f => `<STX>${f}<ETX>`),
+         '<STX>B1;o10,10;c3;h40;w2;d3,123<ETX>', '<STX>R<ETX>'].join('\n');
+    const escWarned = (...frames: string[]): boolean =>
+        parseViewerIPL(escStream(...frames)).issues.some(
+            i => i.code === NOT_MODELLED && i.level === 'warning');
+
+    it('warns for Emulation Mode (<ESC>c), which retimes the engine', () => {
+        // PRM 2.70 p.102: n=0 -> 10 mil dots, n=1 -> 15 mil for bar codes.
+        // The preview draws Advanced-mode geometry, so either value diverges.
+        expect(escWarned('<ESC>c0')).toBe(true);
+        expect(escWarned('<ESC>c1')).toBe(true);
+    });
+
+    it('warns for Page Select (<ESC>G) only when it targets a different page', () => {
+        // The viewer composes the LAST page defined. Selecting that same page
+        // is what it already draws, so only a mismatch is a divergence —
+        // bartender-auto.ipl defines page 3 and selects page 3, and warning
+        // there was a false positive the shipped-sample guard caught.
+        const twoPages = ['S1;Ma,1;O0,0', 'S2;Ma,2;O0,0'];
+        expect(escWarned(...twoPages, '<ESC>G1'), 'page 1 vs last-defined 2').toBe(true);
+        expect(escWarned(...twoPages, '<ESC>G2'), 'the page we already draw').toBe(false);
+        // No page defined at all: nothing to compose either way.
+        expect(escWarned('<ESC>G3')).toBe(false);
+    });
+
+    it('warns for Code 39 start/stop only (<ESC><SP>), in every notation', () => {
+        // PRM p.117: "print only the start and stop characters" — a printed
+        // field's content changes. The command IS a trailing space, which
+        // tokenizeFrames trims, so a standalone literal frame loses it; the
+        // raw scan is what makes all three spellings detectable.
+        expect(escWarned('<ESC> '), 'literal standalone').toBe(true);
+        expect(escWarned('<ESC> <ESC>F1<NUL>X'), 'literal mid-frame').toBe(true);
+        const raw = '\x02\x1bP\x03\x02E1;F1;\x03\x02\x1b \x03\x02R\x03';
+        expect(parseViewerIPL(raw).issues.some(i => i.code === NOT_MODELLED), 'raw bytes').toBe(true);
+    });
+
+    it('stays silent for the <ESC> commands that cannot change the picture', () => {
+        // Neighbours a loose matcher would sweep in. <ESC>C1 and <ESC>E1 carry
+        // bare digits exactly like <ESC>c1 / <ESC>G1; <ESC>T enters Test and
+        // Service mode (the printer finishes the job first, so the label on
+        // screen still prints); <ESC>N clears an odometer flag this viewer
+        // models per field; <ESC>I5 attaches to its field.
+        for (const f of ['<ESC>C1', '<ESC>E1', '<ESC>E4', '<ESC>P', '<ESC>F1', '<ESC>g1',
+                         '<ESC>I5', '<ESC>y2', '<ESC>O1', '<ESC>T', '<ESC>N']) {
+            expect(escWarned(f), `${f} should not warn`).toBe(false);
+        }
+        // A bare <ESC> (no space) is not the Code 39 command.
+        expect(escWarned('<ESC>'), 'bare ESC').toBe(false);
+    });
+});

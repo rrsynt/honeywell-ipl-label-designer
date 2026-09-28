@@ -236,6 +236,16 @@ export class IPLViewerParser {
      */
     private slashZeroRequested = false;
 
+    /**
+     * Page id named by `<ESC>Gn` (Page, Select, PRM p.113), or null when the
+     * stream never selects one. Held until the end of the parse because whether
+     * it diverges depends on which page the stream ends up defining: selecting
+     * the page this viewer already draws (the last one defined) is harmless,
+     * and only a selection pointing at a DIFFERENT page means the preview is
+     * showing the wrong label.
+     */
+    private pageSelectRequested: number | null = null;
+
     /** Sets the target printer, which Direct Graphics placement may need. */
     setDriver(model: string | undefined, dpi: 203 | 300 | 406 | undefined): void {
         this.driverModel = model ?? null;
@@ -356,6 +366,11 @@ export class IPLViewerParser {
         // Needs the finished element list and the final printer language, so it
         // runs after everything else has settled.
         this.reportSlashZero();
+        // Needs the final page id — which page the stream kept — so it also
+        // runs last (see its own note).
+        this.reportPageSelect();
+        // Reads the raw stream, not the trimmed frames (see its own note).
+        this.reportCode39StartStop(code);
         return this.printer.label;
     }
 
@@ -968,6 +983,7 @@ export class IPLViewerParser {
     private parseEscFrame(frame: string): void {
         const cmd = frame.charAt(LITERAL_ESC.length);
         const rest = frame.slice(LITERAL_ESC.length + 1);
+        this.reportUnmodelledEsc(cmd, rest, frame);
         switch (cmd) {
             case 'P': // Enter program mode
                 this.printer.closeFormat();
@@ -1036,6 +1052,96 @@ export class IPLViewerParser {
         if (lang) this.printer.setCodePage(parseInt(lang[1], 10));
 
         this.reportUnmodelledSetup(frame);
+    }
+
+    /**
+     * The <ESC> counterpart of reportUnmodelledSetup.
+     *
+     * The <SI> reporter was built by sweeping the manual's command index; the
+     * <ESC> surface was left unswept, so every unmatched <ESC> command fell
+     * through to a single generic `esc-command` info — indistinguishable from
+     * the harmless ones. Sweeping it the same way found three that change the
+     * picture, each confirmed against PRM 2.70's own definition bodies:
+     *
+     *   <ESC>cn   Emulation Mode, Enter   -- p.102, retimes the engine to 10 or
+     *             15 mil dots. Nothing in the stream says the format was drawn
+     *             for that dot size, so the preview's geometry is wrong for it.
+     *   <ESC>Gn   Page, Select           -- p.113, chooses which page prints.
+     *             This viewer keeps only the LAST page defined and always draws
+     *             it, so a stream selecting any other page is silently showing
+     *             the wrong label. n=0 is the documented default (the printer
+     *             starts on page 0), so only a nonzero selection diverges.
+     *   <ESC><SP> Start and Stop Codes (Code 39), Print -- p.117, drops every
+     *             character but the start/stop of the current Code 39 field.
+     *             A printed field's CONTENT changes.
+     *
+     * Warned rather than modelled, for the same reason as the <SI> list: what
+     * emulation's 10/15 mil retiming does to an arbitrary format is hardware
+     * behaviour, and a table guessed instead of measured is what this project
+     * has paid for twice.
+     */
+    private reportUnmodelledEsc(cmd: string, rest: string, frame: string): void {
+        const warn = (what: string, detail: string): void => {
+            this.printer.issue('warning', 'setup-not-modelled',
+                `${what} changes the printed image, which this preview does not reproduce: ${detail}`,
+                frame.slice(0, 24));
+        };
+
+        // Emulation Mode, Enter (PRM p.102). Both n values are real mode
+        // changes — there is no "off" spelling of this command, so any <ESC>c
+        // that reaches here diverges from the Advanced geometry we draw.
+        //
+        // Guarded on the letter: <ESC>C0/<ESC>C1 (Advanced Mode, p.96) and
+        // <ESC>E1 (Format, Select) also carry bare digits, and matching on the
+        // argument alone would report those as emulation or page selects.
+        if (cmd === 'c') {
+            const emulation = /^([01])(?![,\d])/.exec(rest);
+            if (emulation) {
+                warn('Emulation mode (<ESC>c)',
+                    `the printer is retimed to Emulation mode with ${emulation[1] === '1' ? '15 mil dots for bar codes (10 mil for other fields)' : '10 mil dots'}, but this preview draws Advanced-mode geometry.`);
+            }
+        }
+
+        // Page, Select (PRM p.113) is NOT decided here. This viewer composes
+        // the last page defined, so whether a selection diverges depends on
+        // which page the stream ends up defining — unknown while frames are
+        // still arriving. It is recorded now and decided in reportPageSelect
+        // once the label is complete.
+        if (cmd === 'G') {
+            const page = /^(\d+)(?![,\d])/.exec(rest);
+            if (page) this.pageSelectRequested = parseInt(page[1], 10);
+        }
+
+        // Start and Stop Codes (Code 39), Print (PRM p.117): "Instructs the
+        // current Code 39 field to print only the start and stop characters."
+        // The command IS the space character, so there is no argument to check
+        // — and the space is why this cannot be detected here: tokenizeFrames
+        // trims each frame, so a standalone "<ESC><SP>", the command's natural
+        // written form, arrives as a bare "<ESC>" with the space already gone.
+        // It is scanned from the raw stream in reportCode39StartStop instead.
+    }
+
+    /**
+     * Start and Stop Codes (Code 39), Print — scanned from the RAW stream
+     * rather than per frame.
+     *
+     * PRM 2.70 p.117: "Instructs the current Code 39 field to print only the
+     * start and stop characters." The command's syntax IS a trailing space
+     * (<ESC><SP>), and tokenizeFrames trims frame content, so by the time a
+     * frame is dispatched a standalone occurrence is indistinguishable from a
+     * bare <ESC>. Reading the untrimmed stream is what makes this detectable —
+     * the mid-frame form "<ESC> <ESC>F1…" survives trimming, the standalone
+     * one does not, and only the raw scan catches both.
+     */
+    private reportCode39StartStop(code: string): void {
+        // <ESC> followed by a space, then end-of-frame or another command.
+        // The trailing lookahead keeps "<ESC>  x" (two spaces, a different
+        // thing) and "<ESC> x" out of it while allowing end-of-frame.
+        const hit = /(?:<ESC>|\x1b) (?:<ETX>|\x03|$|(?:<ESC>|\x1b)|<STX>|\x02)/.exec(code);
+        if (!hit) return;
+        this.printer.issue('warning', 'setup-not-modelled',
+            'Code 39 start/stop only (<ESC><SP>) changes the printed image, which this preview does not reproduce: the current Code 39 field prints only its start and stop characters, so the bar code content differs.',
+            hit[0].slice(0, 24));
     }
 
     /**
@@ -1150,6 +1256,32 @@ export class IPLViewerParser {
         this.printer.issue('warning', 'setup-not-modelled',
             'Slash zero (<SI>z1) makes every zero print with a slash through it, which this preview draws as a plain zero.',
             '<SI>z1');
+    }
+
+    /**
+     * Report Page, Select (`<ESC>Gn`, PRM p.113) once the whole label is known.
+     *
+     * Decided here, not when the frame arrived, because it is only a divergence
+     * when the selection points at a page this viewer does NOT draw. The viewer
+     * composes the last page defined, so:
+     *   - no page defined at all  -> nothing to compose; the printer would also
+     *     have nothing to print, so selection is moot.
+     *   - selection === last page -> what we already draw. bartender-auto.ipl
+     *     defines page 3 and selects page 3; warning there was a false positive
+     *     caught by the shipped-sample guard.
+     *   - selection !== last page -> the printer prints a different label than
+     *     the one on screen. That is the real case.
+     *   - n = 0 with several pages is the documented default page, so it takes
+     *     the same comparison as any other value.
+     */
+    private reportPageSelect(): void {
+        if (this.pageSelectRequested === null) return;
+        const defined = this.printer.label.settings.pageNumber;
+        if (defined === undefined) return;
+        if (this.pageSelectRequested === defined) return;
+        this.printer.issue('warning', 'setup-not-modelled',
+            `Page select (<ESC>G${this.pageSelectRequested}) chooses page ${this.pageSelectRequested} for printing, but this preview composes only page ${defined} — the last page defined in the stream.`,
+            `<ESC>G${this.pageSelectRequested}`);
     }
 
     private parseFieldFrame(frame: string): void {

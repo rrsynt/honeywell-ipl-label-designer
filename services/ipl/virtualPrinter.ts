@@ -70,7 +70,12 @@ export class VirtualPrinter {
     programModeSeen = false;
     /** `K<id>` field keys already defined, for duplicate detection. */
     readonly seenFieldKeys = new Set<string>();
-    /** Graphics downloaded via <ESC>G (id -> columns), referenced by U fields. */
+    /**
+     * Graphics downloaded via the Gn command (id -> columns), referenced by U
+     * fields. Gn ("User-Defined Character, Clear or Create", PRM p.214) is the
+     * BARE G command; <ESC>G is a different command entirely — "Page, Select"
+     * (PRM p.113) — and defines no graphic.
+     */
     readonly downloadedGraphics = new Map<number, DownloadedGraphic>();
     /** Id of the most recently defined graphic (for split u-frame form). */
     lastGraphicId: number | null = null;

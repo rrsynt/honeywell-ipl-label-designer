@@ -82,6 +82,44 @@ describe('commands that change the image but had no decision path', () => {
     });
 });
 
+describe('the <ESC> surface, swept the same way', () => {
+    // The first sweep stopped at <SI>. Every unmatched <ESC> command fell
+    // through to one generic `esc-command` info, so a command that changes the
+    // picture was indistinguishable from a harmless one. Sweeping the <ESC>
+    // index against parseEscFrame's dispatch found three; the tests for them
+    // live in unmodelledSetup.test.ts, and this pins the source they came from.
+
+    it('the manual\'s <ESC> command index is the authority, and still lists them', () => {
+        const body = readFileSync(join(
+            __dirname, '..', 'docs', 'manuals', 'IPL_2.70_Programmers_Reference_Manual.txt'), 'utf8');
+        // The syntax index in PRM 2.70 (Chapter 6, "Commands Listed by Syntax").
+        expect(body).toContain('<ESC>c Emulation Mode, Enter');
+        expect(body).toContain('<ESC>G Page, Select');
+        expect(body).toContain('<ESC><SP> Start and Stop Codes (Code 39), Print');
+        // The definition bodies the warnings quote, so a reworded manual is
+        // noticed here rather than silently invalidating the messages.
+        expect(body).toContain('Instructs the printer to operate in Emulation mode');
+        expect(body).toContain('Selects a page for data entry or printing');
+        expect(body).toContain('print only the start and stop');
+    });
+
+    it('the <ESC> dispatch and the index agree on which letters are spoken for', () => {
+        // The sweep only means something while the dispatch is the real list of
+        // handled letters: a letter handled in code but absent here would be
+        // reported as unmodelled, and one handled only in the test is a fiction.
+        const src = readFileSync(join(__dirname, '..', 'services', 'ipl', 'viewerParser.ts'), 'utf8');
+        const dispatch = src.slice(src.indexOf('private parseEscFrame'));
+        for (const letter of ["case 'P'", "case 'C'", "case 'E'", "case 'g'"]) {
+            expect(dispatch, `${letter} missing from parseEscFrame`).toContain(letter);
+        }
+        // The <ESC>-level reporter must exist and be called, or the sweep's
+        // findings have nowhere to land.
+        expect(src).toContain('reportUnmodelledEsc');
+        expect(src).toContain('reportPageSelect');
+        expect(src).toContain('reportCode39StartStop');
+    });
+});
+
 describe('the sweep that found them is reproducible', () => {
     it('the manual\'s command index is still the authority for the list', () => {
         // The two commands above were found by enumerating this file. If it

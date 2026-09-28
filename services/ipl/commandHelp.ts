@@ -121,6 +121,21 @@ export const COMMAND_HELP: CommandHelp[] = [
     { token: '<SI>z', kind: 'setup', title: 'Slash zero', syntax: '<SI>zn',
       summary: 'n=1 replaces every zero with a slashed zero. Works only under printer language 0 (USA) and never on OCR fonts c23/c24. Not reproduced by this preview.',
       page: 'PRM 2.70 p.146' },
+    // The <ESC> surface, swept the same way (PRM 2.70's "Commands Listed by
+    // Syntax" index against parseEscFrame's dispatch). These used to fall
+    // through to one generic `esc-command` info, so a command that changes the
+    // picture looked exactly like a harmless one.
+    { token: '<ESC>c', kind: 'control', title: 'Enter Emulation mode', syntax: '<ESC>cn',
+      summary: 'Retimes the printer: n=0 gives 10 mil dots, n=1 gives 15 mil for bar codes (10 mil for other fields). This preview draws Advanced-mode geometry. Not reproduced by this preview.',
+      page: 'PRM 2.70 p.102' },
+    { token: '<ESC>G', kind: 'control', title: 'Select page', syntax: '<ESC>Gn',
+      summary: 'Chooses which page prints. This preview composes only the last page defined in the stream, so selecting a different one shows the wrong label.',
+      page: 'PRM 2.70 p.113' },
+    // The token carries its trailing space, because that space IS the command
+    // and lookupHelpForFrame keys on `<ESC>` + the frame's 6th character.
+    { token: '<ESC> ', kind: 'control', title: 'Code 39 start/stop only', syntax: '<ESC><SP>',
+      summary: 'The command is a trailing space: the current Code 39 field then prints only its start and stop characters, so the bar code content differs. Not reproduced by this preview.',
+      page: 'PRM 2.70 p.117' },
 ];
 
 const HELP_BY_TOKEN = new Map(COMMAND_HELP.map(h => [h.token, h]));
