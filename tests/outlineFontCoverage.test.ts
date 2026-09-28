@@ -3,7 +3,7 @@
 // spurious "unknown font" warning and painted with a fallback face.
 import './golden/setup';
 import { describe, it, expect } from 'vitest';
-import { FONT_MAP, fontStack } from '../constants';
+import { FONT_MAP, FONT_FAMILIES, fontStack } from '../constants';
 import { parseViewerIPL, OUTLINE_FONTS } from '../services/ipl/viewerParser';
 import type { TextElement } from '../services/ipl/types';
 
@@ -99,10 +99,12 @@ describe('nominal point sizes for the fixed-size families', () => {
 });
 
 describe('fontStack', () => {
-    it('resolves a family to its vendored Liberation stack', () => {
+    it('resolves a family to its vendored stack', () => {
         expect(fontStack('sans-serif')).toContain('Liberation Sans');
         expect(fontStack('serif')).toContain('Liberation Serif');
         expect(fontStack('monospace')).toContain('Liberation Mono');
+        // c67: Century Schoolbook's metric-exact GUST-licensed substitute.
+        expect(fontStack('schoolbook')).toContain('TeX Gyre Schola');
     });
 
     it('falls back to monospace for an unknown family', () => {
@@ -113,8 +115,43 @@ describe('fontStack', () => {
     it('never requests a bold face', () => {
         // See constants.ts: the ids whose names say "bold" are painted at
         // regular weight, matching the BarTender reference export.
-        for (const family of ['monospace', 'sans-serif', 'serif', undefined]) {
+        for (const family of ['monospace', 'sans-serif', 'serif', 'schoolbook', undefined]) {
             expect(fontStack(family)).not.toMatch(/^bold /);
         }
+    });
+});
+
+// c67 used to resolve to the `serif` family, whose table is Times-compatible
+// (CG Times, for c28/c66) and metered c67's fields ~10–13% narrow. Pinning the
+// ROUTING here is what keeps that from quietly coming back: the table test
+// below would still pass if c67 pointed at `serif`, because both tables are
+// internally consistent — only the mapping was wrong.
+describe('c67 Century Schoolbook routing', () => {
+    it('is its own family, not the Times-compatible serif', () => {
+        expect(FONT_MAP['67'].family).toBe('schoolbook');
+    });
+
+    it('sibling serif ids stay on the Times-compatible family', () => {
+        // c28/c66 are CG Times, which descends from Times New Roman — the
+        // serif table is genuinely right for them and must not be swept up.
+        expect(FONT_MAP['28'].family).toBe('serif');
+        expect(FONT_MAP['66'].family).toBe('serif');
+    });
+
+    it('every family a FONT_MAP id names has its own stack', () => {
+        // Guards the silent-fallthrough class: a family with no FONT_FAMILIES
+        // entry resolves to the monospace fallback (fontStack's `??`), i.e. the
+        // field silently paints in the wrong face. Checked against the map
+        // itself, not against fontStack's fallback — the fallback IS the
+        // monospace stack, so comparing stacks would flag the legitimate
+        // monospace family as missing.
+        const checked = new Set<string>();
+        for (const [id, def] of Object.entries(FONT_MAP)) {
+            if (def.type !== 'outline' || !def.family || checked.has(def.family)) continue;
+            checked.add(def.family);
+            expect(FONT_FAMILIES[def.family], `c${id} → ${def.family} has no stack`).toBeDefined();
+        }
+        // Sanity: the loop actually saw the families it is meant to cover.
+        expect(checked.size).toBeGreaterThanOrEqual(4);
     });
 });

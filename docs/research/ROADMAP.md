@@ -15,7 +15,7 @@
 | Renderer stateless | ya, opsi per panggilan | `renderLabel(canvas,label,extent,opts)` murni (dipakai headless vitest); `canvasDrawer` khusus UI designer | ✅ terpisah |
 | Semua koordinat dalam dots | ya, sejak parse time | ya (pt→dots hanya outline `k`, butuh dpi renderer — disengaja) | ✅ diaudit |
 | Golden-file testing | ~109 tes, threshold per-pixel, diff overlay, toleransi didokumentasikan | harness golden 8 kasus + parity suite BarTender (geometry, sweep, auto, golden-pair) + codeword decode | ✅ Fase 3 |
-| Kalibrasi font | tabel tuning per-karakter vs referensi | tabel advance per-glyph Liberation (fontMetrics.ts, ASCII 32–126, per-mille em) dipakai estimateElementSize + border b + import designer | ✅ Batch U 2026-09-24 (mono byte-stable, proporsional ≤0.3% vs measureText). **Face printer andal 2026-09-28:** Andale Mono = 600/1000 em eksak (cocok); c67 Century Schoolbook beda ~10–13% pada lebar field |
+| Kalibrasi font | tabel tuning per-karakter vs referensi | tabel advance per-glyph (fontMetrics.ts, ASCII 32–126, per-mille em) dipakai estimateElementSize + border b + import designer; 4 keluarga resident | ✅ Batch U 2026-09-24 (mono byte-stable, proporsional ≤0.3% vs measureText). **Face printer andal 2026-09-28:** Andale Mono = 600/1000 em eksak; c67 Century Schoolbook beda ~10–13% → **diperbaiki** dengan TeX Gyre Schola (identik 0,0), keluarga ke-4 `'schoolbook'` |
 | Semantik command yang tak terdokumentasi | — | seluruh 10 pertanyaan terbuka IPL-RENDER-SPEC §15 tertutup 2026-09-25 (jawaban dari manual, export BarTender, atau invarian terukur) | ✅ §15 kosong |
 | Print data non-ASCII | — | code page `<SI>l` (cp850/1250-1258/874/UTF-8) + substitusi resident n=0-9, satu entry point `decodePrintData` | ✅ 2026-09-24 |
 
@@ -116,9 +116,14 @@ Dokumentasi lengkap: [GOLDEN-TESTING.md](GOLDEN-TESTING.md).
       lebar tinta; angkanya tercatat). **Temuan sampingan yang nyata:** id
       **c67 Century Schoolbook** (face `CENSCBK.TTF`, Monotype) advance-nya
       **beda 59,8 per-mille rata-rata (maks 406)** → field c67 tergambar
-      **~10–13% lebih sempit** dari cetakan; belum diperbaiki (c67 nol
-      pemakaian, keputusan pengguna). Dua id serif lain (c28/c66 → CG Times)
-      tetap benar. **Sisa (b)** masih menunggu printer.
+      **~10–13% lebih sempit** dari cetakan. **SUDAH DIPERBAIKI 2026-09-28**:
+      TeX Gyre Schola (GUST Font License) ternyata metrik-nya **identik persis**
+      dengan Century Schoolbook (0,0 per-mille), jadi ia di-vendor sebagai
+      keluarga advance keempat `'schoolbook'` — face-nya benar-benar dikirim,
+      bukan cuma tabelnya diubah, karena renderer menggambar lewat `fillText`.
+      Terukur di browser: c67 kini +9,3% lebih lebar. Dua id serif lain
+      (c28/c66 → CG Times) tetap benar dan **tidak disentuh**. **Sisa (b)**
+      masih menunggu printer.
       CATATAN: Honeywell resmi menyatakan TIDAK ADA simulator (artikel
       000075988) — jalur: cross-check Labelary (`npm run crosscheck`), akses
       printer fisik (vendor demo/pinjam), kurasi contoh Developer's Guide.

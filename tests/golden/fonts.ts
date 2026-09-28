@@ -31,6 +31,10 @@ export const registerBundledFonts = (): void => {
         'LiberationSans-Bold.ttf',
         'LiberationSerif-Regular.ttf',
         'LiberationSerif-Bold.ttf',
+        // Century Schoolbook's metric-exact free substitute, for IPL id c67
+        // (GUST Font License — the grant is in the file's own name table).
+        // CFF outlines, hence .otf.
+        'TeXGyreSchola-Regular.otf',
     ];
     for (const f of files) {
         const p = path.join(FONTS_DIR, f);

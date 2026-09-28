@@ -82,8 +82,11 @@ perilaku firmware). Opsi realistis:
   integer dengan Liberation Mono kita**, jadi lebar field monospace
   (c20/21/22/25/26/30–41/64) **benar apa adanya**; yang masih beda hanya bentuk
   glyph (~6,7% lebar tinta, tidak menggeser). **Sisa yang perlu printer hanya
-  konfirmasi** bahwa firmware memakai face itu apa adanya. **Temuan c67**
-  (Century Schoolbook, `CENSCBK.TTF`, ~10–13% lebih sempit) tercatat di
+  konfirmasi** bahwa firmware memakai face itu apa adanya. **c67 Century
+  Schoolbook**: ternyata ~10–13% lebih sempit dari yang kita gambar, dan
+  **sudah diperbaiki 2026-09-28** dengan TeX Gyre Schola (GUST Font License,
+  metriknya identik 0,0 dengan `CENSCBK.TTF`) sebagai keluarga ke-4
+  `'schoolbook'`. Rinciannya di
   `docs/research/IMPLEMENTATION-BREAKDOWN-2026-09-26.md` Tahap 4(a).
 - [x] Titik jangkar rotasi f1/f2/f3 — dikunci kontrak `tests/rotationWysiwyg.test.ts`
   (12 kasus) dan disepakati DevGuide p.27; sudah diverifikasi terhadap export
@@ -136,9 +139,10 @@ perilaku firmware). Opsi realistis:
 Yang **belum** bisa diputuskan tanpa printer: apakah firmware memakai tabel
 substitusi resident yang sama dengan Appendix B. Pertanyaan satunya — apakah
 metrik face outline printer menyamai Liberation — **sudah dijawab 2026-09-28**
-dari file fontnya (Andale Mono 600 eksak; c67 berbeda ~10–13%), jadi yang
-tersisa untuk printer cuma konfirmasi. Keduanya pertanyaan akurasi, bukan
-struktur — struktur sudah teruji.
+dari file fontnya (Andale Mono 600 eksak; c67 berbeda dan **sudah diperbaiki**
+dengan pengganti yang metriknya identik), jadi yang tersisa untuk printer cuma
+konfirmasi. Keduanya pertanyaan akurasi, bukan struktur — struktur sudah
+teruji.
 
 ### Kalau printer nyata berperilaku beda dari preview — periksa versi firmware dulu
 

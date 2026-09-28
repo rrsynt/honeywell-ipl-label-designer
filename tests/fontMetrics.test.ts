@@ -50,6 +50,46 @@ describe('outlineTextBlockWidthDots calibration', () => {
         expect(serifTable).toBeCloseTo(serifExpected, -1);
     });
 
+    it('schoolbook (c67) matches the vendored Century Schoolbook substitute', () => {
+        // c67 used to resolve to `serif`, which is Times-compatible (CG Times,
+        // for c28/c66) and metered c67 ~10–13% narrow — 59.8 per-mille on
+        // average versus the printer's face. TeX Gyre Schola (GUST Font
+        // License) is metrically IDENTICAL to Century Schoolbook, so the table
+        // below is measured off it and this pins the two together: if the
+        // vendored .otf is ever swapped for a non-matching face, this fails
+        // instead of silently metering every c67 field wrong.
+        const c = newRealCanvas(100, 100);
+        const ctx = c.getContext('2d');
+        ctx.font = `${PX}px "TeX Gyre Schola"`;
+        // The control that matters: an unresolvable family silently falls back
+        // to a default face, so a typo'd name would still produce *a* width.
+        // Two bogus names agreeing (and differing from this one) proves the
+        // face really resolved.
+        const bogusA = (() => { ctx.font = `${PX}px "BogusFamilyAAA"`; return ctx.measureText('PRODUCT NAME').width; })();
+        const bogusB = (() => { ctx.font = `${PX}px "BogusFamilyBBB"`; return ctx.measureText('PRODUCT NAME').width; })();
+        expect(bogusA).toBe(bogusB);
+        ctx.font = `${PX}px "TeX Gyre Schola"`;
+        expect(ctx.measureText('PRODUCT NAME').width).not.toBe(bogusA);
+
+        for (const line of ['PRODUCT NAME', '0123456789', 'WWW iii', '.,:;()']) {
+            const measuredEm = ctx.measureText(line).width / PX;
+            const hDots = 34; // 12pt at 203dpi
+            const tableW = outlineTextBlockWidthDots([line], hDots, 'schoolbook');
+            expect(Math.abs(tableW - measuredEm * hDots), line).toBeLessThanOrEqual(1);
+        }
+    });
+
+    it('schoolbook is genuinely distinct from serif and monospace', () => {
+        // If these ever collapse to the same numbers the "fix" is a no-op and
+        // c67 is back to being metered by a face it does not print in.
+        const hDots = 34;
+        const sb = outlineTextBlockWidthDots(['PRODUCT NAME'], hDots, 'schoolbook');
+        expect(sb).not.toBe(outlineTextBlockWidthDots(['PRODUCT NAME'], hDots, 'serif'));
+        expect(sb).not.toBe(outlineTextBlockWidthDots(['PRODUCT NAME'], hDots, 'monospace'));
+        // Direction matters: Century Schoolbook runs WIDER than Times.
+        expect(sb).toBeGreaterThan(outlineTextBlockWidthDots(['PRODUCT NAME'], hDots, 'serif'));
+    });
+
     it('falls back to defaults for non-ASCII codepoints', () => {
         const hDots = Math.round((12 / 72) * 203);
         // SANS table: 'A'=667, 'B'=667; \x80 is outside printable ASCII →

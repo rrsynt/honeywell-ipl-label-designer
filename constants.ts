@@ -70,6 +70,13 @@ export const UNPRINTABLE_MARGIN_MM: { [model: string]: number } = {
     'PD45S': 1,
 };
 
+/** The resident outline families the printer actually has faces for. Four, not
+ *  three: Century Schoolbook (c67) is metrically distinct from BOTH the Times-
+ *  compatible serif (c28/c66 → CG Times) and the monospace ids — its advances
+ *  run ~10–13% wider than Liberation Serif, which is what the serif family
+ *  used to give it, so it needs its own advance table. */
+export type FontFamily = 'monospace' | 'sans-serif' | 'serif' | 'schoolbook';
+
 // THE single source of font metrics (audit T1: the designer, the viewer
 // renderer and the parser each used to carry their own diverging table).
 // baseHeight/baseWidth are the GLYPH CELL in dots (PRM270 §7.3: c0 is 7×9,
@@ -83,7 +90,7 @@ export interface FontDef {
     baseWidth?: number;
     /** Intercharacter gap in dots (bitmap fonts only). */
     gapWidth?: number;
-    family?: 'monospace' | 'sans-serif' | 'serif';
+    family?: FontFamily;
     /**
      * Nominal size in points for the fixed-size families (c20 8pt, c21 12pt,
      * c22 20pt, c30-c41 …). The printer uses this when the field carries no
@@ -100,10 +107,17 @@ export interface FontDef {
 // font on Windows, Linux CI and any user machine, instead of silently
 // substituting whatever Courier New/Arial/Times the host happens to have.
 // Liberation Mono/Sans/Serif are metric-compatible with those originals.
-export const FONT_FAMILIES: { monospace: string; 'sans-serif': string; serif: string } = {
+//
+// "schoolbook" is TeX Gyre Schola (GUST Font License, also vendored), the
+// metric-exact match for Century Schoolbook — which is what c67 prints in. The
+// real face is Monotype's and cannot be shipped. The bare "Century Schoolbook"
+// is kept behind it so a host that has the genuine article uses it; note that
+// would be a LICENSED Windows install, not a redistribution.
+export const FONT_FAMILIES: Record<FontFamily, string> = {
     monospace: '"Liberation Mono", "Courier New", monospace',
     'sans-serif': '"Liberation Sans", Arial, Helvetica, sans-serif',
     serif: '"Liberation Serif", "Times New Roman", serif',
+    schoolbook: '"TeX Gyre Schola", "Century Schoolbook", "Liberation Serif", serif',
 };
 
 /**
@@ -161,7 +175,7 @@ export const FONT_MAP: { [key: string]: FontDef } = {
     '64': { name: 'Prestige bold', type: 'outline', family: 'monospace' },
     '65': { name: 'Zurich extra condensed', type: 'outline', family: 'sans-serif' },
     '66': { name: 'Dutch 801 bold', type: 'outline', family: 'serif' },
-    '67': { name: 'Century Schoolbook', type: 'outline', family: 'serif' },
+    '67': { name: 'Century Schoolbook', type: 'outline', family: 'schoolbook' },
     '68': { name: 'Futura light', type: 'outline', family: 'sans-serif' },
     '69': { name: 'Letter Gothic', type: 'outline', family: 'monospace' },
     '70': { name: 'DingDings', type: 'outline', family: 'sans-serif' },

@@ -1,6 +1,6 @@
 import type { Design, Field, TextField, BarcodeField, LineField, BoxField, ImageField, EllipseField, PolygonField, TriangleField, PrinterSettings, FieldDataSource, DataSource, DateFormat, TimeFormat } from '../types';
 import { getFormattedDateTime } from './dateTimeFormat';
-import { DPI_MAP, FONT_MAP } from '../constants';
+import { DPI_MAP, FONT_MAP, type FontFamily } from '../constants';
 import { getObjectBoundingBox } from './geometry';
 import { encodeBitmapColumns, encodeColumnsToNibblizedRle } from './ipl/graphics';
 import { bitmapRowsToMatrix } from './imageField';
@@ -11,13 +11,14 @@ import { widthDelta } from './fontStore';
 /**
  * The resident outline font emitted for an uploaded face. One id per family,
  * chosen as the family's plain (non-bold, non-condensed) member: c61 Swiss 721,
- * c28 Dutch Roman, c25 Swiss Mono. A printer has no way to accept the uploaded
- * bytes, so this is the closest it can print.
+ * c28 Dutch Roman, c25 Swiss Mono, c67 Century Schoolbook. A printer has no way
+ * to accept the uploaded bytes, so this is the closest it can print.
  */
-const RESIDENT_FONT_ID: Record<'sans-serif' | 'serif' | 'monospace', string> = {
+const RESIDENT_FONT_ID: Record<FontFamily, string> = {
     'sans-serif': '61',
     'serif': '28',
     'monospace': '25',
+    schoolbook: '67',
 };
 
 /**
@@ -40,7 +41,7 @@ export interface FontSubstitution {
     /** The uploaded font's name, as the field stores it. */
     font: string;
     /** The resident IPL family emitted in its place. */
-    resident: 'sans-serif' | 'serif' | 'monospace';
+    resident: FontFamily;
     /** |uploaded − resident| / resident, by average advance. */
     delta: number;
 }

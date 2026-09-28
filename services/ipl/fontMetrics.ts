@@ -18,6 +18,8 @@
 // If the vendored fonts ever change, regenerate with the snippet in
 // tests/fontMetrics.test.ts (it pins this table against live measureText).
 
+import type { FontFamily } from '../../constants';
+
 /** Advances in per-mille of em, ASCII 32 (space) through 126 (~). */
 const SANS: readonly number[] = [
     278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
@@ -39,11 +41,29 @@ const SERIF: readonly number[] = [
 
 const MONO_PER_MILLE = 600;
 
+/** Century Schoolbook (IPL id c67), measured from TeX Gyre Schola — the
+ *  GUST-licensed face that IS metrically identical to the printer's Monotype
+ *  original (0 per-mille difference across ASCII 32–126; the real face is
+ *  commercial and cannot be vendored). Previously c67 resolved to the `serif`
+ *  table, which is Times-compatible and metered its fields ~10–13% too narrow.
+ *
+ *  Monospace's 600 cannot stand in for this family: the tables differ by up to
+ *  406 per-mille, which is exactly the defect this table exists to fix. */
+const SCHOOLBOOK: readonly number[] = [
+    278, 296, 389, 556, 556, 833, 815, 204, 333, 333, 500, 606, 278, 333, 278, 278,
+    556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 606, 606, 606, 444,
+    737, 722, 722, 722, 778, 722, 667, 778, 833, 407, 556, 778, 667, 944, 815, 778,
+    667, 778, 722, 630, 667, 815, 722, 981, 704, 704, 611, 333, 606, 333, 606, 500,
+    333, 556, 556, 444, 574, 500, 333, 537, 611, 315, 296, 593, 315, 889, 611, 500,
+    574, 556, 444, 463, 389, 611, 537, 778, 537, 537, 481, 333, 606, 333, 606,
+];
+
 /** Fallback advance for codepoints outside printable ASCII (non-Latin text,
  *  control chars): the family's average, so widths stay plausible instead of
  *  collapsing to 0. */
 const SANS_DEFAULT = 524;
 const SERIF_DEFAULT = 478;
+const SCHOOLBOOK_DEFAULT = 558;
 
 /**
  * Fase 3: a user-uploaded font. The screen renders it by its real face (the
@@ -58,7 +78,7 @@ export interface UploadedFontMetrics {
     /** CSS family name the face was registered under. */
     cssFamily: string;
     /** Nearest resident family, by average advance. */
-    family: 'sans-serif' | 'serif' | 'monospace';
+    family: FontFamily;
     /** Per-mille advances, ASCII 32 through 126, measured at one size. */
     advances: number[];
     /** Average of `advances`, used for codepoints the table does not cover. */
@@ -82,11 +102,16 @@ export const getUploadedFontMetrics = (name: string): UploadedFontMetrics | unde
 
 const tableFor = (family: string | undefined): { t: readonly number[] | null; perMille: number; dflt: number } => {
     // An uploaded font is addressed by its own name, which is never one of the
-    // three resident families, so this lookup cannot shadow them.
+    // resident families, so this lookup cannot shadow them.
     const uploaded = family ? uploadedFonts.get(family) : undefined;
     if (uploaded) return { t: uploaded.advances, perMille: 0, dflt: uploaded.dflt };
     if (family === 'sans-serif') return { t: SANS, perMille: 0, dflt: SANS_DEFAULT };
     if (family === 'serif') return { t: SERIF, perMille: 0, dflt: SERIF_DEFAULT };
+    if (family === 'schoolbook') return { t: SCHOOLBOOK, perMille: 0, dflt: SCHOOLBOOK_DEFAULT };
+    // Monospace is the fallthrough, so an unknown family lands on 600. Every
+    // FontFamily member must be named explicitly above: a new family that
+    // reached this line would be measured as monospace, which for schoolbook
+    // would under-measure by ~7% and (unlike a missing font) do it silently.
     return { t: null, perMille: MONO_PER_MILLE, dflt: MONO_PER_MILLE };
 };
 

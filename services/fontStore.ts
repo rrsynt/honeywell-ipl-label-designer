@@ -99,6 +99,10 @@ const RESIDENT_AVERAGE: Record<UploadedFontMetrics['family'], number> = {
     'sans-serif': 524,
     'serif': 478,
     'monospace': 600,
+    // Century Schoolbook sits between serif and monospace by average advance,
+    // so an upload running ~500–560 now substitutes to c67 rather than
+    // rounding to one of the neighbours.
+    'schoolbook': 558,
 };
 
 /**

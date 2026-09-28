@@ -42,13 +42,19 @@
       /* Vendored label fonts (public/fonts): the designer preview and the IPL
          viewer measure text with these exact faces, so on-screen widths match
          the headless golden renders on any OS (audit batch 6). Liberation is
-         metric-compatible with Courier New / Arial / Times New Roman. */
+         metric-compatible with Courier New / Arial / Times New Roman.
+         TeX Gyre Schola (GUST Font License) is the metric-exact match for
+         Century Schoolbook, which is what IPL font id c67 actually prints in;
+         the real face is Monotype's and cannot be vendored. Regular only --
+         every outline id is painted at regular weight, including the ones whose
+         names say "bold" (constants.ts). */
       @font-face { font-family: 'Liberation Mono'; src: url('/fonts/LiberationMono-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }
       @font-face { font-family: 'Liberation Mono'; src: url('/fonts/LiberationMono-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; }
       @font-face { font-family: 'Liberation Sans'; src: url('/fonts/LiberationSans-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }
       @font-face { font-family: 'Liberation Sans'; src: url('/fonts/LiberationSans-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; }
       @font-face { font-family: 'Liberation Serif'; src: url('/fonts/LiberationSerif-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }
       @font-face { font-family: 'Liberation Serif'; src: url('/fonts/LiberationSerif-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; }
+      @font-face { font-family: 'TeX Gyre Schola'; src: url('/fonts/TeXGyreSchola-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; }
 
       body {
         font-family: 'Inter', sans-serif;

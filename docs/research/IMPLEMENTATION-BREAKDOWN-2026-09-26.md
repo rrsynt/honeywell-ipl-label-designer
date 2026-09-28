@@ -496,16 +496,44 @@ dihitung salah, melainkan **tidak pernah dilihat**.
 mengembangkan CG Times dari Times New Roman, jadi pemetaan serif Times-compatible
 kita **tetap benar** untuk keduanya. c67 berdiri sendiri.
 
-**Jalur yang ditempuh: TIDAK diubah sekarang.** Menambah keluarga advance
-keempat ke `fontMetrics.ts` mekanisnya lurus (preseden `UploadedFontMetrics` /
-`registerUploadedFontMetrics` sudah ada, hanya ditanam sebagai resident), tapi
-keputusan itu milik pengguna: face-nya komersial, `c67` nol pemakaian, dan
-setiap keluarga baru menambah tabel yang harus dijaga. Yang dilakukan sekarang
-adalah **mencatat angkanya** supaya tidak hilang, plus menyisakan opsi terbuka.
+**SUDAH DIPERBAIKI 2026-09-28 — dan face komersial itu ternyata bukan penghalang.**
+
+Jalan keluar yang tidak terlihat saat temuan ini dicatat: **TeX Gyre Schola**,
+face bebas berlisensi **GUST Font License** (grant-nya ada di name table font
+itu sendiri), metriknya **identik persis** dengan Century Schoolbook —
+**0,0 per-mille, maksimum 0** di seluruh ASCII 32–126. Cap-height-nya juga sama
+(**0,7220 em** untuk keduanya; Liberation Serif 0,6548 em), jadi perbaikan ini
+membetulkan **lebar dan tinggi sekaligus**, bukan menukar satu dengan yang lain.
+
+Model yang diterapkan: keluarga advance **keempat** (`'schoolbook'`) dengan
+face-nya di-vendor di `public/fonts/TeXGyreSchola-Regular.otf` — **face-nya
+benar-benar dikirim, bukan hanya tabelnya diubah.** Itu bukan kemewahan: karena
+`renderer.ts` menggambar teks outline lewat `ctx.fillText`, advance yang terlihat
+di layar datang dari **font yang benar-benar ter-resolve**, sementara tabel kita
+hanya mengukur kotaknya. Mengubah tabel tanpa menyertakan face akan membuat
+kotak dan tinta tidak sinkron.
+
+Preseden `UploadedFontMetrics` / `registerUploadedFontMetrics` dipakai sebagai
+bentuknya, hanya ditanam sebagai resident. Union-nya disatukan jadi satu
+`FontFamily` di `constants.ts` supaya `tsc` menemukan setiap `Record` yang
+kurang — dan memang menemukan dua (`RESIDENT_AVERAGE`, `RESIDENT_FONT_ID`).
+
+Bug c67 nol pemakaian, jadi **tidak ada golden yang berubah**; suite naik dari
+1243 → 1248 tes. Penjaga barunya menegaskan **routing**-nya (`FONT_MAP['67']`
+harus `schoolbook`, bukan `serif`) — bukan hanya tabelnya, karena tes tabel
+akan tetap lulus kalau c67 kembali menunjuk `serif`: kedua tabel konsisten
+sendiri, hanya pemetaannya yang salah. Dibuktikan dengan mengembalikan
+`family: 'serif'`: 2 tes gagal. Dan dengan mengganti tabel SCHOOLBOOK menjadi
+salinan SERIF: 2 tes lain gagal.
+
+**Terukur di browser (Chromium, jalur renderer aplikasi):** c67 kini **+9,3%
+lebih lebar** dari c66/c28, dan c66/c28 tetap **identik satu sama lain** (benar —
+keduanya CG Times). Angka itu cocok dengan +9,7% yang diukur dari tabel.
 
 **Cakupan face yang sekarang tertutup:** Andale Mono ✅ (diukur, eksak),
-Century Schoolbook ✅ (diukur, **beda**), CG Times (Times-compatible,
-didukung proxy 0,0). **Belum diperoleh sama sekali:** Univers (61/62/63/65/68),
+Century Schoolbook ✅ (**terukur, berbeda, dan sudah diperbaiki**), CG Times
+(Times-compatible, didukung proxy 0,0). **Belum diperoleh sama sekali:**
+Univers (61/62/63/65/68),
 Letter Gothic (69), TBMinPro (50/51), **dan OCR A/B (23/24)** — semuanya masih
 memakai `MONO_PER_MILLE = 600` atau tabel serif tanpa dasar pengukuran. Empat id
 pertama adalah face komersial/bundel printer yang tidak ada di mesin ini;
@@ -513,8 +541,10 @@ OCR A/B adalah face bitmap printer yang tidak diedarkan sebagai TrueType, jadi
 angkanya tidak bisa diambil dengan metode yang sama.
 
 **Prioritas yang tersisa, bila mau dilanjutkan:** 23/24 dan 69 paling berisiko
-karena **masih dipetakan ke 600 tanpa bukti**, sedangkan c67 sudah diukur dan
-sekadar menunggu keputusan.
+karena **masih dipetakan ke 600 tanpa bukti** — sekarang justru mereka satu-satunya
+yang belum diukur sama sekali, karena Andale dan Century Schoolbook sudah
+ditutup. Kalau pola TeX Gyre berlaku lagi (lihat Schola untuk c67), keduanya
+layak dicari pengganti bebasnya lebih dulu sebelum menyimpulkan "butuh printer".
 
 **Pertanyaan (b) tetap terbuka**, tapi target pencariannya berubah: halaman
 charset K10 menunjuk ke **printer user manual** ("For international character
