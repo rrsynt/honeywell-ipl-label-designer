@@ -643,7 +643,7 @@ angkanya tidak bisa diambil dengan metode yang sama.
 | 67 | Century Schoolbook Roman | schoolbook | ✅ **diperbaiki** (TeX Gyre Schola, 0,0) |
 | **69** | **Letter Gothic** | monospace 600 | ⚠️ **terukur 500 → 20% terlalu lebar; diberitahukan, belum diperbaiki** |
 | **63/65** | **Univers Condensed Bold / Extra Condensed** | univers-condensed | ✅ **diperbaiki** — advance dari AFM Adobe asli |
-| 61/62/68 | Univers (regular/bold) | sans-serif | ⚠️ **selisih terukur ~74 per-mille (≈6,5%), belum dipakai** — lihat di bawah |
+| 61/62/68 | Univers (regular/bold) | sans-serif | ⚠️ **AFM regular dicari 2026-09-28, TIDAK ada; 3 kandidat "Univers" terbukti palsu** — selisihnya terestimasi ~6,5%, belum dipakai |
 | **50/51** | **TBMinPro-Light (Kanji)** | sans / monospace | ✅ **bug lebar CJK DIPERBAIKI** — lihat di bawah |
 
 ### 50/51 (TBMinPro / Kanji) — DIPERBAIKI 2026-09-28: lebar CJK dihitung setengah
@@ -738,35 +738,63 @@ Helvetica/Arial** — URW Nimbus Sans (klon Helvetica) vs Liberation Sans
 menyimpang hanya **1,49 per-mille rata-rata**, dan Arial vs Liberation Sans
 **0,0**. Jadi keluarga sans kita bukan tebakan; ia Helvetica.
 
-**Tidak ada sumber metrik Univers yang bisa diperoleh — diperiksa, bukan
-diasumsikan:**
-- **Tidak ada fontnya**: tidak di registry font, tidak di `C:/Windows/Fonts`,
-  tidak di instalasi Seagull (`find` atas seluruh pohonnya → **0 file .ttf/.otf**),
-  tidak di Office/Adobe (keduanya terpasang; `*.otf/*.ttf` bernama Univers → 0),
-  dan **tidak ada di dalam `ss#ipl.ddz`** (tidak satu pun berkas ber-magic
-  TTF/OTF di arsip itu).
-- **AFM tidak ada di mana pun**: jalur Adobe core fonts, `urw-base35-fonts` →
-  404; Univers bukan bagian base-35 Adobe.
-- **PFM driver TERTUTUP — dan ini sekarang dibuktikan, bukan diduga.**
-  `Univers[1252].pfm` dll adalah **stub**: ukuran header yang dideklarasikan
-  jauh lebih kecil dari berkasnya, `dfFirstChar`/`dfLastChar` **nol**, dan tidak
-  ada offset mana pun yang memuat tabel lebar yang cocok — decode-nya mencetak
-  **7/95 dan 10/95** terhadap Century dan CG Times, yang metriknya diketahui
-  pasti dari Schola dan Times. Kontras: PFM **URW** tervalidasi **95/95**
-  melawan AFM-nya sendiri, jadi metodenya benar; datanya yang tidak ada.
-- Interop BarTender **tidak mengekspos daftar font printer sama sekali**
-  (`Format`/`Application` tidak punya `PrinterFonts`; hanya tipe
-  `BtFontWeight`/`BtFontScript` yang ada).
+**AFM Univers REGULAR dicari sistematis 2026-09-28 dan TIDAK ditemukan — dan
+tiga kandidat yang bernama "Univers" terbukti BUKAN Univers.** Ini penting
+supaya tidak ada yang memakai file itu setelah menemukannya di pencarian.
 
-**Yang tetap bisa dinyatakan: 63 dan 65 adalah cut CONDENSED.** Manual
-menyebut face-nya "Univers Condensed Bold" dan "Univers Extra Condensed", tapi
-`FONT_MAP` memetakan keduanya ke `sans-serif` **biasa** — jadi keduanya
-digambar **lebih lebar daripada cetakannya**. **Arahnya pasti** (cut condensed
-secara definisi lebih sempit dari regular-nya); **besarannya tidak diukur**, dan
-sengaja **tidak dikarang**. Sebagai pembanding yang *tidak* dipakai: Arial
-Narrow **ada** di mesin ini dan terukur konsisten **0,82× Liberation Sans** —
-tapi Arial Narrow itu Helvetica Narrow, desain yang berbeda dari Univers
-Condensed, jadi menuliskan 0,82 untuk c63/c65 adalah persis tebakan yang EPL
+| kandidat | hasil uji |
+|---|---|
+| `mal359/unixfonts`: `Univers-Condensed{,Bold,Oblique,BoldOblique}` | ✅ **ASLI** — dipakai untuk c63/c65 |
+| `vipulkohli/Fonts2000`: `UNIVERS.afm` | ❌ ratio vs Univers asli **berserakan 1,12–1,40** |
+| `vipulkohli/Fonts2000`: `UNIVERS1.afm` | ❌ skala terbaik k=0,906, **residual 71,9** per-mille |
+| `vipulkohli/Fonts2000`: `UNIVERS2.afm` | ❌ skala terbaik k=1,180, **residual 42,0** per-mille |
+| `att/uwin`: `groff/font/devps/afm/afm.dat` | ❌ **katalog nama file**, bukan metrik |
+| nama wildtype Adobe `uv______.afm` (dari katalog itu) | ❌ tidak ada di GitHub |
+
+**Uji pembeda yang dipakai** (pakai ini lagi untuk font komersial lain): file
+yang benar-benar desain yang sama terhadap Univers Condensed Bold yang asli
+cocok pada **residual <5 per-mille di bawah SATU skala**. Ketiga kandidat
+mencetak **42–72**, jadi bukan. Tanda-tanda pendukung pada yang palsu:
+`Notice="k"` (sampah), `EncodingScheme FontSpecific`, dan
+`Notice Converted by ALLTYPE` — semuanya font hasil konversi yang diganti nama.
+
+Seluruh **688 AFM** di `mal359/unixfonts` juga sudah dienumerasi: hanya **4**
+yang bernama Univers, **semuanya Condensed**. Direktori lain di repo itu
+(Mathematica, NeXT, Solaris, DEC) berisi set base-35 Adobe tanpa Univers.
+
+**Nama file yang dicari kalau nanti mau lanjut** — dari katalog Adobe/Linotype:
+**`uv______.afm`** (Univers 55 Roman), `uvb_____.afm` (Bold),
+`uvc_____.afm` / `uvcb____.afm` (Condensed / Condensed Bold). Jalur yang belum
+dicoba: paket Adobe Type Library asli, atau specimen Univers cetak.
+
+**Estimasi yang bisa dipertahankan — bukan spesifikasi, tapi jauh lebih baik
+daripada "tidak diketahui":** Univers adalah **superfamily dengan langkah lebar
+teratur antar cut** (55 regular → 57/67 condensed → 65/75 extended). Dari cut
+yang **terukur** (Condensed Bold, 74,4 per-mille lebih sempit dari Liberation
+Sans), **c61/c62/c68 kemungkinan besar terlalu lebar pada orde yang sama,
+~6,5%.** Estimasi ini berasal dari satu cut yang berdekatan, bukan dari cut
+regularnya, jadi **tidak dipakai** — tapi ia menetapkan skala kesalahannya.
+
+**Cara mencari yang berhasil** (kontras dengan yang gagal): **`gh` CLI code
+search** menemukan AFM yang tidak pernah muncul di jalur web/arsip mana pun.
+`gh api -X GET search/code -f q='filename:...'` untuk nama, dan
+`-f q='"FontName X" StartCharMetrics'` untuk isi. Semua verdict "tidak ada
+sumber" sebelumnya di dokumen ini berasal dari WebSearch/archive.org/rapid
+repo — **jangan simpulkan buntu sebelum `gh` code search dicoba.**
+
+**Sumber lain yang sudah diperiksa dan tetap buntu:** tidak ada font Univers di
+registry, `C:/Windows/Fonts`, seluruh pohon Seagull (**0 file .ttf/.otf**),
+Office/Adobe (keduanya terpasang), atau di dalam `ss#ipl.ddz`; AFM tidak ada di
+jalur Adobe core fonts maupun `urw-base35-fonts` (Univers bukan bagian base-35);
+**PFM driver adalah stub** (7/95 dan 10/95 terhadap Century dan Times, yang
+metriknya diketahui pasti — sedangkan PFM **URW** tervalidasi 95/95 melawan
+AFM-nya sendiri, jadi metodenya benar dan datanya yang tidak ada); dan interop
+BarTender tidak mengekspos daftar font printer (`Format`/`Application` tidak
+punya `PrinterFonts`).
+
+**63 dan 65 sendiri sudah diperbaiki** (lihat bagian di atas) — advance metrik
+dari AFM Adobe yang asli. Sisa yang di bawah ini hanya berlaku untuk
+**c61/c62/c68**.
 dan TSPL sudah dua kali buktikan salah.
 
 **Yang diterapkan:** peringatan `univers-condensed-width` (sekali per label,
