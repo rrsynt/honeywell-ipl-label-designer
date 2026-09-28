@@ -17,7 +17,7 @@ import { describeCodePage, ensureCjkReady } from '../services/ipl/codePages';
 import { notify, requestConfirm } from '../services/uiDialogs';
 import { sendIplViaBridge, pingBridge } from '../services/bridgeSend';
 import { getPrinterTarget, setPrinterTarget } from '../services/printerTarget';
-import { PRINTER_MODELS } from '../constants';
+import { PRINTER_MODELS, UNPRINTABLE_MARGIN_MM } from '../constants';
 
 const DPI_OPTIONS: PrinterSettings['dpi'][] = [203, 300, 406];
 
@@ -133,6 +133,14 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
     const [debouncedCode, setDebouncedCode] = useState(iplCode);
     const [dpi, setDpi] = useState<PrinterSettings['dpi']>(203);
     const [zoomFactor, setZoomFactor] = useState(1);
+    /**
+     * Show the band the print head cannot reach. Default OFF, because the
+     * viewer's contract is "preview === print": a mark that is not in the
+     * printed output should not appear unless asked for. It is an overlay
+     * ELEMENT rather than canvas drawing, so PNG/PDF export — which reads
+     * `canvas.toDataURL()` — stays clean with it on.
+     */
+    const [showMargin, setShowMargin] = useState(false);
     const [basePxPerDot, setBasePxPerDot] = useState(0.5);
     const [copied, setCopied] = useState(false);
     const [safeCopied, setSafeCopied] = useState(false);
@@ -381,6 +389,39 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
         if (!canvas || !hasContent) return;
         renderLabel(canvas, previewLabel, extent, { dpi, pxPerDot: Math.min(8, basePxPerDot * zoomFactor), quality: 2, rotation: effectiveRotation });
     }, [previewLabel, extent, dpi, basePxPerDot, zoomFactor, hasContent, bwipReady, effectiveRotation]);
+
+    /**
+     * The printable area, as a CSS-pixel rectangle over the canvas.
+     *
+     * `UNPRINTABLE_MARGIN_MM` is the head's own figure and carries WIDTH only,
+     * so the band runs along the two edges of the head axis — which screen
+     * edges those are depends on the rotation, exactly like the W axis in the
+     * placement formula: at 0/180 the label's width axis is horizontal, at
+     * 90/270 it is vertical. Insetting all four edges would claim a margin
+     * along the feed that the driver's table does not state.
+     *
+     * Null when this model has no such band, when no model is chosen, or when
+     * the label is too small for any printable area to be left.
+     */
+    const printableArea = useMemo(() => {
+        const insetMm = UNPRINTABLE_MARGIN_MM[driverModel] ?? 0;
+        if (!showMargin || insetMm <= 0) return null;
+        const swap = effectiveRotation === 1 || effectiveRotation === 3;
+        const wDots = swap ? extent.heightDots : extent.widthDots;
+        const hDots = swap ? extent.widthDots : extent.heightDots;
+        const inset = (insetMm / 25.4) * dpi;
+        if (wDots <= inset * 2 || hDots <= inset * 2) return null;
+        const pxPerDot = Math.min(8, basePxPerDot * zoomFactor);
+        const band = inset * pxPerDot;
+        // The head spans the stock's WIDTH, so the band is on that axis.
+        const acrossWidth = !swap;
+        return {
+            left: acrossWidth ? band : 0,
+            top: acrossWidth ? 0 : band,
+            width: wDots * pxPerDot - (acrossWidth ? band * 2 : 0),
+            height: hDots * pxPerDot - (acrossWidth ? 0 : band * 2),
+        };
+    }, [showMargin, driverModel, extent, dpi, basePxPerDot, zoomFactor, effectiveRotation]);
 
     const handleImport = useCallback(async () => {
         try {
@@ -947,6 +988,14 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                                 </div>
                             </div>
                             <div className="flex gap-1 ml-1">
+                                <button onClick={() => setShowMargin(v => !v)}
+                                    disabled={(UNPRINTABLE_MARGIN_MM[driverModel] ?? 0) <= 0}
+                                    title={(UNPRINTABLE_MARGIN_MM[driverModel] ?? 0) > 0
+                                        ? `Show the ${UNPRINTABLE_MARGIN_MM[driverModel]} mm band the print head cannot reach, from the driver's own model table. Not part of the printed label, and never included in PNG/PDF export.`
+                                        : 'This printer model publishes no unprintable margin, so there is no band to show. Pick a model under Printer.'}
+                                    className={`text-xs px-2.5 py-2 rounded flex items-center gap-1 ${showMargin ? 'bg-orange-600 hover:bg-orange-500 text-white' : 'bg-gray-700 hover:bg-gray-600'} disabled:opacity-40 disabled:cursor-not-allowed`}>
+                                    <span className="material-icons text-sm">crop_free</span>Guide
+                                </button>
                                 <button onClick={downloadPng} disabled={!hasContent || exporting}
                                     className="text-xs px-2.5 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1">
                                     <span className="material-icons text-sm">image</span>{exporting ? '…' : 'PNG'}
@@ -996,7 +1045,21 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                                     {errors.length > 0 ? errors[0].message : 'Type or paste IPL code to preview the label.'}
                                 </div>
                             ) : (
-                                <canvas ref={canvasRef} className="shadow-2xl" style={{ imageRendering: 'pixelated' }} />
+                                <div className="relative inline-block">
+                                    <canvas ref={canvasRef} className="shadow-2xl" style={{ imageRendering: 'pixelated' }} />
+                                    {printableArea && (
+                                        <div
+                                            aria-hidden="true"
+                                            className="absolute pointer-events-none border-2 border-dashed border-orange-400/90"
+                                            style={{
+                                                left: printableArea.left,
+                                                top: printableArea.top,
+                                                width: printableArea.width,
+                                                height: printableArea.height,
+                                            }}
+                                        />
+                                    )}
+                                </div>
                             )}
                         </div>
 

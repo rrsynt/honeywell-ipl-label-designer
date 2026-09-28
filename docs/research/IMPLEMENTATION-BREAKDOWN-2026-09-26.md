@@ -884,11 +884,21 @@ SALAH : "halaman dipotong 8 dot per tepi"  (menyiratkan pergeseran −8)
 ```
 
 Angka 16 dot itu sendiri nyata dan konsisten di kelima fixture (812→796,
-406→390, 609→593, 1218→1202), dan 16 = 2 mm = dua kali
-`UNPRINTABLE_MARGIN_MM['PD43'] = 1` mm. Yang salah hanyalah **membaginya dua
-lalu menyebutnya pergeseran**. Delapan dot itu ukuran beberapa efek nyata di
-sini, jadi model yang keliru sempat menutupi selisih asli — pelajaran yang sama
+406→390, 609→593, 1218→1202). Yang salah hanyalah **membaginya dua lalu
+menyebutnya pergeseran**. Delapan dot itu ukuran beberapa efek nyata di sini,
+jadi model yang keliru sempat menutupi selisih asli — pelajaran yang sama
 dengan matriks 2×2 di audit DG.
+
+> **Koreksi 2026-09-29 — derivasi `16 = 2 × UNPRINTABLE_MARGIN_MM['PD43']`
+> DICABUT, dan ternyata tidak diperlukan.** Angka itu sempat dijelaskan sebagai
+> dua kali konstanta margin 1 mm milik aplikasi ini. Tabel driver Seagull
+> membantahnya: `Stock.UnprintableWidth` untuk **PD43 adalah `0.00 in`**, jadi
+> tidak ada 1 mm untuk digandakan. 16 dot itu tetap berdiri karena ia **diukur
+> langsung dari PNG preview BarTender** (lihat tabel di atas, "16 = inset area
+> tercetak (diukur independen dari PNG preview)") — sumbernya pengukuran, bukan
+> konstanta aplikasi, sehingga cabutnya penjelasan ini tidak menggeser satu pun
+> angka di dokumen ini. Yang benar-benar berubah: `UNPRINTABLE_MARGIN_MM`
+> sendiri, yang nilainya baru saja dikoreksi dari tabel driver itu juga.
 
 **Konsekuensi yang penting untuk jumlah yang belum dijelaskan:** selisih posisi
 absolut kita vs BarTender tetap **tidak seragam** — berbeda per fixture, bahkan

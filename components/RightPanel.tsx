@@ -282,7 +282,7 @@ const PrinterSettingsEditor: React.FC<{ settings: Design['printerSettings']; dis
                 </select>
             </PropInput>
             {(UNPRINTABLE_MARGIN_MM[settings.model] ?? 0) > 0 && (
-                <p className="col-span-2 text-xs text-orange-300/80" title="Honeywell publishes no per-model figure for this, so it is a conservative warning, not a measured limit">
+                <p className="col-span-2 text-xs text-orange-300/80" title="From the printer driver's own model table (Stock.UnprintableWidth), not an estimate. It covers the two edges across the print head; the leading and trailing edges are not inset.">
                     Unprintable margin: {UNPRINTABLE_MARGIN_MM[settings.model]} mm per edge — shown as the dashed orange guide on the canvas.
                 </p>
             )}

@@ -56,18 +56,37 @@ export const LABEL_WIDTH_ADJUSTMENT: { [model: string]: Partial<Record<203 | 300
 };
 
 /**
- * Fase 3: the strip along each edge of the stock that the print head cannot
- * reach, in mm, drawn as a guide rectangle on the canvas. Honeywell does not
- * publish a per-model figure for this, so the values below are the conservative
- * inset the designer warns with, NOT a measured printer specification — a
- * design placed outside it may still print, and one inside it will. 'Generic'
- * has no head to describe, so it gets none and draws no guide.
+ * The strip along each edge of the stock that the print head cannot reach, in
+ * mm, drawn as a guide rectangle on the canvas and in the viewer.
+ *
+ * These are the DRIVER's own figures, not a guess. `Stock.UnprintableWidth` in
+ * the Seagull model table (`ss#ipl.ddz` -> `Model.d`) gives, for the 203 dpi
+ * models this project ships: PD43 / PC23d / PC43d / PM43 = 0.00 in, and
+ * PD41 = 3.00 mm (2.20 mm at 300 dpi). The table is most of the evidence:
+ * 29 of its 62 entries are 0.00, and the non-zero ones cluster on the older
+ * 3400/4100/4400 generation at 0.05-0.12 in. The key carries WIDTH only — no
+ * per-edge variant exists anywhere in the table — so it describes the two
+ * edges ACROSS the print head, and the guide insets both of those.
+ *
+ * An earlier revision carried a flat 1 mm for every model and said so in this
+ * comment: "NOT a measured printer specification". It was wrong in both
+ * directions — three times too small for the PD41 and inventing a margin the
+ * PD43 does not have — which is exactly the failure a guessed table buys.
+ *
+ * What this does NOT model: the leading/trailing edges along the feed axis.
+ * `Stock.Printable.Y` equals the stock length on every model above (68.00 in
+ * against a 68.00 in maximum), so the table claims nothing is lost there, and
+ * the guide follows it rather than insetting those edges on a hunch.
+ *
+ * Treat it as a layout-safe band, not a hard limit: a design placed outside it
+ * may still print, and one inside it will. 'Generic' has no head to describe,
+ * so it gets 0 and draws no guide.
  */
 export const UNPRINTABLE_MARGIN_MM: { [model: string]: number } = {
     'Generic': 0,
-    'PD41': 1,
-    'PD43': 1,
-    'PD45S': 1,
+    'PD41': 3,       // Stock.UnprintableWidth=3.00 mm at 203 dpi, 2.20 mm at 300
+    'PD43': 0,       // Stock.UnprintableWidth=0.00 in
+    'PD45S': 0,      // absent from the driver table; PD43/PC43/PM43 all read 0.00
 };
 
 /** The resident outline families the printer actually has faces for.
