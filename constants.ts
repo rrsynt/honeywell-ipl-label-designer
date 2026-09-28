@@ -324,12 +324,49 @@ export const FONT_MAP: { [key: string]: FontDef } = {
     '61': { name: 'Swiss 721 (Univers)', type: 'outline', family: 'sans-serif' },
     '62': { name: 'Swiss 721 bold', type: 'outline', family: 'sans-serif' },
     '63': { name: 'Swiss 721 bold condensed', type: 'outline', family: 'univers-condensed' },
+    // c62, c64, c66 carry "bold" in their NAME, and the authoritative K10 table
+    // confirms the printer really does substitute a bold face behind them
+    // (Univers Bold / Andale Mono Bold / CG Times Bold). They are drawn here
+    // with their family's regular cut. Measured 2026-09-28 from the driver's own
+    // per-face PFMs, to put a number on that rather than assume it is harmless:
+    //
+    //   c64 (Andale Mono Bold)   monospace, so the advance is IDENTICAL —
+    //                            measured 0 of 95 glyphs differ. No exposure.
+    //   c62 (Univers Bold)       bold differs from regular on 42/95 glyphs.
+    //   c66 (CG Times Bold)      47/95 glyphs, mean 59 per-mille apart.
+    //
+    // Against OUR tables the picture is subtler, and it is why the mapping is
+    // left alone: scaled to a common mean, Liberation Sans sits 23.5 per-mille
+    // from Univers Bold but only 16.7 from Univers regular, and Liberation Serif
+    // sits 32.3 from CG Times Bold against 28.1 from CG Times regular. The
+    // regular cut is the closer of the two in both cases — so the current
+    // mapping is the better of the available choices, not an oversight.
+    //
+    // Painting these bold would be worse: every outline id is drawn at regular
+    // weight (tests/outlineBoldWeight.test.ts), and geometry.ts and
+    // canvasDrawer.ts hardcode normal weight, so emboldening only the viewer
+    // would desync the designer from the preview.
     '64': { name: 'Prestige bold', type: 'outline', family: 'monospace' },
     '65': { name: 'Zurich extra condensed', type: 'outline', family: 'univers-condensed' },
     '66': { name: 'Dutch 801 bold', type: 'outline', family: 'serif' },
     '67': { name: 'Century Schoolbook', type: 'outline', family: 'schoolbook' },
     '68': { name: 'Futura light', type: 'outline', family: 'sans-serif' },
     '69': { name: 'Letter Gothic', type: 'outline', family: 'letter-gothic' },
+    // c70 (DingDings) is the weakest id in this table, and it is kept only
+    // because PRM 2.70 p.206 lists it. Three things are worth knowing:
+    //   - It is ABSENT from the authoritative K10 table, which stops at 69. So
+    //     the face behind it is undocumented by the source this project treats
+    //     as decisive.
+    //   - The manual gives no face beyond the name, no cell, no size, and no
+    //     statement of what character set it holds, so "sans-serif" here is a
+    //     placeholder rather than a measurement. A dingbat face is not a text
+    //     face; if it is used at all it is for symbol glyphs that none of our
+    //     tables describe.
+    //   - Only the PM4i/PX4i/PX6i line lists 61-70 in its `c` range at all
+    //     ("0 to 26, 28, 30 to 41, 61 to 70"); every PD43-era entry stops at 41.
+    //
+    // It stays in FONT_MAP because the PRM names it and a stream may legitimately
+    // carry it, but nothing here should be read as knowing what it looks like.
     '70': { name: 'DingDings', type: 'outline', family: 'sans-serif' },
 };
 

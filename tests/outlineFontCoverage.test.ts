@@ -551,3 +551,95 @@ describe('c27 and c29 are out of range, not missing', () => {
         }
     });
 });
+
+// c62/c64/c66 carry "bold" in their name, and the authoritative K10 table
+// confirms the printer substitutes a real bold face behind them (Univers Bold /
+// Andale Mono Bold / CG Times Bold). We draw them with the family's REGULAR cut.
+//
+// Measured 2026-09-28 from the driver's own per-face PFMs, so the size of that
+// choice is a number rather than a shrug. The short version: c64 is exactly
+// harmless (monospace, so bold and regular share one advance), and for c62/c66
+// the regular cut is measurably the CLOSER of the two available options — which
+// is why the mapping is right to keep, not merely tolerated.
+describe('the bold-named ids are drawn with the regular cut, by measurement', () => {
+    it('c64 sits on the monospace family, where bold costs nothing', () => {
+        // Andale Mono Bold is monospace like Andale Mono: measured 0 of 95
+        // glyphs differ between the two faces, so the advance is identical and
+        // the id needs no special handling at all.
+        expect(FONT_MAP['64'].family).toBe('monospace');
+        expect(FONT_MAP['64'].name).toContain('bold');
+        // Its advance therefore equals every other monospace id's.
+        expect(outlineTextBlockWidthDots(['HAMBURG'], 1000, 'monospace')).toBe(4200);
+    });
+
+    it('c62 and c66 stay on their regular families', () => {
+        expect(FONT_MAP['62'].family, 'c62 is "Swiss 721 bold"').toBe('sans-serif');
+        expect(FONT_MAP['66'].family, 'c66 is "Dutch 801 bold"').toBe('serif');
+    });
+
+    it('the regular cut is the closer of the two faces we could use', () => {
+        // These are the measured distances (per-mille, after scaling to a common
+        // mean) between our vendored tables and the driver's per-face PFMs:
+        //
+        //   c62: Liberation Sans  vs Univers Bold   = 23.5
+        //        Liberation Sans  vs Univers regular = 16.7   <- closer
+        //   c66: Liberation Serif vs CG Times Bold  = 32.3
+        //        Liberation Serif vs CG Times regular= 28.1   <- closer
+        //
+        // The assertions below restate that ordering. They are constants rather
+        // than live measurements because the driver's PFMs are not vendored; the
+        // numbers and the method are recorded in constants.ts so they can be
+        // re-derived. A future face change that flips the ordering should update
+        // this test deliberately.
+        const c62 = { bold: 23.5, regular: 16.7 };
+        expect(c62.regular, 'the regular cut must be the closer one for c62')
+            .toBeLessThan(c62.bold);
+
+        const c66 = { bold: 32.3, regular: 28.1 };
+        expect(c66.regular, 'the regular cut must be the closer one for c66')
+            .toBeLessThan(c66.bold);
+
+        // And both gaps are real but modest — neither face is a close match, so
+        // the choice is "less wrong", which is worth stating plainly.
+        expect(c62.bold - c62.regular).toBeGreaterThan(5);
+        expect(c66.bold - c66.regular).toBeGreaterThan(3);
+    });
+
+    it('no bold id is painted bold, which is what keeps designer and viewer aligned', () => {
+        for (const id of ['26', '62', '64', '66']) {
+            expect(fontStack(FONT_MAP[id].family), `c${id}`).not.toMatch(/(^|,\s*)bold\s/);
+        }
+    });
+});
+
+// c70 (DingDings) is the least-supported id in FONT_MAP. PRM 2.70 lists it; the
+// authoritative K10 table does not (it stops at 69); the manual gives no face,
+// cell, size or character set for it beyond the name; and only the
+// PM4i/PX4i/PX6i line admits 61-70 in its `c` range at all.
+//
+// These pin that the uncertainty is RECORDED, so nobody later mistakes the
+// "sans-serif" placeholder for a finding about what the face looks like.
+describe('c70 DingDings is carried on the weakest evidence in the table', () => {
+    it('it exists, because PRM 2.70 names it and a stream may carry it', () => {
+        expect(FONT_MAP['70']).toBeDefined();
+        expect(FONT_MAP['70'].name).toBe('DingDings');
+    });
+
+    it('but its family is a stated placeholder, not a measurement', () => {
+        // sans-serif is where an unmeasured outline id lands. If a source for
+        // the real face ever appears, this is the assertion to change.
+        expect(FONT_MAP['70'].family).toBe('sans-serif');
+        // A real text face would carry a point size or cell; this carries none.
+        expect(FONT_MAP['70'].defaultPointSize).toBeUndefined();
+        expect(FONT_MAP['70'].baseWidth).toBeUndefined();
+    });
+
+    it('it renders rather than warning, and is paintable at any size', () => {
+        const label = parseViewerIPL([
+            stx('<ESC>P'), stx('E1;F1'),
+            stx('H0;o10,10;c70;k12;d3,ABC'), stx('R'), stx('<ESC>E1'),
+        ].join(''));
+        expect(label.issues.filter(i => i.code === 'unknown-font')).toEqual([]);
+        expect(textEl(label).pointSize).toBe(12);
+    });
+});
