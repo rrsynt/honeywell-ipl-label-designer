@@ -102,8 +102,10 @@ export const COMMAND_HELP: CommandHelp[] = [
       summary: 'Selects media sense mode (gap / reflective / continuous).', page: 'PRM p.125' },
     { token: '<SI>g', kind: 'setup', title: 'Media sensitivity', syntax: '<SI>gn[,m]',
       summary: 'Selects direct-thermal vs thermal-transfer stock and sensitivity.', page: 'PRM p.127' },
-    // These three change the printed image and are NOT reproduced by this
-    // preview; the parser warns when one is present (setup-not-modelled).
+    // These change the printed image and are NOT reproduced by this preview;
+    // the parser warns when one is present (setup-not-modelled). The list is
+    // not claimed to be exhaustive — tests/commandSurface.test.ts sweeps the
+    // manual's command index for the next one.
     { token: '<SI>X', kind: 'setup', title: 'Label origin X-Y adjust', syntax: '<SI>X[m1][,m2]',
       summary: 'Moves the imaged position on the media (m1 = x, m2 = y, in dots). Not reproduced by this preview.',
       page: 'K10 937-028-003 (absent from PRM rev 008)' },
@@ -113,6 +115,12 @@ export const COMMAND_HELP: CommandHelp[] = [
     { token: '<SI>h', kind: 'setup', title: 'Printhead loading mode', syntax: '<SI>hn[,m]',
       summary: 'n=1 mirror printing, m=1 inverse printing — "affects how the whole image prints". Not reproduced by this preview.',
       page: 'PRM p.135' },
+    { token: '<SI>o', kind: 'setup', title: 'Direct Graphics emulation mode', syntax: '<SI>on',
+      summary: 'n=0 prints Direct Graphics with the legacy 7421 printer\'s origin offset; n=1 uses the format origin, which this preview already draws.',
+      page: 'PRM 2.70 p.125' },
+    { token: '<SI>z', kind: 'setup', title: 'Slash zero', syntax: '<SI>zn',
+      summary: 'n=1 replaces every zero with a slashed zero. Works only under printer language 0 (USA) and never on OCR fonts c23/c24. Not reproduced by this preview.',
+      page: 'PRM 2.70 p.146' },
 ];
 
 const HELP_BY_TOKEN = new Map(COMMAND_HELP.map(h => [h.token, h]));

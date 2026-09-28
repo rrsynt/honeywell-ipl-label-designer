@@ -184,6 +184,13 @@ export class IPLViewerParser {
     private pageOrientation: 'portrait' | 'landscape' | null = null;
     private pageHeightDots: number | null = null;
 
+    /**
+     * `<SI>z1` (Slash Zero) seen during the stream. Held until the end of the
+     * parse because its two exclusions — printer language 0, and OCR fonts —
+     * depend on state that is not known when the setup frame arrives.
+     */
+    private slashZeroRequested = false;
+
     /** Sets the target printer, which Direct Graphics placement may need. */
     setDriver(model: string | undefined, dpi: 203 | 300 | 406 | undefined): void {
         this.driverModel = model ?? null;
@@ -293,6 +300,10 @@ export class IPLViewerParser {
         // print stream, not to any stored format, so they must not be
         // captured by format buckets that composePageIfNeeded rebuilds from.
         this.placeDirectGraphics();
+
+        // Needs the finished element list and the final printer language, so it
+        // runs after everything else has settled.
+        this.reportSlashZero();
         return this.printer.label;
     }
 
@@ -977,10 +988,17 @@ export class IPLViewerParser {
 
     /**
      * Setup commands that move or transform the whole printed image, which this
-     * renderer does not reproduce. Every other unhandled <SI> setting is comms,
-     * network or media handling — it cannot change the picture — but these
-     * three can, and silence about them is the failure mode this project exists
-     * to prevent (see tests/unmodelledSetup.test.ts for the sources).
+     * renderer does not reproduce. Most unhandled <SI> settings are comms,
+     * network or media handling and cannot change the picture — but not all of
+     * them, and silence about the ones that can is the failure mode this
+     * project exists to prevent (see tests/unmodelledSetup.test.ts and
+     * tests/commandSurface.test.ts for the sources).
+     *
+     * The list below used to be asserted as COMPLETE ("every other unhandled
+     * <SI> setting ... cannot change the picture"). A sweep of the manual's own
+     * command index found that claim to be false, twice: <SI>o moves the Direct
+     * Graphics origin, and <SI>z changes a printed glyph. The claim is gone
+     * rather than restated, because the sweep is what should catch the next one.
      *
      * Warned rather than modelled: their effect is hardware behaviour whose
      * magnitudes are not derivable from the stream alone, and this project has
@@ -1027,6 +1045,59 @@ export class IPLViewerParser {
             if (loading[2] === '1') modes.push('inverse');
             if (modes.length) warn('Printhead loading mode (<SI>h)', `${modes.join(' + ')} printing is selected.`);
         }
+
+        // Direct Graphics Emulation Mode (PRM 2.70 p.125): "Prints direct
+        // graphics with the same origin offset as a specific legacy printer."
+        // That is a placement change on exactly the element the renderer is
+        // most careful about — n=0 gives graphics the 7421's origin, n=1 uses
+        // the format origin, which is what we already draw. So only n=0 is a
+        // divergence, and only n=0 warns.
+        //
+        // The letter is lowercase o. "<SI>O" (Online or Offline on Power-Up)
+        // and "<SI>on" inside a longer word are different commands; anchoring
+        // on the argument and rejecting a following letter keeps them apart.
+        const dgEmulation = frame.match(/<SI>o(\d)(?![,\d])/);
+        if (dgEmulation && dgEmulation[1] === '0')
+            warn('Direct Graphics emulation mode (<SI>o0)',
+                'Direct Graphics take the legacy 7421 printer\'s origin offset instead of the format origin, so their position differs from this preview.');
+
+        // Slash Zero, Enable or Disable (PRM 2.70 p.146): "Determines if the
+        // regular zero is replaced with a slashed zero." A printed GLYPH
+        // changes — every zero in every field — so it belongs here rather than
+        // with the comms settings.
+        //
+        // Only the REQUEST is recorded here. Whether it takes effect is decided
+        // in reportSlashZero at the end of the parse, because the manual scopes
+        // it two ways this frame cannot see yet: it needs printer language 0
+        // (USA), and it never applies to OCR fonts c23/c24 — and no field has
+        // been parsed at the moment a setup frame arrives.
+        //
+        // The letter is lowercase z. Anchoring on the argument and rejecting a
+        // following digit keeps "<SI>z1" from matching inside "<SI>z12" or a
+        // longer word.
+        const slashZero = frame.match(/<SI>z([01])(?![,\d])/);
+        if (slashZero) this.slashZeroRequested = slashZero[1] === '1';
+    }
+
+    /**
+     * Report Slash Zero once the whole label is known.
+     *
+     * No renderer here can draw a slashed zero — the glyphs are the printer's,
+     * not ours — so the honest outcome is to say the preview differs. Silent
+     * when the command cannot take effect, which the manual's two exclusions
+     * define: it works only under printer language 0 (USA), and never on OCR
+     * fonts c23/c24.
+     */
+    private reportSlashZero(): void {
+        if (!this.slashZeroRequested) return;
+        const lang = this.printer.label.settings.codePage;
+        if (lang !== undefined && lang !== 0) return;
+        const usesOcr = this.printer.label.elements.some(
+            el => el.kind === 'text' && (el.font === '23' || el.font === '24'));
+        if (usesOcr) return;
+        this.printer.issue('warning', 'setup-not-modelled',
+            'Slash zero (<SI>z1) makes every zero print with a slash through it, which this preview draws as a plain zero.',
+            '<SI>z1');
     }
 
     private parseFieldFrame(frame: string): void {
