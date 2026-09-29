@@ -133,7 +133,12 @@ const PRINTER_SETTINGS = new Set([
     'I', 'oR', 'oB', 'oE', 'oH', 'oM', 'oW', 'O',   // code page, options
     'M', 'U', 'UA', 'UB', 'UE', 'UF', 'UG', 'UI', 'UM', 'UN', 'UP', 'UQ', 'US', 'U$', 'U%',
     'V', 'C', 'TD', 'TT', 'TS', 'r', 'JB', 'JF', 'FE', 'FS', 'FK', 'FR', 'EK',
-    'LD', 'LE', 'GG', 'GM', 'GI', 'H', 'W', 'K', 'e', 'A'.toLowerCase(),
+    'LD', 'LE', 'GG', 'GM', 'GI', 'H', 'W', 'K', 'e',
+    // 'a' used to be here as `'A'.toLowerCase()`. EPL is CASE-SENSITIVE — the
+    // tokenizer takes the command name verbatim (`/^([A-Za-z$%]+)/`) and the
+    // switch matches 'A' for text — so 'a' is not the text command and never
+    // was: it is an unrecognized command that got silenced instead of named.
+    // A lowercase 'a' line now reports like any other unknown command.
 ]);
 
 export interface EplParseResult {
