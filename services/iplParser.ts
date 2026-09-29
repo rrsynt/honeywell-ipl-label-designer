@@ -209,28 +209,28 @@ export const parseIPL = (
         const commandParts = commandStr.split(';');
         const commandIdMatch = commandParts[0].match(/^([HBLWU])(\d+)/);
         if (!commandIdMatch) {
-            // Two things land here and both used to vanish without a word:
-            //   I<n>  an interpretive field. The designer has no such concept
-            //         (it attaches an HRI row to its barcode), and the HRI
-            //         font pass above has already consumed the ones that were
-            //         font declarations — so what is left is a real field with
-            //         nowhere to go.
-            //   any other letter, which is simply not a field this model has.
-            // Reported so the caller can say what was dropped, rather than
-            // leaving the user to notice a missing field themselves.
+            // A FIELD this model cannot hold. Only an In qualifies, and only an
+            // orphan one:
+            //
+            //   In  an interpretive field. The designer has no such concept (it
+            //       attaches the human-readable row to its bar code), and the
+            //       HRI font pass above has already consumed the ones that were
+            //       font declarations — so only an In with no bar code to
+            //       attach to has nowhere to go.
+            //
+            // Deliberately NOT every unrecognized segment. G/u graphic
+            // definitions, D field deletes and N session-save are all handled
+            // elsewhere (or are no-ops), and reporting them said "not a field
+            // type this designer can represent" about things that were never
+            // fields — a false-positive storm on correct input, which trains
+            // users to ignore the message. Only a segment that is shaped like a
+            // FIELD the designer lacks is worth a word.
             const head = commandParts[0].trim();
-            // An In that the HRI pass above consumed IS represented — as the
-            // bar code's human-readable row — so it is not a loss and must not
-            // be reported. Only an interpretive field with no matching bar code
-            // has nowhere to go.
             const interpId = /^I(\d+)$/.exec(head);
-            const consumedAsHri = interpId !== null && hriFontMap.has(parseInt(interpId[1], 10));
-            if (onNotice && /^[A-Za-z]\d*/.test(head) && !consumedAsHri) {
+            if (onNotice && interpId && !hriFontMap.has(parseInt(interpId[1], 10))) {
                 onNotice({
                     command: head.slice(0, 24),
-                    message: interpId
-                        ? `Interpretive field "${head.slice(0, 24)}" was not imported: this designer attaches the human-readable row to its bar code instead of holding it as its own field.`
-                        : `Command "${head.slice(0, 24)}" was not imported: it is not a field type this designer can represent.`,
+                    message: `Interpretive field "${head.slice(0, 24)}" was not imported: this designer attaches the human-readable row to its bar code instead of holding it as its own field.`,
                 });
             }
             return;

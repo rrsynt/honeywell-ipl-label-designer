@@ -420,8 +420,16 @@ describe('importer notices for fields it cannot represent (2026-09-29)', () => {
         expect(notes).toEqual(['I1']);
     });
 
-    it('reports a command letter the designer has no field for', () => {
-        expect(parse(['H1;o10,10;c0;d3,X', 'Z9;o10,50;c0']).notes).toEqual(['Z9']);
+    it('stays silent for segments that are not fields at all', () => {
+        // G/u are graphic DEFINITIONS (handled by their own pass), D is field
+        // delete, N is session-save. Reporting them said "not a field type
+        // this designer can represent" about things that were never fields —
+        // a false-positive storm on correct input. An earlier cut of this
+        // change did exactly that, and this test is the pin.
+        expect(parse(['G0;x8;y8', 'u1,FF']).notes).toEqual([]);
+        expect(parse(['H1;o10,10;c0;d3,X', 'D0']).notes).toEqual([]);
+        expect(parse(['H1;o10,10;c0;d3,X', 'N']).notes).toEqual([]);
+        expect(parse(['H1;o10,10;c0;d3,X', 'Z9;o10,50;c0']).notes).toEqual([]);
     });
 
     it('stays silent for an In that becomes a bar code HRI row', () => {
