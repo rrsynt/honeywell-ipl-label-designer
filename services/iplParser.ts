@@ -155,14 +155,31 @@ export const parseIPL = (
 
     const labelWidthMatch = iplCode.match(/<ESC>C<SI>W(\d+)/);
     if (labelWidthMatch) {
-        // <SI>W is the label width (across the printhead). We assume portrait;
-        // landscape orientation cannot be reliably detected from the stream alone.
+        // <SI>W is the label width (across the printhead). Orientation is not
+        // decided here — <SI>L below is what settles it, and only when both are
+        // present.
         design.labelSettings.width = dotsToMm(parseInt(labelWidthMatch[1], 10), dpi);
     }
 
     const labelLengthMatch = iplCode.match(/<STX><SI>L(\d+)<ETX>/);
     if (labelLengthMatch) {
         design.labelSettings.height = dotsToMm(parseInt(labelLengthMatch[1], 10), dpi);
+        // Orientation is DERIVED, and only when the stream says enough to tell:
+        // <SI>W is the width across the printhead and <SI>L the length along
+        // the feed, so a length longer than the width means the stock is wider
+        // than it is tall. Nothing else depends on the value — the generator
+        // sizes the label from `width` and `height` whatever orientation says —
+        // but the property panel reads it back, and answering "Portrait" for a
+        // landscape stream is a control that contradicts the label beside it.
+        //
+        // A stream that declares only <SI>W is genuinely undecidable and stays
+        // portrait: some drivers write the printhead width there for a landscape
+        // page (samples/bartender-sweep-one-box-landscape.ipl declares W388 for
+        // a 4x2 in page and no <SI>L at all), so guessing would be wrong about
+        // as often as right.
+        if (labelWidthMatch && design.labelSettings.height > design.labelSettings.width) {
+            design.labelSettings.orientation = 'landscape';
+        }
     }
 
     // Rudimentary settings parsing (tolerates combined <SI> frames from third-party streams)

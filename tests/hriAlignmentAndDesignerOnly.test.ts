@@ -15,6 +15,7 @@ import { designerOnlyWarnings } from '../services/designerOnly';
 import { printedLabelMm } from '../services/stockFrame';
 import { sheetCellDots } from '../services/printRecords';
 import { elementVisualBox } from '../services/ipl/renderer';
+import { parseIPL } from '../services/iplParser';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
 import { renderLabel, computeLabelExtent } from '../services/ipl/renderer';
 import { newRealCanvas } from './golden/setup';
@@ -449,5 +450,50 @@ describe('Direct Graphics placement survives the landscape change', () => {
         const l = await generateIPL(dgDesign('landscape', imageAt(20, 15)));
         const hexOf = (s: string) => /<STX><ESC>g1<ETX>\n<STX>([0-9A-Fa-f]+)<ETX>/.exec(s)?.[1];
         expect(hexOf(l)).toBe(hexOf(p));
+    });
+});
+
+// Orientation is not in the stream, but it is derivable when BOTH dimensions
+// are declared: <SI>W is the width across the printhead and <SI>L the length
+// along the feed, so a longer length means a stock wider than it is tall. The
+// importer used to answer "portrait" unconditionally, so the property panel
+// contradicted the landscape label sitting next to it.
+describe('import: orientation is derived from W and L, and only then', () => {
+    const stream = (w: string, l?: string) => [
+        '<STX>R<ETX>',
+        `<STX><ESC>C<SI>W${w}<ETX>`,
+        ...(l ? [`<STX><SI>L${l}<ETX>`] : []),
+        '<STX><ESC>P<ETX>',
+        '<STX>E1;F1<ETX>',
+        '<STX>H1;o40,40;c25;k10;d3,x<ETX>',
+        '<STX>R<ETX>',
+        '<STX><ESC>E1<CAN><ETB><FF><ETX>',
+    ].join('\n');
+
+    it('a longer L than W is landscape', () => {
+        // 100mm x 160mm at 203 dpi.
+        const d = parseIPL(stream('800', '1280'), 203);
+        expect(d.labelSettings.width).toBeCloseTo(100, 0);
+        expect(d.labelSettings.height).toBeCloseTo(160, 0);
+        expect(d.labelSettings.orientation).toBe('landscape');
+    });
+
+    it('a shorter L than W is portrait', () => {
+        const d = parseIPL(stream('800', '160'), 203);
+        expect(d.labelSettings.orientation).toBe('portrait');
+    });
+
+    it('equal sides are portrait — there is no "square" to choose', () => {
+        const d = parseIPL(stream('800', '800'), 203);
+        expect(d.labelSettings.orientation).toBe('portrait');
+    });
+
+    it('W alone stays portrait, because the driver writes the printhead width', () => {
+        // The driver's own landscape output declares W388 and no <SI>L at all
+        // (samples/bartender-sweep-one-box-landscape.ipl, a 4x2 in page), so a
+        // lone <SI>W is genuinely undecidable and must not be guessed.
+        const d = parseIPL(stream('388'), 203);
+        expect(d.labelSettings.orientation).toBe('portrait');
+        expect(d.labelSettings.width).toBeCloseTo(48.5, 0);
     });
 });
