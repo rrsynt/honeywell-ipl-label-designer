@@ -34,26 +34,53 @@ const advanceNumeric = (digits: string, step: number, sign: 1 | -1): string => {
     return String(value).padStart(width, '0');
 };
 
-/** Alphanumeric odometer over 0–9,A–Z (PRM p.92): Z→A carries, 9→0 carries. */
+/**
+ * Alphanumeric odometer over 0–9,A–Z (PRM p.97): the sequence runs
+ * "0, 1, 2...8, 9, A, B, C...Y, Z, 0, 1...", so 9 rolls into A and Z into 0.
+ *
+ * Two manual rules shape the width arithmetic, and the first version broke both
+ * for a region containing anything but digits and letters:
+ *
+ *   "The printer ignores any non-alphanumeric characters within this region."
+ *   "The length of data does not change."
+ *
+ * Ignoring a character means its POSITION still counts but its VALUE does not:
+ * in "A-1" the '-' is not part of the number, yet the region is still three
+ * characters wide when it comes back. Counting the width as text.length while
+ * accumulating only the valid characters made "A-1" advance to "0A2" — the
+ * value shifted up a place and the field changed length, which is exactly what
+ * the second rule forbids.
+ *
+ * So the arithmetic runs over the valid characters alone, and the result is
+ * written back into the ignored positions unchanged.
+ */
 const advanceAlphanumeric = (text: string, step: number, sign: 1 | -1): string => {
     const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const base = alphabet.length;
     let value = 0;
+    let width = 0;
     for (const ch of text) {
         const d = alphabet.indexOf(ch);
-        if (d < 0) continue; // non-alphanumerics are ignored per the manual
+        if (d < 0) continue; // ignored: contributes no value AND no width
         value = value * base + d;
+        width++;
     }
+    if (width === 0) return text; // nothing to advance; leave it alone
     value += sign * step;
-    const width = text.length;
     const modulus = base ** width;
     value = ((value % modulus) + modulus) % modulus;
-    let out = '';
+
+    // Walk the text right-to-left, substituting each valid position and leaving
+    // every ignored character exactly where it was.
+    const digits: string[] = new Array(width);
     for (let i = 0; i < width; i++) {
-        out = alphabet[value % base] + out;
+        digits[width - 1 - i] = alphabet[value % base];
         value = Math.floor(value / base);
     }
-    return out;
+    let next = 0;
+    return [...text]
+        .map(ch => (alphabet.indexOf(ch) < 0 ? ch : digits[next++]))
+        .join('');
 };
 
 /**
@@ -96,14 +123,36 @@ export const resolveLabelAtBatch = (
         const sign: 1 | -1 = own !== undefined && own < 0 ? -1 : 1;
         if (step === 0) return { ...el, source: { ...src, data: data.replace(/<(FS|GS)>/g, '') } } as ViewerElement;
 
-        const advanced = data.replace(/<FS>([^<]*)<FS>|<FS>([^<]*)<GS>/g, (_m, a: string, b: string) => {
-            const region = a ?? b;
-            const isNumeric = a !== undefined;
-            const delta = step * batchIndex;
-            return isNumeric
-                ? advanceNumeric(region, delta, sign)
-                : advanceAlphanumeric(region, delta, sign);
-        });
+        // Three delimiter pairs, and the manual documents two of them:
+        //
+        //   <FS>data<FS>  Numeric Field Separator (p.111)      -> numeric
+        //   <GS>data<GS>  Alphanumeric Field Separator (p.97)  -> alphanumeric
+        //   <FS>data<GS>  not documented; kept because it is the
+        //                 shape two existing tests use -> alphanumeric
+        //
+        // The middle one was MISSING, and the omission was silent: the manual
+        // is explicit ("You must enclose the data between two sets of <GS>
+        // commands: <GS>data<GS>", p.97) and the command's own example is
+        // "<STX><CR><ESC>I1<GS>A<GS><ETX>" — but the regex only accepted
+        // `<FS>…<FS>` and `<FS>…<GS>`, so a properly-written <GS> region never
+        // matched, never advanced, and then had its delimiters stripped. The
+        // preview showed a constant value where the printer steps an
+        // alphanumeric counter.
+        //
+        // Order matters: the specific pairs are tried before the mixed one, so
+        // "…<FS>01<FS>x<GS>AB<GS>" advances the numeric region AND the
+        // alphanumeric one rather than swallowing both into the third arm.
+        const advanced = data.replace(
+            /<FS>([^<]*)<FS>|<GS>([^<]*)<GS>|<FS>([^<]*)<GS>/g,
+            (_m, fs1: string, gs2: string, mixed: string) => {
+                const region = fs1 ?? gs2 ?? mixed;
+                const isNumeric = fs1 !== undefined;
+                const delta = step * batchIndex;
+                return isNumeric
+                    ? advanceNumeric(region, delta, sign)
+                    : advanceAlphanumeric(region, delta, sign);
+            },
+        );
         // The <FS>/<GS> delimiters are control markers, not printable text —
         // strip them so the preview shows only the region contents.
         const display = advanced.replace(/<(FS|GS)>/g, '');
