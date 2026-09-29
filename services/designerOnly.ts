@@ -38,5 +38,20 @@ export const designerOnlyWarnings = (_language: PrinterLanguage, design: Design)
         out.push(`${misaligned.map(f => `"${f.name}"`).join(', ')}: the human-readable line is anchored at the start of the bar code in every supported printer language, so the alignment set on screen ${one ? 'is' : 'are'} not printed.`);
     }
 
+    // Multi-up stock (Grid Columns / Rows). No supported language has a
+    // ganging command: IPL's only width control is <SI>W, which "sets the LABEL
+    // width" (PRM p.131) — one label per feed, sized by that number of dots. So
+    // every generator prints the full declared width as ONE label and the grid
+    // never reaches the printer. The canvas draws the same full label for the
+    // same reason: dividing it here used to shrink the stock to one cell and
+    // then clip away any field outside that cell, so the screen hid ink the
+    // printer would print.
+    const { columns, rows } = design.labelSettings;
+    const cols = Math.max(1, Math.floor(columns || 1));
+    const rws = Math.max(1, Math.floor(rows || 1));
+    if (cols > 1 || rws > 1) {
+        out.push(`the label stock is set to ${cols}x${rws} (multi-up), but no supported printer language has a ganging command — the whole ${design.labelSettings.width}x${design.labelSettings.height}mm is printed as ONE label. Set Grid Columns and Rows to 1 unless the stock really is that size.`);
+    }
+
     return out;
 };

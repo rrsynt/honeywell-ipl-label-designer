@@ -217,13 +217,17 @@ export const Workspace: React.FC<{
         const canvasPos = screenToCanvas(mousePos);
         const { zoom, pan } = workspaceState;
         const scale = PREVIEW_SCALE * zoom;
-        const { width, height, columns, rows, orientation } = design.labelSettings;
+        const { width, height, orientation } = design.labelSettings;
         const isLandscape = orientation === 'landscape';
         const displayWidth = isLandscape ? height : width;
         const displayHeight = isLandscape ? width : height;
 
-        const templateWidth = displayWidth / (columns || 1);
-        const templateHeight = displayHeight / (rows || 1);
+        // The whole stock is the label: the printer gets one label of this size
+        // (`<SI>W` sets the LABEL width, PRM p.131) and IPL has no ganging
+        // command, so the canvas must not divide by Grid Columns/Rows — doing so
+        // made the hit-test and the edge-snap targets a fraction of what prints.
+        const templateWidth = displayWidth;
+        const templateHeight = displayHeight;
 
         const labelX = canvasPos.x - pan.x;
         const labelY = canvasPos.y - pan.y;

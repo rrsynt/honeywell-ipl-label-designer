@@ -155,4 +155,95 @@ describe('designerOnlyWarnings — screen-only properties are named, not dropped
             expect(designerOnlyWarnings(lang, d), lang).toHaveLength(2);
         }
     });
+
+    it('names multi-up stock, which no language can gang', () => {
+        const d = designOf([barcodeField()]);
+        d.labelSettings = { ...d.labelSettings, columns: 2, rows: 1 };
+        const w = designerOnlyWarnings('ipl', d);
+        expect(w).toHaveLength(1);
+        expect(w[0]).toContain('2x1');
+        expect(w[0]).toContain('ONE label');
+    });
+
+    it('stays silent for ordinary 1x1 stock', () => {
+        expect(designerOnlyWarnings('ipl', designOf([barcodeField()]))).toEqual([]);
+    });
+});
+
+// Multi-up and landscape are both cases where the canvas used to disagree with
+// every generator. `columns` made it draw a fraction of the stock and clip the
+// rest (fields outside the first cell vanished from the screen while the
+// printer printed them); `orientation` made it draw a label whose sides were
+// not swapped while the generator sent <SI>W/<SI>L swapped. Both are now the
+// whole stock, and landscape is drawn turned a quarter — the same transform the
+// viewer's renderLabel uses.
+describe('stock geometry: the canvas draws the label the printer is told to make', () => {
+    const stockPx = (labelSettings: Partial<Design['labelSettings']>, fields: Design['fields'] = [barcodeField()]) => {
+        const d = designOf(fields);
+        d.labelSettings = { ...d.labelSettings, ...labelSettings };
+        const c = newRealCanvas(1200, 1200) as any;
+        const ctx = c.getContext('2d');
+        drawElements(ctx, d, [], { zoom: 1, pan: { x: 0, y: 0 } } as any, { x: null, y: null }, null, null);
+        const data = ctx.getImageData(0, 0, 1200, 1200).data;
+        let minX = Infinity, maxX = -1, minY = Infinity, maxY = -1;
+        for (let y = 0; y < 1200; y++) for (let x = 0; x < 1200; x++) {
+            const i = (y * 1200 + x) * 4;
+            if (data[i + 3] > 200) { // the opaque stock
+                if (x < minX) minX = x; if (x > maxX) maxX = x;
+                if (y < minY) minY = y; if (y > maxY) maxY = y;
+            }
+        }
+        return { w: maxX - minX + 1, h: maxY - minY + 1 };
+    };
+
+    const streamSize = async (labelSettings: Partial<Design['labelSettings']>) => {
+        const d = designOf([barcodeField()]);
+        d.labelSettings = { ...d.labelSettings, ...labelSettings };
+        const ipl = await generateIPL(d);
+        return { W: Number(/<SI>W(\d+)/.exec(ipl)![1]), L: Number(/<SI>L(\d+)/.exec(ipl)![1]) };
+    };
+
+    it('draws the WHOLE stock when columns/rows are set, not one cell of it', () => {
+        // 80x50mm at PREVIEW_SCALE 4 = 320x200 px, whatever the grid says: the
+        // generator prints the full width as one label (<SI>W does not divide).
+        const one = stockPx({ columns: 1, rows: 1 });
+        const four = stockPx({ columns: 2, rows: 2 });
+        expect(one).toEqual({ w: 320, h: 200 });
+        expect(four).toEqual(one);
+    });
+
+    it('keeps a field outside the first grid cell visible', () => {
+        // The old division shrank the clip to one cell and hid this field, so
+        // the screen showed a label with ink the printer would print missing.
+        const far = barcodeField({ x: 60, y: 5 });
+        expect(stockPx({ columns: 2, rows: 1 }, [far]).w).toBe(stockPx({ columns: 1, rows: 1 }, [far]).w);
+        const d = designOf([far]);
+        d.labelSettings = { ...d.labelSettings, columns: 2, rows: 1 };
+        const c = newRealCanvas(1200, 1200) as any;
+        const ctx = c.getContext('2d');
+        drawElements(ctx, d, [], { zoom: 1, pan: { x: 0, y: 0 } } as any, { x: null, y: null }, null, null);
+        const data = ctx.getImageData(0, 0, 1200, 1200).data;
+        // x=60mm is 240px; the old 2-up clip ended at 160px, so any ink past
+        // that proves the field is no longer cut away.
+        let rightmost = -1;
+        for (let y = 0; y < 1200; y++) for (let x = 0; x < 1200; x++) {
+            const i = (y * 1200 + x) * 4;
+            if (data[i + 3] > 0 && data[i] < 128 && x > rightmost) rightmost = x;
+        }
+        expect(rightmost).toBeGreaterThan(240);
+    });
+
+    it('swaps the drawn stock for landscape, exactly as <SI>W/<SI>L swap', async () => {
+        const portrait = stockPx({ orientation: 'portrait' });
+        const landscape = stockPx({ orientation: 'landscape' });
+        // 80x50 portrait; 50x80 landscape.
+        expect(portrait).toEqual({ w: 320, h: 200 });
+        expect(landscape).toEqual({ w: 200, h: 320 });
+        const p = await streamSize({ orientation: 'portrait' });
+        const l = await streamSize({ orientation: 'landscape' });
+        expect(p).toEqual({ W: 640, L: 400 });
+        expect(l).toEqual({ W: 400, L: 640 });
+        // The swap is the same in both worlds.
+        expect(landscape.w / portrait.w).toBeCloseTo(p.L / l.L, 5);
+    });
 });
