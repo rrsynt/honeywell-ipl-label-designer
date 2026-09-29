@@ -4,6 +4,7 @@ import { FieldEditor } from './FieldEditor';
 import { CodePanel } from './CodePanel';
 import { PRINTER_MODELS, UNPRINTABLE_MARGIN_MM } from '../constants';
 import { generateIPL, fontSubstitutions, suppressionWarnings, type FontSubstitution } from '../services/iplGenerator';
+import { designerOnlyWarnings } from '../services/designerOnly';
 import { generateZPL } from '../services/zpl/zplGenerator';
 import { generateEPL } from '../services/epl/eplGenerator';
 import { generateTSPL } from '../services/tspl/tsplGenerator';
@@ -1130,6 +1131,7 @@ export const RightPanel: React.FC<{ activeDesign: Design; selectedFieldIds: numb
     const [zplWarnings, setZplWarnings] = useState<string[]>([]);
     const [fontWarnings, setFontWarnings] = useState<FontSubstitution[]>([]);
     const [suppressWarnings, setSuppressWarnings] = useState<string[]>([]);
+    const [designerOnly, setDesignerOnly] = useState<string[]>([]);
     // Lives here (not in CsvJobExporter) so pasted CSV survives tab switches.
     const [jobCsv, setJobCsv] = useState('');
     // ...but a DIFFERENT design must not inherit the old design's table:
@@ -1161,6 +1163,9 @@ export const RightPanel: React.FC<{ activeDesign: Design; selectedFieldIds: numb
             // letting the width difference pass unnoticed.
             setFontWarnings(fontSubstitutions(activeDesign));
             setSuppressWarnings(suppressionWarnings(activeDesign));
+            // These hold for every target language, so they are reported
+            // whichever one the panel is showing.
+            setDesignerOnly(designerOnlyWarnings(language, activeDesign));
         }
     }, [activeTab, activeDesign]);
 
@@ -1202,7 +1207,7 @@ export const RightPanel: React.FC<{ activeDesign: Design; selectedFieldIds: numb
                 {activeTab === 'properties' && renderProperties()}
                 {activeTab === 'printer' && <PrinterSettingsEditor settings={activeDesign.printerSettings} dispatch={dispatch} />}
                 {activeTab === 'data' && renderDataSources()}
-                {activeTab === 'code' && <CodePanel iplCode={iplCode} fontWarnings={fontWarnings} suppressionWarnings={suppressWarnings} zplWarnings={zplWarnings} />}
+                {activeTab === 'code' && <CodePanel iplCode={iplCode} fontWarnings={fontWarnings} suppressionWarnings={suppressWarnings} zplWarnings={zplWarnings} designerOnlyWarnings={designerOnly} />}
             </div>
         </aside>
     );

@@ -421,7 +421,10 @@ const BarcodeFieldEditor: React.FC<{ fields: BarcodeField[]; design: Design; han
     const commonCode39CheckDigit = getCommonValue(fields, 'code39_checkDigit');
     const commonHriFont = getCommonValue(fields, 'hriFont');
     const commonHriFontSize = getCommonValue(fields, 'hriFontSize');
-    const commonHriAlign = getCommonValue(fields, 'hriAlign') || 'center';
+    // 'left' is what the printer does (PRM p.200: an IPL interpretive field is
+    // left justified), so the editor must not show 'center' for a field that
+    // has never set the property.
+    const commonHriAlign = getCommonValue(fields, 'hriAlign') || 'left';
 
     const hMagEditor = usePropEditor(commonHMag, (val: number) => handleUpdate({ h_mag: val } as Partial<Field>));
     const wMagEditor = usePropEditor(commonWMag, (val: number) => handleUpdate({ w_mag: val } as Partial<Field>));

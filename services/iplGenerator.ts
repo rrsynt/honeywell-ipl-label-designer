@@ -1,4 +1,4 @@
-import type { Design, Field, TextField, BarcodeField, LineField, BoxField, ImageField, EllipseField, PolygonField, TriangleField, PrinterSettings, FieldDataSource, DataSource, DateFormat, TimeFormat } from '../types';
+import type { Design, Field, TextField, BarcodeField, BoxField, ImageField, EllipseField, PolygonField, TriangleField, PrinterSettings, FieldDataSource, DataSource, DateFormat, TimeFormat } from '../types';
 import { getFormattedDateTime } from './dateTimeFormat';
 import { DPI_MAP, FONT_MAP, type FontFamily } from '../constants';
 import { getObjectBoundingBox } from './geometry';

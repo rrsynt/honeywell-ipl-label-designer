@@ -612,7 +612,11 @@ export const drawElements = (
                     ctx.font = `${hriFontSize}px monospace`;
                     ctx.fillStyle = 'black';
                     
-                    const hriAlign = field.hriAlign || 'center';
+                    // An IPL interpretive field is ALWAYS left justified (PRM
+                    // p.200), and that is what the viewer and the printed label
+                    // do. Defaulting to 'center' here drew the HRI half a text
+                    // width right of where it prints.
+                    const hriAlign = field.hriAlign || 'left';
                     ctx.textAlign = hriAlign;
                     
                     let drawX = 0;

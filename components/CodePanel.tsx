@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { FontSubstitution } from '../services/iplGenerator';
 
-export const CodePanel: React.FC<{ iplCode: string; fontWarnings?: FontSubstitution[]; suppressionWarnings?: string[]; zplWarnings?: string[] }> = ({ iplCode, fontWarnings = [], suppressionWarnings = [], zplWarnings = [] }) => {
+export const CodePanel: React.FC<{ iplCode: string; fontWarnings?: FontSubstitution[]; suppressionWarnings?: string[]; zplWarnings?: string[]; designerOnlyWarnings?: string[] }> = ({ iplCode, fontWarnings = [], suppressionWarnings = [], zplWarnings = [], designerOnlyWarnings = [] }) => {
     const [copyText, setCopyText] = useState('Copy');
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     
@@ -32,6 +32,11 @@ export const CodePanel: React.FC<{ iplCode: string; fontWarnings?: FontSubstitut
             {suppressionWarnings.map(w => (
                 <p key={w} className="text-xs text-amber-300 bg-amber-400/10 border border-amber-400/30 rounded-md px-2 py-1 mb-2">
                     Suppression ignored — {w} The field prints anyway.
+                </p>
+            ))}
+            {designerOnlyWarnings.map(w => (
+                <p key={w} className="text-xs text-amber-300 bg-amber-400/10 border border-amber-400/30 rounded-md px-2 py-1 mb-2">
+                    Screen only — {w}
                 </p>
             ))}
             {zplWarnings.map(w => (
