@@ -19,7 +19,7 @@ import { parseViewerIPL } from '../services/ipl/viewerParser';
 import { renderLabel, computeLabelExtent } from '../services/ipl/renderer';
 import { newRealCanvas } from './golden/setup';
 import { DPI_MAP } from '../constants';
-import type { BarcodeField, BoxField, Design, LineField } from '../types';
+import type { BarcodeField, BoxField, Design, ImageField, LineField } from '../types';
 
 beforeAll(async () => { await ensureBarcodesReady(); });
 
@@ -391,5 +391,63 @@ describe('generate -> parse: a field stays where it was authored', () => {
         // transpose, so an authored 90 came back as 180.
         const l = await placedMm('landscape', boxAt(10, 10, 90));
         expect(l.f).toBe(1);
+    });
+});
+
+// Direct Graphics is the ONE write path that is not a format field: an image is
+// emitted as an <ESC>g1 raster whose origin is baked into its own payload. It
+// lost its landscape transpose with the rest of them, and nothing covered it —
+// the removal was verified through text and barcode fields, which go through
+// the format path instead. An image is the only way to reach this code.
+describe('Direct Graphics placement survives the landscape change', () => {
+    const bitmap = [
+        '111111111111',
+        '100000000001',
+        '101111111101',
+        '101000000101',
+        '101011110101',
+        '101000000101',
+        '100000000001',
+        '111111111111',
+    ];
+
+    const imageAt = (x: number, y: number): ImageField => ({
+        id: 1, type: 'image', name: 'IMG', x, y, rotation: 0,
+        bitmap, width: 12, height: 8, threshold: 128,
+    });
+
+    const dgDesign = (orientation: 'portrait' | 'landscape', f: ImageField): Design => {
+        const d = designOf([f]);
+        d.labelSettings = { ...d.labelSettings, orientation };
+        d.printerSettings = { ...d.printerSettings, directGraphics: true };
+        return d;
+    };
+
+    for (const orientation of ['portrait', 'landscape'] as const) {
+        it(`${orientation}: the raster is emitted, and lands where it was drawn`, async () => {
+            const field = imageAt(20, 15);
+            const ipl = await generateIPL(dgDesign(orientation, field));
+
+            // It really took the Direct Graphics path (not a stored G/U graphic).
+            const payload = /<STX><ESC>g1<ETX>\n<STX>([0-9A-Fa-f]+)<ETX>/.exec(ipl);
+            expect(payload, 'no <ESC>g1 region in the stream').not.toBeNull();
+
+            const label = await parseViewerIPL(ipl);
+            const el = label.elements.find(e => e.kind === 'graphic');
+            expect(el, 'the raster did not parse back').toBeDefined();
+            const b = elementVisualBox(el!, 203);
+            const MM = 203 / 25.4;
+            expect(b.x / MM).toBeCloseTo(20, 0);
+            expect(b.y / MM).toBeCloseTo(15, 0);
+        });
+    }
+
+    it('emits the same payload for both orientations, at the same origin', async () => {
+        // Landscape is not a transform, so the only difference between the two
+        // streams is what <SI>W/<SI>L say — never the raster's own placement.
+        const p = await generateIPL(dgDesign('portrait', imageAt(20, 15)));
+        const l = await generateIPL(dgDesign('landscape', imageAt(20, 15)));
+        const hexOf = (s: string) => /<STX><ESC>g1<ETX>\n<STX>([0-9A-Fa-f]+)<ETX>/.exec(s)?.[1];
+        expect(hexOf(l)).toBe(hexOf(p));
     });
 });
