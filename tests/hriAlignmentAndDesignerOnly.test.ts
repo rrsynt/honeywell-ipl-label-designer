@@ -12,6 +12,7 @@ import { ensureBarcodesReady } from '../services/ipl/barcodes';
 import { drawElements } from '../services/canvasDrawer';
 import { generateIPL } from '../services/iplGenerator';
 import { designerOnlyWarnings } from '../services/designerOnly';
+import { isTurned, printedLabelMm, screenToLabel, screenToLabelDelta } from '../services/stockFrame';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
 import { renderLabel, computeLabelExtent } from '../services/ipl/renderer';
 import { newRealCanvas } from './golden/setup';
@@ -245,5 +246,58 @@ describe('stock geometry: the canvas draws the label the printer is told to make
         expect(l).toEqual({ W: 400, L: 640 });
         // The swap is the same in both worlds.
         expect(landscape.w / portrait.w).toBeCloseTo(p.L / l.L, 5);
+    });
+});
+
+// The pointer space is a quarter turn away from the label space on a landscape
+// canvas, and the two conversions there are NOT inverses of each other: a point
+// maps (u,v) -> device (v, H-u), while a DIRECTION maps (du,dv) -> (-dv, du).
+// Writing the delta as the point's inverse moves a dragged field the wrong way
+// — and only on landscape, which no test here had ever set.
+describe('stockFrame: pointer space <-> label space on a turned canvas', () => {
+    const H = 320; // the turned label's height in px
+
+    it('is the identity for portrait, so nothing that worked can change', () => {
+        const pan = { x: 50, y: 30 };
+        expect(screenToLabel({ x: 180, y: 120 }, pan, false, H)).toEqual({ x: 130, y: 90 });
+        expect(screenToLabelDelta({ x: 25, y: -40 }, false)).toEqual({ x: 25, y: -40 });
+    });
+
+    it('round-trips a label point through the canvas transform', () => {
+        // Canvas transform: device = (pan + (v, H - u)). Feeding a device point
+        // back in must give the label point it came from.
+        const pan = { x: 12, y: 7 };
+        for (const [u, v] of [[0, 0], [50, 20], [H, 100]] as const) {
+            const device = { x: pan.x + v, y: pan.y + (H - u) };
+            expect(screenToLabel(device, pan, true, H)).toEqual({ x: u, y: v });
+        }
+    });
+
+    it('turns a DIRECTION the other way, which is what a drag needs', () => {
+        // A label +x step appears on the canvas as device +y; a label +y step
+        // appears as device -x.
+        const alongX = screenToLabel({ x: 0, y: 0 }, { x: 0, y: 0 }, true, H);
+        expect(alongX).toEqual({ x: H, y: 0 }); // the origin maps to the corner
+        // Compared as numbers: the turn produces -0 where a component is
+        // zero, which toEqual distinguishes from +0.
+        const down = screenToLabelDelta({ x: 0, y: 10 }, true);
+        expect([down.x, down.y]).toEqual([-10, 0]);
+        const right = screenToLabelDelta({ x: 10, y: 0 }, true);
+        expect([right.x + 0, right.y]).toEqual([0, 10]);
+    });
+
+    it('a direction is NOT the point conversion applied to a delta', () => {
+        // The two differ, and that difference is the bug this pins.
+        const delta = { x: 30, y: 0 };
+        const asDelta = screenToLabelDelta(delta, true);
+        const asPoint = screenToLabel(delta, { x: 0, y: 0 }, true, 0);
+        expect(asDelta).not.toEqual(asPoint);
+    });
+
+    it('printedLabelMm swaps for landscape, exactly as the stream does', () => {
+        expect(printedLabelMm({ width: 100, height: 60, orientation: 'portrait' })).toEqual({ widthMm: 100, heightMm: 60 });
+        expect(printedLabelMm({ width: 100, height: 60, orientation: 'landscape' })).toEqual({ widthMm: 60, heightMm: 100 });
+        expect(isTurned({ orientation: 'landscape' })).toBe(true);
+        expect(isTurned({ orientation: 'portrait' })).toBe(false);
     });
 });

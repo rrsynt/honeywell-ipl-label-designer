@@ -5,6 +5,7 @@ import { drawElements, getFieldBoundingBox, getHandleAtPos, isPointInRotatedRect
 import { ensureBarcodesReady } from '../services/ipl/barcodes';
 import { Rulers } from './Rulers';
 import { getAxisAlignedBoundingBox, getObjectBoundingBox } from '../services/geometry';
+import { isTurned, screenToLabel, screenToLabelDelta } from '../services/stockFrame';
 import { computeDragSelectionIds, snapRotation, expandIdsWithGroups, guideMmFromRuler } from '../services/dragMath';
 
 const RULER_SIZE = 30;
@@ -121,6 +122,40 @@ export const Workspace: React.FC<{
     const canvasToMm = (pos: number) => pos / (PREVIEW_SCALE * workspaceState.zoom);
     const mmToCanvas = (pos: number) => pos * PREVIEW_SCALE * workspaceState.zoom;
 
+    /**
+     * Which orientation the stock is drawn in. The canvas turns a landscape
+     * label a quarter (drawElements draws it through a 90° CCW context), so
+     * every hit-test, marquee and drag delta has to be read in the same turned
+     * frame or the pointer lands on the wrong field.
+     */
+    const stockIsTurned = (): boolean => isTurned(design.labelSettings);
+
+    const stockSizePx = () => {
+        const { width, height, orientation } = design.labelSettings;
+        const landscape = orientation === 'landscape';
+        return { w: mmToCanvas(landscape ? height : width), h: mmToCanvas(landscape ? width : height) };
+    };
+
+    /** A screen point as label-frame pixels (origin at the label's own top-left,
+     *  no pan). This is the frame a field's x/y and the ruler read-out use, so
+     *  points outside the label map outside its box — what a hit-test wants. */
+    const stockPointPx = (canvasPos: {x:number, y:number}): {x:number, y:number} => {
+        const { h } = stockSizePx();
+        return screenToLabel(canvasPos, workspaceState.pan, stockIsTurned(), h);
+    };
+
+    /**
+     * The same point in the frame `isPointInRotatedRect`/`getHandleAtPos`
+     * expect. Those helpers locate a field's origin with `fieldOriginPx`, which
+     * ALREADY adds the pan, so the point handed to them must carry it too —
+     * passing a pan-less point subtracts the pan twice and every click misses.
+     */
+    const hitTestPoint = (canvasPos: {x:number, y:number}): {x:number, y:number} => {
+        const p = stockPointPx(canvasPos);
+        return { x: p.x + workspaceState.pan.x, y: p.y + workspaceState.pan.y };
+    };
+
+
     const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
         if (e.button === 2) return; // Let context menu handle it
         if (editingState) return;
@@ -135,6 +170,8 @@ export const Workspace: React.FC<{
         }
         
         const canvasPos = screenToCanvas(mousePos);
+        const stockPos = stockPointPx(canvasPos);
+        const hitPos = hitTestPoint(canvasPos);
         const { zoom } = workspaceState;
 
         // Guide clicks. Guides are painted inside the panned transform
@@ -161,7 +198,7 @@ export const Workspace: React.FC<{
         if (selectedFieldIds.length === 1) {
             const selectedField = design.fields.find(f => f.id === selectedFieldIds[0]);
             if (selectedField && !selectedField.locked) {
-                const handle = getHandleAtPos(ctx, selectedField, design, canvasPos.x, canvasPos.y, workspaceState);
+                const handle = getHandleAtPos(ctx, selectedField, design, hitPos.x, hitPos.y, workspaceState);
                 if (handle) {
                     setDragMode(handle);
                     setInitialDragState({ field: structuredClone(selectedField), mouseX: mousePos.x, mouseY: mousePos.y });
@@ -173,7 +210,7 @@ export const Workspace: React.FC<{
         let clickedField = null;
         for (let i = design.fields.length - 1; i >= 0; i--) {
             const field = design.fields[i];
-            if(field.visible !== false && isPointInRotatedRect(ctx, field, design, canvasPos.x, canvasPos.y, workspaceState)){
+            if(field.visible !== false && isPointInRotatedRect(ctx, field, design, hitPos.x, hitPos.y, workspaceState)){
                 clickedField = field;
                 break;
             }
@@ -215,6 +252,8 @@ export const Workspace: React.FC<{
     const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
         const mousePos = getMousePos(e);
         const canvasPos = screenToCanvas(mousePos);
+        const stockPos = stockPointPx(canvasPos);
+        const hitPos = hitTestPoint(canvasPos);
         const { zoom, pan } = workspaceState;
         const scale = PREVIEW_SCALE * zoom;
         const { width, height, orientation } = design.labelSettings;
@@ -229,8 +268,10 @@ export const Workspace: React.FC<{
         const templateWidth = displayWidth;
         const templateHeight = displayHeight;
 
-        const labelX = canvasPos.x - pan.x;
-        const labelY = canvasPos.y - pan.y;
+        // Read through the stock frame, so the read-out matches the field
+        // coordinates shown in the property panel rather than the turned pixels.
+        const labelX = stockPos.x;
+        const labelY = stockPos.y;
         if (labelX >= 0 && labelX <= templateWidth * scale && labelY >= 0 && labelY <= templateHeight * scale) {
             setMouseCoords({ x: canvasToMm(labelX), y: canvasToMm(labelY) });
         } else {
@@ -248,7 +289,7 @@ export const Workspace: React.FC<{
 
             for (let i = design.fields.length - 1; i >= 0; i--) {
                 const field = design.fields[i];
-                if (field.visible !== false && isPointInRotatedRect(ctx, field, design, canvasPos.x, canvasPos.y, workspaceState)) {
+                if (field.visible !== false && isPointInRotatedRect(ctx, field, design, hitPos.x, hitPos.y, workspaceState)) {
                     fieldUnderCursor = field;
                     break;
                 }
@@ -259,7 +300,7 @@ export const Workspace: React.FC<{
                 newCursor = 'grab';
 
                 if (selectedFieldIds.length === 1 && selectedFieldIds[0] === fieldUnderCursor.id) {
-                     const handle = getHandleAtPos(ctx, fieldUnderCursor, design, canvasPos.x, canvasPos.y, workspaceState);
+                     const handle = getHandleAtPos(ctx, fieldUnderCursor, design, hitPos.x, hitPos.y, workspaceState);
                      if (handle === 'rotate') newCursor = 'crosshair';
                      if (handle === 'resize-br') newCursor = 'se-resize';
                 }
@@ -275,11 +316,18 @@ export const Workspace: React.FC<{
         
         let dx = (mousePos.x - initialDragState.mouseX);
         let dy = (mousePos.y - initialDragState.mouseY);
-        
+
         if (dragMode === 'pan') {
             setWorkspaceState(prev => ({ ...prev, pan: { x: initialDragState.pan.x + dx, y: initialDragState.pan.y + dy } }));
             return;
         }
+
+        // Below here the DELTAS move things measured in label millimetres, and
+        // the label may be drawn turned a quarter for landscape. A screen-right
+        // drag has to become a label-down one there, or the field runs away
+        // from the cursor. Rotating (dx,dy) by the same 90° CCW the canvas
+        // draws with is the whole conversion.
+        ({ x: dx, y: dy } = screenToLabelDelta({ x: dx, y: dy }, stockIsTurned()));
         
         if (dragMode === 'drag-guide-h' || dragMode === 'drag-guide-v') {
             const orientation = dragMode === 'drag-guide-h' ? 'horizontal' : 'vertical';
@@ -459,7 +507,19 @@ export const Workspace: React.FC<{
     const handleMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
         if (e.button === 2) return;
         if (dragMode === 'marquee' && marquee) {
-            const marqueeInCanvas = { x: marquee.x, y: marquee.y, width: marquee.width, height: marquee.height };
+            // The marquee box is drawn in screen space but the fields it is
+            // tested against live in the stock's own frame — which is turned a
+            // quarter for landscape. Map the SCREEN corners of the box into
+            // that frame (not the box's min/max, which a quarter turn swaps)
+            // and compare in one space.
+            const screenA = { x: marquee.x, y: marquee.y };
+            const screenB = { x: marquee.x + marquee.width, y: marquee.y + marquee.height };
+            const a = stockPointPx(screenA);
+            const b = stockPointPx(screenB);
+            const selRect = {
+                x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
+                w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y),
+            };
             const ctx = canvasRef.current?.getContext('2d');
             if (ctx) {
                 // Batch O: a marquee that catches any group member catches the
@@ -470,8 +530,8 @@ export const Workspace: React.FC<{
                 const rawIds = design.fields.filter(field => {
                     if (field.locked || field.visible === false) return false;
                     const aabb = getAxisAlignedBoundingBox([field], design);
-                    const fieldRect = { x: mmToCanvas(aabb.minX) + workspaceState.pan.x, y: mmToCanvas(aabb.minY) + workspaceState.pan.y, width: mmToCanvas(aabb.maxX - aabb.minX), height: mmToCanvas(aabb.maxY - aabb.minY) };
-                    return fieldRect.x < marqueeInCanvas.x + marqueeInCanvas.width && fieldRect.x + fieldRect.width > marqueeInCanvas.x && fieldRect.y < marqueeInCanvas.y + marqueeInCanvas.height && fieldRect.y + fieldRect.height > marqueeInCanvas.y;
+                    const fieldRect = { x: mmToCanvas(aabb.minX), y: mmToCanvas(aabb.minY), width: mmToCanvas(aabb.maxX - aabb.minX), height: mmToCanvas(aabb.maxY - aabb.minY) };
+                    return fieldRect.x < selRect.x + selRect.w && fieldRect.x + fieldRect.width > selRect.x && fieldRect.y < selRect.y + selRect.h && fieldRect.y + fieldRect.height > selRect.y;
                 }).map(f => f.id);
                 const idsToSelect = expandIdsWithGroups(design.fields, rawIds);
                 dispatch({ type: 'SET_SELECTION', payload: e.shiftKey ? [...selectedFieldIds, ...idsToSelect.filter(id => !selectedFieldIds.includes(id))] : idsToSelect });
@@ -500,11 +560,13 @@ export const Workspace: React.FC<{
     const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
         const mousePos = getMousePos(e);
         const canvasPos = screenToCanvas(mousePos);
+        const stockPos = stockPointPx(canvasPos);
+        const hitPos = hitTestPoint(canvasPos);
         const ctx = canvasRef.current?.getContext('2d');
         if (!ctx) return;
         for (let i = design.fields.length - 1; i >= 0; i--) {
             const field = design.fields[i];
-            if (field.visible !== false && !field.locked && (field.type === 'text' || field.type === 'barcode') && isPointInRotatedRect(ctx, field, design, canvasPos.x, canvasPos.y, workspaceState)) {
+            if (field.visible !== false && !field.locked && (field.type === 'text' || field.type === 'barcode') && isPointInRotatedRect(ctx, field, design, hitPos.x, hitPos.y, workspaceState)) {
                 
                 const dataSource = (field as TextField | BarcodeField).dataSource;
                 if (dataSource.type === 'linked' || dataSource.type === 'date' || dataSource.type === 'time') return;
@@ -588,12 +650,14 @@ export const Workspace: React.FC<{
         e.preventDefault();
         const mousePos = getMousePos(e);
         const canvasPos = screenToCanvas(mousePos);
+        const stockPos = stockPointPx(canvasPos);
+        const hitPos = hitTestPoint(canvasPos);
         const ctx = canvasRef.current?.getContext('2d');
         if (!ctx) return;
         let clickedField: Field | null = null;
          for (let i = design.fields.length - 1; i >= 0; i--) {
             const field = design.fields[i];
-            if(field.visible !== false && isPointInRotatedRect(ctx, field, design, canvasPos.x, canvasPos.y, workspaceState)){
+            if(field.visible !== false && isPointInRotatedRect(ctx, field, design, hitPos.x, hitPos.y, workspaceState)){
                 clickedField = field;
                 break;
             }
