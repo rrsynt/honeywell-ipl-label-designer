@@ -73,19 +73,49 @@ interface FieldParam {
     value: string;
 }
 
+/**
+ * A field parameter that follows the fixed data: ONE lowercase letter with a
+ * purely numeric value ("k12", "h3", "w2", "c25", "o10,40", "f0").
+ *
+ * This shape is what separates a parameter from ordinary text. "A;B",
+ * "X;B2;Y" and "LOT;ROLLS" all fail it — an upper-case key, or letters inside
+ * the value — so they stay data, which is what the greedy behaviour was
+ * protecting in the first place.
+ *
+ * 'd' is excluded: a second `d` segment is malformed here, and re-reading it
+ * as a param would be a guess.
+ */
+const FIELD_PARAM_AFTER_DATA = /^[abcefhijkmnpqrstuwz][\d,.\-]+$/;
+
 const splitParams = (body: string): FieldParam[] => {
-    // d3 (fixed text) is greedy: everything after `d3,` is the payload, ';'
-    // included. Both this app's generator and BarTender emit d3 last in the
-    // field, and the printer treats the origin onward as raw data — splitting
-    // it by ';' truncated 'A;B' to 'A' and silently dropped real data.
+    // d3 (fixed text) is greedy up to a POINT parameter: everything after `d3,`
+    // is the payload, ';' included, because splitting it by ';' truncated 'A;B'
+    // to 'A' and silently dropped real data.
+    //
+    // But the manual puts parameters AFTER the data too. Its own example
+    // (PRM 2.70 p.109) is "<STX>H0;o35,40;c25;d3,Cat.;k12;<ETX>" — the point
+    // size comes last. Reading the whole tail as text made the field print
+    // "Cat.;k12" and silently dropped k (and h/w/r/f when present), so the
+    // preview showed text the printer never produces.
+    //
+    // Resolution: strip a TRAILING run of well-formed parameters, keep
+    // everything before it as data. Only a trailing run, so a param-looking
+    // segment in the middle of intended text cannot split it.
     const di = body.search(/(?:^|;)d3,/);
     if (di >= 0) {
         const head = body.slice(0, di).replace(/;$/, '');
         // +4 skips 'd3,' itself. A single trailing ';' is the customary frame
         // separator (generator and BarTender both end the last param with it),
         // not part of the text — strip exactly one.
-        const data = body.slice(di + 4).replace(/;$/, '');
+        const tail = body.slice(di + 4).replace(/;$/, '');
+        const segs = tail.split(';');
+        let cut = segs.length;
+        while (cut > 0 && FIELD_PARAM_AFTER_DATA.test(segs[cut - 1])) cut--;
+        const data = segs.slice(0, cut).join(';');
         const params = head.length > 0 ? splitParamsPlain(head) : [];
+        for (const seg of segs.slice(cut)) {
+            params.push({ key: seg.charAt(0), value: seg.slice(1) });
+        }
         params.push({ key: 'd', value: `3,${data}` }); // resolveSource wants the '3,' prefix
         return params;
     }

@@ -271,3 +271,66 @@ describe('setup commands inside a chained frame (2026-09-29)', () => {
         expect(label.issues.filter(i => i.level !== 'info')).toEqual([]);
     });
 });
+
+// ---------------------------------------------------------------------------
+// Parameters AFTER the fixed data (the manual's own ordering)
+// ---------------------------------------------------------------------------
+//
+// d3 is greedy because splitting it by ';' truncated real text like "A;B".
+// But the manual also puts parameters after the data, and PRM 2.70 p.109 does
+// exactly that: "<STX>H0;o35,40;c25;d3,Cat.;k12;<ETX>". Reading the whole
+// tail as text made that field print "Cat.;k12" and silently dropped the
+// point size — and h/w/r/f after d3 were dropped the same way, so the preview
+// drew text and geometry the printer never produces.
+//
+// The fix separates only a TRAILING RUN of well-formed parameters, so text in
+// the middle of intended data cannot be split.
+describe('field parameters placed after the d3 data (PRM p.109)', () => {
+    const textEl = (field: string) => {
+        const l = parseViewerIPL([stx('<ESC>P'), stx('E5;F5;'), stx(field), stx('R')].join(''));
+        return l.elements.find(e => e.kind === 'text') as TextElement;
+    };
+
+    it("parses the manual's own d3-then-k12 example as the manual intends", () => {
+        // <STX>H0;o35,40;c25;d3,Cat.;k12;<ETX>
+        const t = textEl('H0;o35,40;c25;d3,Cat.;k12;');
+        expect((t.source as { data: string }).data, 'text').toBe('Cat.');
+        expect(t.pointSize, 'point size from the trailing k12').toBe(12);
+    });
+
+    it('applies the other trailing parameters too, not just k', () => {
+        expect(textEl('H0;o10,10;c25;k12;d3,AB;h3;').hMag).toBe(3);
+        expect(textEl('H0;o10,10;c25;k12;d3,AB;w2;').wMag).toBe(2);
+        expect(textEl('H0;o10,10;c25;k12;d3,AB;r1;').charRot).toBe(1);
+        expect(textEl('H0;o10,10;c25;k12;d3,AB;f2;').f).toBe(2);
+        // and several in a row
+        const both = textEl('H0;o10,10;c25;k12;d3,AB;h3;w2;');
+        expect(both.hMag).toBe(3);
+        expect(both.wMag).toBe(2);
+    });
+
+    it('leaves real text containing ; alone', () => {
+        // The greedy behaviour exists for these: an upper-case key, or letters
+        // in the value, is not a parameter.
+        for (const [field, want] of [
+            ['H0;o10,10;c0;d3,A;B;', 'A;B'],
+            ['H0;o10,10;c0;d3,LOT;ROLLS;', 'LOT;ROLLS'],
+            ['H0;o10,10;c0;d3,X;B2;Y;', 'X;B2;Y'],
+            ['H0;o10,10;c0;d3,BASIS WT. 39-4838;', 'BASIS WT. 39-4838'],
+        ] as Array<[string, string]>) {
+            expect((textEl(field).source as { data: string }).data, field).toBe(want);
+        }
+    });
+
+    it('does not split a parameter-shaped segment in the MIDDLE of the data', () => {
+        // Only a trailing run is stripped, so this stays one text value.
+        const t = textEl('H0;o10,10;c0;d3,A;k12;B;');
+        expect((t.source as { data: string }).data).toBe('A;k12;B');
+    });
+
+    it('is unchanged when d3 comes last, as the generator and BarTender emit', () => {
+        const t = textEl('H0;o35,40;c25;k12;d3,Cat.;');
+        expect((t.source as { data: string }).data).toBe('Cat.');
+        expect(t.pointSize).toBe(12);
+    });
+});
