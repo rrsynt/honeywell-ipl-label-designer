@@ -167,3 +167,49 @@ describe('<ESC> commands that change the image but are not modelled', () => {
         expect(escWarned('<ESC>'), 'bare ESC').toBe(false);
     });
 });
+
+// ---------------------------------------------------------------------------
+// The t=2 Shift table sweep (Appendix D) — <SI>i is IBM translation
+// ---------------------------------------------------------------------------
+//
+// Sweeping every letter of PRM 2.70's Shift Commands table against the parser.
+// 25 of the 27 change nothing about the picture (comms, hardware, media,
+// storage) and stay silent as they should; <SI>F and <SI>h were already
+// reported. One was missing: <SI>i, IBM Language Translation.
+describe('<SI>i — IBM language translation (t=2 sweep)', () => {
+    const stx = (f: string) => `<STX>${f}<ETX>`;
+    const warned = (frame: string): boolean => parseViewerIPL(
+        [stx('<ESC>P'), stx('E1;F1;'), stx('H1;o10,10;c0;d3,X'), stx('R'), stx(frame)].join(''),
+    ).issues.some(i => i.code === 'setup-not-modelled');
+
+    it('reports <SI>i1, which replaces printed glyphs', () => {
+        // PRM 2.70 p.128: "allows IBM compatible characters to REPLACE standard
+        // ASCII characters based on the current printer language." The same
+        // class as <SI>z1, which is already reported.
+        expect(warned('<SI>i1')).toBe(true);
+    });
+
+    it('stays silent for <SI>i0, the documented disabled state', () => {
+        expect(warned('<SI>i0')).toBe(false);
+    });
+
+    it('does NOT fire on <SI>I — that is Number of Image Bands', () => {
+        // The two commands differ only by case, and the manual's own
+        // emulation-mode table (p.128) prints "<SI>I" for IBM, which is a typo
+        // there. Its two other indexes agree on the split: the by-syntax list
+        // reads "i 69 IBM Language Translation" and "I 49 Set Number of Image
+        // Bands". Matching case-insensitively would shadow a real command.
+        expect(warned('<SI>I8')).toBe(false);
+        expect(warned('<SI>I')).toBe(false);
+    });
+
+    it('does not match inside a longer argument', () => {
+        expect(warned('<SI>i12')).toBe(false);
+        expect(warned('<SI>i1,2')).toBe(false);
+    });
+
+    it('still fires when the command rides inside a combined setup frame', () => {
+        // The shape BarTender and hand-authored streams use.
+        expect(warned('<SI>l13;<SI>i1')).toBe(true);
+    });
+});

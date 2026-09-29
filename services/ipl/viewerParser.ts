@@ -1556,6 +1556,34 @@ export class IPLViewerParser {
         // longer word.
         const slashZero = frame.match(/<SI>z([01])(?![,\d])/);
         if (slashZero) this.slashZeroRequested = slashZero[1] === '1';
+
+        // IBM Language Translation, Enable or Disable (PRM 2.70 p.128): "allows
+        // IBM compatible characters to REPLACE standard ASCII characters based
+        // on the current printer language." The same class as <SI>z1 — a
+        // printed GLYPH changes, so it is reported rather than left among the
+        // comms settings that cannot touch the picture.
+        //
+        // Not modelled: the replacement table lives in the printer's own user
+        // manual, not in the PRM, so there is nothing here to build it from —
+        // and a guessed table is what this project has paid for twice.
+        //
+        // Unlike <SI>z1 there is no deferred decision, because the manual gives
+        // it no exclusions: it applies to every printer, and (unlike slash zero)
+        // it does not depend on the printer language being 0 or on the field
+        // font. So n=1 is reported as soon as it is seen.
+        //
+        // The letter is LOWERCASE i — "<SI>I" is Number of Image Bands, a
+        // different command (p.135). Two of the manual's own indexes agree:
+        // the by-syntax list at p.252 reads "i 69 IBM Language Translation" and
+        // "I 49 Set Number of Image Bands". The emulation-mode table on p.128
+        // prints "<SI>I" for IBM, which is a typo there — and <SI>I is already
+        // handled as image bands, so matching it here would shadow a real
+        // command. Anchoring on the argument and rejecting a following digit
+        // keeps "<SI>i1" out of "<SI>i12".
+        const ibmTranslation = frame.match(/<SI>i([01])(?![,\d])/);
+        if (ibmTranslation && ibmTranslation[1] === '1')
+            warn('IBM language translation (<SI>i1)',
+                'IBM compatible characters replace standard ASCII characters based on the printer language, so the glyphs printed differ from this preview\'s.');
     }
 
     /**
