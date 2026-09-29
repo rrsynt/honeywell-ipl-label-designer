@@ -13,6 +13,7 @@ import { drawElements } from '../services/canvasDrawer';
 import { generateIPL } from '../services/iplGenerator';
 import { designerOnlyWarnings } from '../services/designerOnly';
 import { isTurned, labelToScreen, printedLabelMm, screenToLabel, screenToLabelDelta } from '../services/stockFrame';
+import { sheetCellDots } from '../services/printRecords';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
 import { renderLabel, computeLabelExtent } from '../services/ipl/renderer';
 import { newRealCanvas } from './golden/setup';
@@ -360,5 +361,40 @@ describe('ruler guides keep the SCREEN axis on a turned stock', () => {
         const landscape = guideInk('landscape', { horizontal: [20], vertical: [] });
         expect(portrait.w).toBeGreaterThan(portrait.h * 5);
         expect(landscape.w).toBeGreaterThan(landscape.h * 5);
+    });
+});
+
+// The sheet preview sizes each cell from the PRINTED label, and draws the label
+// into that same cell extent. Reading the raw settings instead made a landscape
+// cell 100x65 where the label prints 65x100, so a tall label was stretched
+// across a wide cell — the preview showed a shape the printer never makes.
+describe('sheet preview cells match the printed label', () => {
+    const design = (orientation: 'portrait' | 'landscape'): Design => ({
+        ...designOf([barcodeField()]),
+        labelSettings: { width: 100, height: 65, columns: 1, rows: 1, unit: 'mm', orientation },
+    });
+
+    it('portrait keeps the settings as written', () => {
+        const cell = sheetCellDots(design('portrait'));
+        // 100mm x 8 dots/mm at 203 dpi
+        expect(cell).toEqual({ widthDots: 800, heightDots: 520 });
+    });
+
+    it('landscape swaps, because that is what <SI>W/<SI>L send', () => {
+        const cell = sheetCellDots(design('landscape'));
+        expect(cell).toEqual({ widthDots: 520, heightDots: 800 });
+        // The cell is the extent renderLabel draws into, so a wrong size here
+        // stretches the label rather than merely misfiling it.
+        expect(cell.heightDots).toBeGreaterThan(cell.widthDots);
+    });
+
+    it('agrees with printedLabelMm in both orientations', () => {
+        for (const o of ['portrait', 'landscape'] as const) {
+            const d = design(o);
+            const { widthMm, heightMm } = printedLabelMm(d.labelSettings);
+            const cell = sheetCellDots(d);
+            expect(cell.widthDots).toBe(Math.round(widthMm * 8));
+            expect(cell.heightDots).toBe(Math.round(heightMm * 8));
+        }
     });
 });

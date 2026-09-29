@@ -25,6 +25,7 @@ import { resolveLabelAtBatch } from './ipl/odometer';
 import { planDesignTableJob } from './tableSource';
 import { rowBatchData, type JobPlan } from './csvJob';
 import { DPI_MAP } from '../constants';
+import { printedLabelMm } from './stockFrame';
 import type { Design } from '../types';
 import type { ViewerLabel } from './ipl/types';
 
@@ -76,9 +77,16 @@ export const labelAtRecord = async (
  */
 export const sheetCellDots = (design: Design): { widthDots: number; heightDots: number } => {
     const { dpi } = design.printerSettings;
+    // The PRINTED label's size, which swaps for landscape: the generator sends
+    // <SI>W/<SI>L and every origin in the turned frame, so a landscape design
+    // prints 65x100 where its settings say 100x65. Sizing the cell from the raw
+    // settings made it the wrong way round, and since the cell extent is also
+    // what renderLabel draws the label into, the preview stretched a tall label
+    // across a wide cell. See services/stockFrame.ts.
+    const { widthMm, heightMm } = printedLabelMm(design.labelSettings);
     return {
-        widthDots: Math.max(1, Math.round(design.labelSettings.width * DPI_MAP[dpi])),
-        heightDots: Math.max(1, Math.round(design.labelSettings.height * DPI_MAP[dpi])),
+        widthDots: Math.max(1, Math.round(widthMm * DPI_MAP[dpi])),
+        heightDots: Math.max(1, Math.round(heightMm * DPI_MAP[dpi])),
     };
 };
 

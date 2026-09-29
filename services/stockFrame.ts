@@ -23,9 +23,12 @@ export const isTurned = (labelSettings: Pick<LabelSettings, 'orientation'>): boo
 /** The printed label's size in millimetres: the swap the generator performs. */
 export const printedLabelMm = (
     labelSettings: Pick<LabelSettings, 'width' | 'height' | 'orientation'>,
-): { widthMm: number; heightMm: number } => isTurned(labelSettings)
-    ? { widthMm: labelSettings.height, heightMm: labelSettings.width }
-    : { widthMm: labelSettings.width, heightMm: labelSettings.height };
+): { widthMm: number; heightMm: number } => {
+    const { width, height } = labelSettings;
+    const widthMm = width;
+    const heightMm = height;
+    return isTurned(labelSettings) ? { widthMm: heightMm, heightMm: widthMm } : { widthMm, heightMm };
+};
 
 /**
  * A point in the panned canvas, expressed in the label's own unrotated frame
