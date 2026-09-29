@@ -84,8 +84,22 @@ interface FieldParam {
  *
  * 'd' is excluded: a second `d` segment is malformed here, and re-reading it
  * as a param would be a guess.
+ *
+ * 'g' (Pitch Size, Set) belongs in the set and was missing. It is a real
+ * human-readable parameter — the manual's own task table lists it under
+ * "Human-Readable Field Editing Commands" (PRM pp.92-95) with "Syntax: gn",
+ * default 12, range 1-50, and parseTextField reads it as `pitchParam`. Because
+ * it failed this regex, a pitch written after the data printed as text:
+ *
+ *   <STX>H1;o10,10;c0;h2;w2;d3,AB;g10<ETX>   drew the literal "AB;g10"
+ *
+ * That is the same defect class the rule exists for — a real parameter read as
+ * data — and unlike 'l'/'x'/'y' (whose field types do not take d3 at all) 'g'
+ * is reachable in the documented shape. The set here is still narrow: it
+ * admits one lowercase letter with a numeric value, so "A;B", "LOT;ROLLS" and
+ * "X;B2;Y" all continue to stay text.
  */
-const FIELD_PARAM_AFTER_DATA = /^[abcefhijkmnpqrstuwz][\d,.\-]+$/;
+const FIELD_PARAM_AFTER_DATA = /^[abcefghijkmnpqrstuwz][\d,.\-]+$/;
 
 /**
  * `p` (Code 39 Prefix Character, PRM p.181) is the ONE field parameter whose

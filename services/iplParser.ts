@@ -22,7 +22,7 @@ const mmToDots = (mm: number, dpi: PrinterSettings['dpi']): number => {
  * works on the already-split frame body while the viewer works on the whole
  * frame; the RULE is what has to match, not the mechanics.
  */
-const FIELD_PARAM_AFTER_DATA = /^[abcefhijkmnpqrstuwz][\d,.\-]+$/;
+const FIELD_PARAM_AFTER_DATA = /^[abcefghijkmnpqrstuwz][\d,.\-]+$/;
 
 /**
  * `p` (Code 39 Prefix Character, PRM p.181) is the ONE field parameter whose
