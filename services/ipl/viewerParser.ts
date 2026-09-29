@@ -75,7 +75,7 @@ interface FieldParam {
 
 /**
  * A field parameter that follows the fixed data: ONE lowercase letter with a
- * purely numeric value ("k12", "h3", "w2", "c25", "o10,40", "f0").
+ * purely numeric value ("k12", "h3", "w2", "c25", "f0").
  *
  * This shape is what separates a parameter from ordinary text. "A;B",
  * "X;B2;Y" and "LOT;ROLLS" all fail it — an upper-case key, or letters inside
@@ -84,6 +84,16 @@ interface FieldParam {
  *
  * 'd' is excluded: a second `d` segment is malformed here, and re-reading it
  * as a param would be a guess.
+ *
+ * 'o' (Field Origin) is excluded too, and that is a decision rather than an
+ * oversight — the manual puts origin FIRST in every example it gives. Of the 26
+ * field commands in PRM 2.70 that carry d3, ALL 26 write `o` before the data
+ * and NONE writes it after. `o` opens a field; it is not a trailing modifier
+ * like k/h/w/f/r. Admitting it would buy a shape the manual never produces and
+ * would cost correctness on real text — "d3,REF;o9" is a part number, and
+ * splitting it there truncates the printed value. (This docstring used to list
+ * "o10,40" as an example of the shape while the class excluded it; the comment
+ * was wrong, not the class.)
  *
  * 'g' (Pitch Size, Set) belongs in the set and was missing. It is a real
  * human-readable parameter — the manual's own task table lists it under

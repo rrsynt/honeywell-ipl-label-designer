@@ -88,6 +88,29 @@ describe('the trailing-parameter rule covers every parameter the parser reads', 
         // a param would be a guess.
         expect(viewerSet.has('d')).toBe(false);
     });
+
+    it("keeps origin (o) out — the manual never places it after the data", () => {
+        // `o` is a real parameter of both field types that take d3, which makes
+        // it look like an omission. It is not: of the 26 field commands in
+        // PRM 2.70 that carry d3, every one writes `o` BEFORE the data and none
+        // writes it after. `o` opens a field.
+        //
+        // Admitting it would also cost correctness on real text:
+        // "d3,REF;o9" is a part number, and splitting there truncates it.
+        // Both halves are pinned here so the class is not "completed" later.
+        const src = readFileSync(join(process.cwd(), 'services', 'ipl', 'viewerParser.ts'), 'utf8');
+        const m = /const FIELD_PARAM_AFTER_DATA = \/\^\[([a-z]+)\]/.exec(src);
+        expect(m).not.toBeNull();
+        expect(m![1]).not.toContain('o');
+        expect(m![1]).not.toContain('d');
+
+        const text = (frame: string): string => {
+            const el = parseViewerIPL(stream(frame)).elements.find(e => e.kind === 'text') as TextElement;
+            return (el.source as { data: string }).data;
+        };
+        expect(text('H1;o10,10;c0;h2;w2;d3,REF;o9')).toBe('REF;o9');
+        expect(text('H1;c0;h2;w2;d3,AB;o100,200')).toBe('AB;o100,200');
+    });
 });
 
 describe('importer parity for a trailing pitch', () => {
