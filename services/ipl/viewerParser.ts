@@ -1170,6 +1170,29 @@ export class IPLViewerParser {
         for (let i = 0; i < segments.length; i++) {
             const s = segments[i].trim();
             if (!s) continue;
+            // Setup and escape commands are dispatched EXACTLY as they are when
+            // they arrive as their own frame — a chain is a transport detail,
+            // not a different command set. They are not field commands and were
+            // not in COMMAND_START, so every one of them used to fall through
+            // to the "no buffer" branch below and vanish without a word:
+            // "<ESC>P;<SI>W812;E1;F1;..." dropped the width, the height, the
+            // speed, the darkness and the printer language, and still rendered
+            // the label — at the wrong size and in the wrong character set.
+            //
+            // d3 is greedy to the frame end, so inside its data a segment that
+            // merely LOOKS like a command is text: "d3,LOT;<SI>W812" prints the
+            // literal string. Only a segment in command position is dispatched.
+            const inD3Data = /(?:^|;)d3,/.test(buffer);
+            if (!inD3Data && s.startsWith('<SI>')) {
+                flush();
+                this.parseSetupFrame(s);
+                continue;
+            }
+            if (!inD3Data && s.startsWith(LITERAL_ESC)) {
+                flush();
+                this.parseEscFrame(s);
+                continue;
+            }
             // "E1;F1" is ONE format header (PRM p.181), not two commands. The
             // paired form must be consumed whole: flushing "E1" alone routes it
             // to parseFieldFrame, which does not recognize a bare format id and

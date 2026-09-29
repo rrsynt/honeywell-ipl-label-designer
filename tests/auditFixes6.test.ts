@@ -203,3 +203,71 @@ describe('L/W default line thickness = 1 dot (PRM p.193 / p.169) and w clamp', (
         expect((label.elements[0] as BoxElement).thicknessDots).toBe(8);
     });
 });
+
+// ---------------------------------------------------------------------------
+// Setup commands inside a CHAINED frame
+// ---------------------------------------------------------------------------
+//
+// A chain is a transport detail, not a different command set — but parseChained
+// walked segments against its own COMMAND_START list, which knows only field
+// and format headers. <SI> and <ESC> were neither that nor params of a buffered
+// command, so every one of them fell through to the "no buffer" branch and
+// vanished WITHOUT A WARNING while the label still rendered:
+//
+//   <STX><ESC>P;<SI>W812;<SI>L406;E1;F1;H1;…;R<ETX>
+//
+// lost the width, the height, the speed, the darkness and the printer language
+// — so the preview drew the right fields at the wrong size, in the wrong
+// character set, and said nothing. The built-in "Chained" sample never showed
+// it because it carries no <SI> at all.
+describe('setup commands inside a chained frame (2026-09-29)', () => {
+    const chain = (setup: string) => stx(`<ESC>P;${setup};E1;F1;H1;o10,10;c25;k12;d3,AB;R`);
+    const parse = (setup: string) => parseViewerIPL(chain(setup));
+
+    it('applies the whole <SI> family, exactly as separate frames do', () => {
+        const label = parse('<SI>W812;<SI>L406;<SI>S60;<SI>d5;<SI>l13;<SI>T1;<SI>g0');
+        expect(label.widthDots, 'width').toBe(812);
+        expect(label.heightDots, 'height').toBe(406);
+        expect(label.settings.printSpeed, 'speed').toBe(6);
+        expect(label.settings.darknessAdjust, 'darkness').toBe(5);
+        expect(label.settings.codePage, 'language').toBe(13);
+        expect(label.settings.mediaSenseMode, 'media sense').toBe('gap');
+        expect(label.settings.mediaType, 'media type').toBe('direct-thermal');
+    });
+
+    it('gives the same result as the same commands in separate frames', () => {
+        // The invariant that was broken: chaining must not change the meaning.
+        const chained = parse('<SI>W812;<SI>L406');
+        const separate = parseViewerIPL([
+            stx('<ESC>P'), stx('<SI>W812'), stx('<SI>L406'),
+            stx('E1;F1'), stx('H1;o10,10;c25;k12;d3,AB'), stx('R'),
+        ].join(''));
+        expect(chained.widthDots).toBe(separate.widthDots);
+        expect(chained.heightDots).toBe(separate.heightDots);
+        expect(chained.elements).toHaveLength(separate.elements.length);
+    });
+
+    it('dispatches a chained <ESC> command the same way', () => {
+        // <ESC>C<SI>W640 carries inline setup, the shape BarTender emits.
+        expect(parse('<ESC>C<SI>W640').widthDots).toBe(640);
+    });
+
+    it('keeps an <SI>-lookalike INSIDE d3 data as literal text', () => {
+        // d3 is greedy to the frame end, so a segment in data position is text
+        // even when it is shaped exactly like a command. Dispatching it would
+        // silently reinterpret the label's own content.
+        const label = parseViewerIPL(stx('<ESC>P;E1;F1;H1;o10,10;c25;k12;d3,LOT;<SI>W812;R'));
+        const t = label.elements.find(e => e.kind === 'text') as TextElement;
+        expect((t.source as { data: string }).data).toBe('LOT;<SI>W812');
+        // widthDots is null until an <SI>W sets it — the point is that the
+        // in-data lookalike did NOT set it.
+        expect(label.widthDots, 'the in-data text must not set the width').toBeNull();
+    });
+
+    it('leaves the built-in Chained sample working', () => {
+        const code = stx('<ESC>P;E1;F1;H1;o100,100;f0;c25;k12;d3,Hello World!;B2;o100,200;f0;c6;h80;w2;i1;d3,12345678;R');
+        const label = parseViewerIPL(code);
+        expect(label.elements.map(e => e.kind)).toEqual(['text', 'barcode']);
+        expect(label.issues.filter(i => i.level !== 'info')).toEqual([]);
+    });
+});
