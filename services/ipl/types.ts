@@ -186,6 +186,10 @@ export interface UnknownElement extends ElementBase {
     kind: 'unknown';
     command: string;
     raw: string;
+    /** The field letter that created this element, when it has one (Q for an
+     *  RFID tag write field). Field ids are keyed by letter, so duplicate
+     *  detection and deletion need the real one, not the '?' placeholder. */
+    prefix?: string;
 }
 
 export type ViewerElement =

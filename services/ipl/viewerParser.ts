@@ -1095,7 +1095,7 @@ export class IPLViewerParser {
             // "Last wins" is scoped to the active format (ids are per-format);
             // VirtualPrinter.evictField enforces the store-consistency
             // invariant in one place.
-            this.printer.evictField(e => e.id === id && KIND_PREFIX[e.kind] === kindChar);
+            this.printer.evictField(e => e.id === id && VirtualPrinter.prefixOf(e) === kindChar);
         }
         this.printer.seenFieldKeys.add(key);
     }
@@ -1353,7 +1353,7 @@ export class IPLViewerParser {
         // T, and the rest — are handled earlier in this loop (page, rotation,
         // command tables) or are not field commands at all, and adding them
         // here would split legitimate text.
-        const COMMAND_START = /^(?:[HBLWUGID]\d*|[FA]\*|[FA]\d+|E\d+|R)$/;
+        const COMMAND_START = /^(?:[HBLWUGIDQ]\d*|[FA]\*|[FA]\d+|E\d+|R)$/;
         const segments = body.split(';');
         let buffer = '';
 
@@ -1896,6 +1896,64 @@ export class IPLViewerParser {
 
         const headerMatch = frame.match(/^([HBLWUG])(\d*)/);
         if (!headerMatch) {
+            // Q<n> — RFID Tag Write Field, Create or Edit (PRM p.213). It is a
+            // FORMAT EDITING command, listed as one in the manual's own task
+            // table ("Format Editing Commands": B D H I L Q U W, pp.92-95) and
+            // present in the manual's RFID example verbatim:
+            //
+            //   <STX>Q3;a2,2,0,23;d3,MY FIRST RFID TAG WRITE;<ETX>
+            //
+            // It reached the generic "Unrecognized command frame ignored"
+            // instead — the same defect the bare `C` (Command Tables, Load) had,
+            // and for the same reason: it is not a letter the /^[HBLWUG]/ test
+            // knows.
+            //
+            // Modelled as an 'unknown' element rather than a warning, because
+            // nothing is lost in the picture: the field writes to an RFID TAG,
+            // and the printer draws no label content for it. The element keeps
+            // its id so the format's field inventory stays honest (the same
+            // thing a real printer reports), and the renderer already has a
+            // no-op case for this kind. The divergence that DOES matter —
+            // <SI>K's VOID text on a failed tag — is reported separately.
+            const rfid = frame.match(/^Q(\d+)(.*)$/);
+            if (rfid) {
+                if (!this.printer.inFormat) {
+                    this.printer.issue('warning', 'field-outside-format', `Field command outside a format block was ignored.`, frame.slice(0, 24));
+                    return;
+                }
+                const rfidId = parseInt(rfid[1], 10);
+                this.beginField('Q', rfidId);
+                // No originOf() and no rotationOf() here: the manual lists the Q
+                // field's parameters as a (tag field setup), d (field data) and
+                // n (tag protect) — "RFID Tag Write Field Default Parameters",
+                // PRM p.213 — and `o` is NOT among them. Calling originOf would
+                // raise a spurious 'missing-origin' on the manual's own example
+                // (Q3;a2,2,0,23;d3,…), which has none. The field writes to a tag
+                // and has no position on the label.
+                this.printer.commitElement({
+                    kind: 'unknown',
+                    id: rfidId,
+                    ox: 0,
+                    oy: 0,
+                    f: 0,
+                    command: `Q${rfidId}`,
+                    raw: frame.slice(0, 24),
+                    prefix: 'Q',
+                });
+                this.printer.issue('info', 'rfid-write-field',
+                    `RFID tag write field Q${rfidId} writes to the tag rather than printing, so this preview draws nothing for it.`,
+                    `Q${rfidId}`);
+                return;
+            }
+            // Bare "Q" — Print Quality Label, Print (PRM p.220): "Prints the
+            // print quality program and model number label." It prints a
+            // PRINTER test label, not this job's label, so no element appears.
+            if (/^Q$/.test(frame)) {
+                this.printer.issue('info', 'print-quality-label',
+                    'Print Quality Label (Q) prints the printer\'s own quality test label, not this job\'s label.',
+                    'Q');
+                return;
+            }
             // D<n> deletes field n from the open format (PRM p.174). The
             // viewer honors it by dropping the element; D0 after BarTender's
             // F* blocks clears the temp format's fields.

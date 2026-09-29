@@ -286,6 +286,19 @@ export const parseIPL = (
                     message: `Interpretive field "${head.slice(0, 24)}" was not imported: this designer attaches the human-readable row to its bar code instead of holding it as its own field.`,
                 });
             }
+            // Qn — RFID Tag Write Field, Create or Edit (PRM 2.70 p.213). A
+            // FIELD this model cannot hold, like the In above: the designer has
+            // no RFID concept, and the field writes to a TAG so it draws no
+            // label content here. Reported for the same reason — the import
+            // silently dropped it, and nothing about the resulting design said
+            // a field had been left behind.
+            const rfidId = /^Q(\d+)$/.exec(head);
+            if (onNotice && rfidId) {
+                onNotice({
+                    command: head.slice(0, 24),
+                    message: `RFID tag write field "${head.slice(0, 24)}" was not imported: this designer has no RFID concept. The field writes to the tag rather than printing, so no label content is lost — but any tag-writing this format relies on is gone.`,
+                });
+            }
             return;
         }
 

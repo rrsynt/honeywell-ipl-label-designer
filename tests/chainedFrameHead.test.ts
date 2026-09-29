@@ -35,19 +35,34 @@ describe('a chained frame survives an unrecognized head', () => {
 
     it('keeps the field behind every unmodelled head', () => {
         // Each of these heads reaches the catch-all when it stands alone.
-        for (const head of ['Z40', 'X2', 'Q1', 'J5', 'N', 'T3', 'K5', 'Y9', 'z5', 't65', 'j5', 'a2', 'n1']) {
+        // (Q1 used to be in this list; it is a real RFID field now, which is
+        // why it moved to its own test below.)
+        for (const head of ['Z40', 'X2', 'J5', 'N', 'T3', 'K5', 'Y9', 'z5', 't65', 'j5', 'a2', 'n1']) {
             const got = els(`${head};${FIELD}`);
-            expect(got, `head "${head}" ate the field behind it`).toHaveLength(1);
-            expect((got[0] as { source: { data: string } }).source.data).toBe('ABC');
+            expect(got, `head "${head}" ate the field behind it`)
+                .toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'text' })]));
+            const text = got.find(e => e.kind === 'text') as { source: { data: string } };
+            expect(text.source.data).toBe('ABC');
         }
     });
 
     it('reports the head instead of staying silent', () => {
         // Silence was the older failure mode for a lowercase head: `z5;…`
         // produced the field and said NOTHING about the command it dropped.
-        for (const head of ['Z40', 'X2', 'z5', 't65', 'Q1']) {
+        for (const head of ['Z40', 'X2', 'z5', 't65']) {
             expect(codes(`${head};${FIELD}`), `head "${head}" was silent`).toContain('unknown-frame');
         }
+    });
+
+    it('treats Q1 as the RFID field it is, not as an unrecognized head', () => {
+        // PRM 2.70 p.213: Qn is "RFID Tag Write Field, Create or Edit", listed
+        // in the manual's own Format Editing task table, and it appears in the
+        // manual's RFID example. It must not be reported as unrecognized — and
+        // the text field behind it must still parse.
+        const got = els(`Q1;${FIELD}`);
+        expect(got.some(e => e.kind === 'unknown')).toBe(true);
+        expect(got.some(e => e.kind === 'text')).toBe(true);
+        expect(codes(`Q1;${FIELD}`)).not.toContain('unknown-frame');
     });
 
     it('leaves a frame headed by a real field command exactly as it was', () => {

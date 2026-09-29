@@ -21,7 +21,9 @@ export interface DownloadedGraphic {
     data: string[];
 }
 
-/** IPL command-letter per element kind (H/B/L/W/U) — field-directory keys. */
+/** IPL command-letter per element kind (H/B/L/W/U) — field-directory keys.
+ *  An 'unknown' element carries its own letter (Q for an RFID tag write field),
+ *  because field ids are keyed by letter; '?' is only the fallback. */
 export const KIND_PREFIX: Record<ViewerElement['kind'], string> = {
     text: 'H',
     barcode: 'B',
@@ -197,13 +199,19 @@ export class VirtualPrinter {
         this.formats.set(this.activeFormatId, bucket.filter(e => e.id !== id));
         this.label.elements = this.label.elements.filter(e => !doomed.has(e));
         for (const el of doomed) {
-            this.seenFieldKeys.delete(`${this.activeFormatId}:${KIND_PREFIX[el.kind]}${el.id}`);
+            this.seenFieldKeys.delete(`${this.activeFormatId}:${VirtualPrinter.prefixOf(el)}${el.id}`);
         }
     }
 
     /** The duplicate-detection key for a field in a given format. */
     static fieldKey(formatId: number, kindChar: string, id: number): string {
         return `${formatId}:${kindChar}${id}`;
+    }
+
+    /** The field letter an element was created by. 'unknown' elements carry
+     *  their own (Q for RFID); the KIND_PREFIX entry is only the fallback. */
+    static prefixOf(el: ViewerElement): string {
+        return (el.kind === 'unknown' && el.prefix) ? el.prefix : KIND_PREFIX[el.kind];
     }
 
     /** The bucket that defined `el`, found by identity (pre-composition only). */
