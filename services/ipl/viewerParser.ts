@@ -227,6 +227,11 @@ export const readFieldStep = (slice: string): number | undefined => {
  *   <DLE> p.92  "Executes a printer power-up reset immediately… erases all
  *               data and commands in the input buffer" — the job does not
  *               print at all, so this is more destructive than <EM>.
+ *   <SI>  p.250 is 0x0F "Go to Shift Command Table" in the t=0 print table,
+ *               and a Shift command "must precede these commands with" it
+ *               (p.252) — so "<SI>W812" inside block data is a SETUP command.
+ *               This viewer strips it and does NOT apply it, so the geometry
+ *               the printer would use differs from the preview's.
  *
  * NOT here, and the manual is explicit about why: <BS> (p.118) is a warm boot
  * that "does not take effect immediately. The printer executes all previous
@@ -249,6 +254,10 @@ const BLOCK_COMMANDS_THAT_CHANGE_OUTPUT: Array<[RegExp, string]> = [
     // <DLE> as a reset command." The escapes that turn a DLE into DATA are
     // removed before this list runs (see withoutDataShiftEscapes).
     [/<DLE>|\x10/, '<DLE>'],
+    // Reached only when NOT escaped: <SUB><SI> is Data Shift turning the SI
+    // into a literal character (p.99 lists <SI> among the escapable ones), and
+    // withoutDataShiftEscapes removes that pair before this list runs.
+    [/<SI>|\x0f/, '<SI>'],
 ];
 
 /**
@@ -277,6 +286,15 @@ const findBlockControlChars = (slice: string): string[] => {
     return BLOCK_COMMANDS_THAT_CHANGE_OUTPUT
         .filter(([re]) => re.test(effective))
         .map(([, name]) => name);
+};
+
+/** Why each reported command makes the preview differ from the printer. */
+const BLOCK_COMMAND_EFFECTS: Record<string, string> = {
+    '<EM>': 'it aborts the print job, so fewer labels come out than this preview shows',
+    '<DEL>': "it clears the field's data, so the printer prints the field empty",
+    '<CR>': 'it moves the field pointer, so the printer puts this data in a different field',
+    '<DLE>': 'it resets the printer and erases its input buffer, so the job does not print at all',
+    '<SI>': 'it selects the shift command table for the command that follows, which this preview does not apply — so the geometry here may differ from the print',
 };
 
 /**
@@ -361,6 +379,22 @@ export const extractPrintBlockData = (
                 .replace(/\x10(?=[\x02\x03\x11\x13])/g, '')
                 .replace(/<(US|RS)>\d*/g, '')
                 .replace(/[\x1f\x1e]\d*/g, '')
+                // An <SI> setup command goes WITH its command letter and
+                // argument. <SI> is 0x0F "Go to Shift Command Table" (PRM
+                // p.250, the t=0 print table), and a Shift command "must precede
+                // these commands with" it (p.252) — so "<SI>W812" is ONE
+                // command, not an <SI> to drop plus a literal "W812" to print.
+                // Stripping only the <SI> left the argument behind as TEXT:
+                // "AB<SI>W812" painted "ABW812".
+                //
+                // AFTER the Data Shift block above, never before: "<SUB><SI>" is
+                // an escaped SI that PRINTS as a character, and stripping the SI
+                // first would leave a bare <SUB> to eat the next real character.
+                //
+                // The letter is consumed only when an ARGUMENT follows it, so
+                // "<SI>CD" (an SI with no argument, then text) keeps its C.
+                .replace(/<SI>[A-Z][-\d,.]+|<SI>/g, '')
+                .replace(/\x0f[A-Z][-\d,.]+|\x0f/g, '')
                 .replace(IN_BLOCK_CONTROL_CHARS, '');
             // Removing a command is right (it is not printable text), but doing
             // it SILENTLY is the failure mode this project exists to prevent:
@@ -517,13 +551,8 @@ export class IPLViewerParser {
             return page;
         }, cmd => blockCommandsSeen.add(cmd));
         for (const cmd of blockCommandsSeen) {
-            const effect = cmd === '<EM>'
-                ? 'it aborts the print job, so fewer labels come out than this preview shows'
-                : cmd === '<DEL>'
-                    ? 'it clears the field\'s data, so the printer prints the field empty'
-                    : 'it moves the field pointer, so the printer puts this data in a different field';
             this.printer.issue('warning', 'block-control-command',
-                `${cmd} appears in the field data of a print block; ${effect}.`,
+                `${cmd} appears in the field data of a print block; ${BLOCK_COMMAND_EFFECTS[cmd]}.`,
                 cmd);
         }
         if (varData.size > 0) {

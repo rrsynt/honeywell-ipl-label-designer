@@ -399,3 +399,61 @@ describe('immediate commands as standalone frames', () => {
         expect(codes('\x02\x10\x03')).toContain('immediate-command');
     });
 });
+
+// ---------------------------------------------------------------------------
+// <SI> inside a print block: a setup command, not text
+// ---------------------------------------------------------------------------
+//
+// <SI> is 0x0F "Go to Shift Command Table" in PRM 2.70's t=0 print table
+// (p.250), and the t=2 table says a Shift command "must precede these commands
+// with" it (p.252). So "<SI>W812" inside block data is ONE setup command.
+//
+// The strip knew <SI> as a bare control character and dropped only the token,
+// leaving its ARGUMENT behind as printable text: "AB<SI>W812" painted
+// "ABW812". It is reported rather than applied, because nothing in the manual
+// shows <SI> inside a print block and silently re-timing geometry mid-job
+// would be a guess.
+describe('<SI> inside a print block', () => {
+    const stx = (f: string) => `<STX>${f}<ETX>`;
+    const blockWith = (data: string): string => [
+        stx('<ESC>P'), stx('E1;F1;'), stx('H1;o20,20;c25;k14'), stx('R'),
+        stx('<ESC>E1<CAN>') + '<ESC>F1<NUL>' + data + '<US>1<RS>1<ETB>',
+    ].join('');
+    const rendered = (data: string): string => {
+        const el = parseViewerIPL(blockWith(data)).elements.find(e => e.kind === 'text');
+        return el ? (el.source as { data: string }).data : '';
+    };
+    const reported = (data: string): (string | undefined)[] =>
+        parseViewerIPL(blockWith(data)).issues
+            .filter(i => i.code === 'block-control-command').map(i => i.command);
+
+    it('takes the command letter and argument with it, in both notations', () => {
+        // Previously "ABW812" — the argument printed as text.
+        expect(rendered('AB<SI>W812')).toBe('AB');
+        expect(rendered('AB<SI>L406')).toBe('AB');
+        expect(rendered('AB\x0fW812')).toBe('AB');
+    });
+
+    it('reports it, since the preview does not apply the setup', () => {
+        expect(reported('AB<SI>W812')).toEqual(['<SI>']);
+        expect(reported('AB\x0fW812')).toEqual(['<SI>']);
+    });
+
+    it('keeps the next character when the <SI> carries no argument', () => {
+        // An unconditional letter match ate the following character here:
+        // "AB<SI>CD" came out "ABD", losing the C.
+        expect(rendered('AB<SI>CD')).toBe('ABCD');
+        expect(reported('AB<SI>CD')).toEqual(['<SI>']);
+    });
+
+    it('stays silent when the <SI> is escaped into data', () => {
+        // PRM p.99 lists <SI> among the characters <SUB> escapes, so
+        // "<SUB><SI>" is a literal character the field PRINTS — not the shift
+        // command. The escape pair must be consumed before any other strip, or
+        // removing the <SI> first leaves a bare <SUB> to eat the next byte.
+        for (const form of ['A<SUB><SI>B', 'A\x1a\x0fB']) {
+            expect(rendered(form), form).toBe('AB');
+            expect(reported(form), form).toEqual([]);
+        }
+    });
+});
