@@ -1610,6 +1610,30 @@ export class IPLViewerParser {
         if (ibmTranslation && ibmTranslation[1] === '1')
             warn('IBM language translation (<SI>i1)',
                 'IBM compatible characters replace standard ASCII characters based on the printer language, so the glyphs printed differ from this preview\'s.');
+
+        // RFID Tag Void Text, Set (PRM 2.70 p.144): "Defines the text that is
+        // printed on labels that have bad RFID tags… When the RFID module
+        // cannot communicate with the tag on the label, this text will be
+        // printed at the start of the label". Default "VOID", font 26, printed
+        // in the down direction, up to 16 ASCII characters.
+        //
+        // Reported because it is TEXT THAT CAN APPEAR ON THE LABEL and this
+        // preview cannot draw it: nothing here models RFID at all, so the
+        // failure condition is invisible — a label whose tag is bad would come
+        // out with no VOID text and nothing to say why.
+        //
+        // Conditional, and the wording says so: on a good tag nothing prints,
+        // so this is not "the preview is wrong", it is "the preview cannot
+        // show what happens when the tag fails".
+        //
+        // The argument is free TEXT (default "VOID"), not a number, so the
+        // match takes the rest of the command. n blank disables the command
+        // ("If n is blank, this command is disabled"), and that case stays
+        // silent — there is nothing to print.
+        const voidText = frame.match(/<SI>K([^;,\s][^;,]*)/);
+        if (voidText)
+            warn('RFID tag void text (<SI>K)',
+                `"${voidText[1].trim()}" is what the printer prints at the start of a label whose RFID tag cannot be read. This preview does not model RFID, so a failing tag would print that text here and show nothing.`);
     }
 
     /**

@@ -213,3 +213,43 @@ describe('<SI>i — IBM language translation (t=2 sweep)', () => {
         expect(warned('<SI>l13;<SI>i1')).toBe(true);
     });
 });
+
+// ---------------------------------------------------------------------------
+// <SI>K — the text printed on a label whose RFID tag failed
+// ---------------------------------------------------------------------------
+//
+// Sweeping the manual's own Configuration Commands list (PRM 2.70 p.96) found
+// this one still silent. "Defines the text that is printed on labels that have
+// bad RFID tags… When the RFID module cannot communicate with the tag on the
+// label, this text will be printed at the start of the label" — default "VOID",
+// font 26, printed in the down direction.
+//
+// Reported for the same reason as <SI>z1 and <SI>i1: it is text that can appear
+// on the label and this preview cannot draw it. Nothing here models RFID, so a
+// failing tag would print VOID on the stock and show nothing on screen.
+describe('<SI>K — RFID tag void text (2026-09-29)', () => {
+    const stx = (f: string) => `<STX>${f}<ETX>`;
+    const warned = (setup: string): boolean => parseViewerIPL(
+        [stx('<ESC>C<SI>W812'), stx(setup), stx('<ESC>P'), stx('E1;F1'), stx('H1;o10,10;d3,X'), stx('R')].join(''),
+    ).issues.some(i => i.code === 'setup-not-modelled');
+
+    it('reports a configured void text', () => {
+        expect(warned('<SI>KVOID')).toBe(true);
+        expect(warned('<SI>KVOID,BAD')).toBe(true);
+        expect(warned('<SI>K1')).toBe(true);
+    });
+
+    it('stays silent when the argument is blank, which DISABLES the command', () => {
+        // "If n is blank, this command is disabled" (p.144) — nothing to print,
+        // so there is no divergence to report.
+        expect(warned('<SI>K')).toBe(false);
+        expect(warned('<SI>K;')).toBe(false);
+    });
+
+    it('does not fire on its neighbours', () => {
+        // K is uppercase and sits between the <SI>J and <SI>L entries in the
+        // manual's list; both are handled elsewhere and neither prints text.
+        expect(warned('<SI>L406')).toBe(false);
+        expect(warned('<SI>J1')).toBe(false);
+    });
+});
