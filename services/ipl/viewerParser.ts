@@ -1222,6 +1222,31 @@ export class IPLViewerParser {
                 frame.slice(0, 24));
             return;
         }
+        // A frame whose HEAD is not a command this parser models must not be
+        // handed to the field parser when it carries more commands behind it.
+        //
+        // The /^[A-Z]/ test below is deliberately broad — it routes an
+        // unrecognized command to parseFieldFrame so that parser can say so —
+        // but it ran first and swallowed whole frames: parseFieldFrame fails to
+        // match a field header and returns, so
+        // "Z40;H1;o10,10;c0;h2;w2;d3,ABC" lost the valid text field inside it
+        // and reported only a generic "unrecognized command frame". Twelve such
+        // heads were measured (Z X Q J N T A Y K P …), every one eating the
+        // field that followed.
+        //
+        // Narrow on purpose: only the head is tested, and only when the frame
+        // has more segments. A frame headed by a real field command keeps the
+        // existing path exactly (parseFieldFrame's own d3-greedy handling), and
+        // the lowercase graphic-column frames are untouched.
+        // The head must be a complete field command INCLUDING the optional name
+        // the manual gives every field creator (Bn[,name], Gn[,name], …):
+        // "G1,LOGO;x8;y8;u1,…" is one graphic definition, not a chain.
+        const head = frame.split(';')[0];
+        const headIsField = /^I\d+$/.test(head) || /^[HBLWUG]\d+(?:,[^;,]*)?$/.test(head) || /^D\d+$/.test(head);
+        if (frame.includes(';') && !headIsField) {
+            this.parseChained(frame);
+            return;
+        }
         if (/^[UVBLH]\d*$/.test(frame) || /^[A-Z]/.test(frame)) {
             this.parseFieldFrame(frame);
             return;
@@ -1475,8 +1500,17 @@ export class IPLViewerParser {
                 buffer = s;
             } else if (buffer) {
                 buffer += `;${s}`;
+            } else {
+                // A segment before any command header, in command position.
+                // Parameters legitimately land here (an `o…` that follows a
+                // header is absorbed by the buffer above), so this cannot warn
+                // on shape alone. What it must not do is stay silent about a
+                // segment that the field parser would have reported: an
+                // unrecognized COMMAND. Dispatching it through the plain-frame
+                // path gives it exactly the treatment it would get alone —
+                // including that parser's own 'unknown-frame'.
+                this.parseFieldFrame(s);
             }
-            // Params before any command header are dropped silently.
         }
         flush();
     }
