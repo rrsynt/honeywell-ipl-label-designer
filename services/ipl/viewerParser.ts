@@ -1328,6 +1328,21 @@ export class IPLViewerParser {
                 'the printer resets immediately and erases all data and commands in its input buffer, so this job does not print at all.');
             return true;
         }
+        // <SO> — Cut (PRM p.99), listed in the "Print Commands (t = 0)" table
+        // as "Label Cut Command": "Advances the label out to the cutter and
+        // cuts the label stock."
+        //
+        // It moves MEDIA, not the image, so like <SI>D (end-of-print skip) and
+        // <SI>c (cutter) it is NOT a divergence to warn about — but it IS a
+        // named command, and reaching the generic "Unrecognized command frame
+        // ignored" says otherwise. Inside a print block the same character is
+        // already handled correctly; only the standalone shape was wrong.
+        if (/^(?:<SO>|\x0e)$/.test(frame)) {
+            this.printer.issue('info', 'immediate-command',
+                'Cut (<SO>) advances the label to the cutter after printing; it moves media, not the image, so the preview is unaffected.',
+                frame.slice(0, 24));
+            return true;
+        }
         return false;
     }
 
@@ -1533,6 +1548,12 @@ export class IPLViewerParser {
                 // unrecognized COMMAND. Dispatching it through the plain-frame
                 // path gives it exactly the treatment it would get alone —
                 // including that parser's own 'unknown-frame'.
+                //
+                // The immediate commands go through their own reporter first,
+                // so the same character gets the same answer chained as it does
+                // standalone. Without this, "<SO>;R" fell to the generic
+                // warning while a bare "<SO>" was correctly named as Cut.
+                if (this.reportImmediateCommand(s)) continue;
                 this.parseFieldFrame(s);
             }
         }
