@@ -1078,7 +1078,54 @@ export class IPLViewerParser {
             this.parseChained(frame);
             return;
         }
+        // Immediate commands that change the job, sent as their OWN frame.
+        // The manual gives each a bare syntax ("Syntax: <EM>", "Syntax:
+        // <DLE>"), so this is the documented shape — and it used to reach the
+        // generic unknown-frame warning, which told the user LESS than the
+        // in-block path does for the same character. Reported for the same
+        // reason: the preview shows labels the printer would not produce.
+        if (this.reportImmediateCommand(frame)) return;
         this.printer.issue('warning', 'unknown-frame', `Unrecognized command frame ignored.`, frame.slice(0, 24));
+    }
+
+    /**
+     * Reports an immediate command sent as a standalone frame, and says whether
+     * it consumed the frame.
+     *
+     * PRM 2.70's "Immediate Commands" chapter (p.91) defines these as commands
+     * the printer "executes when it receives them, regardless of printer mode",
+     * each with a bare syntax. Two of them change what comes out:
+     *   <EM>  "Stops batch printing" — the remaining labels never print.
+     *   <DLE> "Executes a printer power-up reset immediately… erases all data
+     *         and commands in the input buffer" — the job is destroyed.
+     * <BS> (Warm Boot) is deliberately NOT reported: "it does not take effect
+     * immediately. The printer executes all previous commands before the warm
+     * boot takes effect" (p.118), so the label still prints. <BEL>/<ENQ>/<VT>
+     * are queries — they only send status back.
+     *
+     * A DOUBLED <DLE> is the documented transparency spelling ("<STX><DLE>
+     * <DLE><ETX> … the first DLE is a transparency character", p.92): the pair
+     * still resets, so both bytes are consumed and one warning is issued.
+     */
+    private reportImmediateCommand(frame: string): boolean {
+        const warn = (what: string, detail: string): void => {
+            this.printer.issue('warning', 'immediate-command',
+                `${what} is an immediate command, which this preview does not apply: ${detail}`,
+                frame.slice(0, 24));
+        };
+        // Both notations: the tokenizer normalizes raw bytes to placeholders,
+        // but a frame built by hand may carry either.
+        if (/^(?:<EM>|\x19)$/.test(frame)) {
+            warn('Abort print job (<EM>)',
+                'the printer stops the current batch, so the remaining labels are never produced.');
+            return true;
+        }
+        if (/^(?:<DLE>|\x10)(?:<DLE>|\x10)?$/.test(frame)) {
+            warn('Reset (<DLE>)',
+                'the printer resets immediately and erases all data and commands in its input buffer, so this job does not print at all.');
+            return true;
+        }
+        return false;
     }
 
     /**

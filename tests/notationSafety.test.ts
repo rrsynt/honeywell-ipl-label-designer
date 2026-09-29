@@ -338,3 +338,64 @@ describe('a Data Shift-escaped terminator does not end the print block', () => {
         expect(at(1)).toBe('0006');
     });
 });
+
+// ---------------------------------------------------------------------------
+// Immediate commands sent as their OWN frame (the documented shape)
+// ---------------------------------------------------------------------------
+//
+// The sweep of Appendix D's t=3 (status responses) and t=4 (protocol
+// characters) found that neither table can change the picture — every
+// character in them already warns, and the field data survives intact. But it
+// exposed an inconsistency: <EM> and <DLE> are documented with a BARE syntax
+// ("Syntax: <EM>", "Syntax: <DLE>", PRM pp.91-92), so the standalone frame is
+// their natural form — and that form reached the generic unknown-frame
+// warning, telling the user LESS than the in-block path does for the same
+// character.
+describe('immediate commands as standalone frames', () => {
+    const stx = (f: string) => `<STX>${f}<ETX>`;
+    const design = (...extra: string[]): string => [
+        stx('<ESC>P'), stx('E1;F1;'), stx('H1;o20,20;c25;k14'), ...extra, stx('R'), stx('<ESC>E1'),
+    ].join('');
+    const codes = (...extra: string[]): string[] =>
+        parseViewerIPL(design(...extra)).issues.filter(i => i.level !== 'info').map(i => i.code);
+
+    it('reports <EM> (Abort Print Job) instead of calling it unrecognized', () => {
+        expect(codes(stx('<EM>'))).toContain('immediate-command');
+        expect(codes(stx('<EM>'))).not.toContain('unknown-frame');
+    });
+
+    it('reports <DLE> (Reset), including the doubled transparency spelling', () => {
+        // p.92: "<STX><DLE><DLE><ETX> ... the first DLE is a transparency
+        // character. It instructs the printer to use the <DLE> as a reset
+        // command." One command, so one report.
+        for (const frame of ['<DLE>', '<DLE><DLE>']) {
+            const got = codes(stx(frame));
+            expect(got, frame).toContain('immediate-command');
+            expect(got.filter(c => c === 'immediate-command'), frame).toHaveLength(1);
+        }
+    });
+
+    it('stays silent for the immediate commands that cannot change the output', () => {
+        // <BS> Warm Boot: "does not take effect immediately. The printer
+        // executes all previous commands before the warm boot takes effect"
+        // (p.118) — the label still prints.
+        //
+        // <BEL>/<ENQ>/<VT> are queries: they only send status back to the host.
+        // These keep the generic unknown-frame warning (they are not modelled),
+        // but must NOT claim to change the picture.
+        for (const frame of ['<BS>', '<BEL>', '<ENQ>', '<VT>']) {
+            expect(codes(stx(frame)), frame).not.toContain('immediate-command');
+        }
+    });
+
+    it('does not consume a frame that merely starts with the command', () => {
+        // The syntax is bare, so trailing bytes make it a different thing.
+        expect(codes(stx('<EM>x'))).not.toContain('immediate-command');
+    });
+
+    it('reports the raw byte spellings too, not just the placeholders', () => {
+        // A raw capture carries <EM> as 0x19 and <DLE> as 0x10.
+        expect(codes('\x02\x19\x03')).toContain('immediate-command');
+        expect(codes('\x02\x10\x03')).toContain('immediate-command');
+    });
+});
