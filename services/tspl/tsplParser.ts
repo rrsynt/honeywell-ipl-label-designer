@@ -252,7 +252,13 @@ export const tokenizeTspl = (source: string): TsplCommand[] => {
         const space = head.search(/\s/);
         const name = space < 0 ? head : head.slice(0, space);
         const rest = space < 0 ? '' : head.slice(space);
-        if (name === '' || !/^[A-Za-z][A-Za-z0-9]*$/.test(name)) {
+        // An underscore is allowed because PRINTER_SETTINGS lists
+        // SETPARTIAL_CUTTER, so that name was meant to be recognized and
+        // silently ignored like its SET* neighbours. Without it the name failed
+        // this test and was reported as "not a command this parser recognizes"
+        // — the opposite of the stated intent, and inconsistent with the very
+        // list that names it.
+        if (name === '' || !/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) {
             out.push({ name: '', params: '', quoted, raw: line });
             continue;
         }

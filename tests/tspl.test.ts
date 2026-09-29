@@ -18,6 +18,8 @@
 // There is NO independent oracle for TSPL — see tools/tspl-crosscheck.mjs.
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { parseTSPL, tokenizeTspl, unescapeTspl, TSPL_FONT_SIZES } from '../services/tspl/tsplParser';
 import { generateTSPL, escapeTsplData } from '../services/tspl/tsplGenerator';
 import { jobSendabilityError, renderJobChunk, type PrintJob } from '../services/printQueue';
@@ -411,5 +413,52 @@ describe('TSPL as a printer language', () => {
             expect(stream).not.toContain('^XA');              // and not ZPL
             expect(stream.split('\n').pop()).toBe('PRINT 3,1');
         });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// PRINTER_SETTINGS must be reachable by the tokenizer
+// ---------------------------------------------------------------------------
+//
+// The list says which commands to ignore silently, because they are printer
+// settings or jobs and put nothing on the label. A name in it that the
+// tokenizer REJECTS is worse than useless: the command falls through to the
+// "not a command this parser recognizes" warning instead, so a stream using it
+// gets told off for something the parser meant to accept.
+//
+// SETPARTIAL_CUTTER was in exactly that state — the tokenizer's name rule was
+// /^[A-Za-z][A-Za-z0-9]*$/, which has no underscore, so the name never reached
+// the list that names it.
+describe('every PRINTER_SETTINGS entry is reachable (2026-09-29)', () => {
+    // Read the list out of the source so a new entry is covered automatically
+    // rather than needing this test to be updated by hand.
+    const settingsSet = (() => {
+        const src = readFileSync(join(__dirname, '..', 'services', 'tspl', 'tsplParser.ts'), 'utf8');
+        const body = src.slice(src.indexOf('const PRINTER_SETTINGS'), src.indexOf(']);', src.indexOf('const PRINTER_SETTINGS')));
+        const names = [...body.matchAll(/'([A-Za-z_][A-Za-z0-9_]*)'/g)].map(m => m[1]);
+        // 'BEep'.toUpperCase() is written as an expression, not a literal.
+        if (body.includes("'BEep'.toUpperCase()")) names.push('BEEP');
+        return [...new Set(names.map(n => n.toUpperCase()))];
+    })();
+
+    it('finds a plausible list to check', () => {
+        expect(settingsSet.length).toBeGreaterThan(40);
+        expect(settingsSet).toContain('SETPARTIAL_CUTTER');
+        expect(settingsSet).toContain('BEEP');
+    });
+
+    it('recognizes every entry as a command (so none is called unreadable)', () => {
+        const rejected: string[] = [];
+        for (const name of settingsSet) {
+            const cmd = tokenizeTspl(`${name} 1\n`)[0];
+            if (!cmd || cmd.name === '') rejected.push(name);
+        }
+        expect(rejected, 'in PRINTER_SETTINGS but the tokenizer rejects them').toEqual([]);
+    });
+
+    it('still rejects a name that is not a command at all', () => {
+        // The underscore allowance must not turn the rule into "accept anything".
+        expect(tokenizeTspl('1X 5\n')[0].name).toBe('');
+        expect(tokenizeTspl(' 5\n')[0].name).toBe('');
     });
 });
