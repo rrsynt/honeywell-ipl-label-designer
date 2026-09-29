@@ -12,7 +12,7 @@ import { ensureBarcodesReady } from '../services/ipl/barcodes';
 import { drawElements } from '../services/canvasDrawer';
 import { generateIPL } from '../services/iplGenerator';
 import { designerOnlyWarnings } from '../services/designerOnly';
-import { isTurned, printedLabelMm, screenToLabel, screenToLabelDelta } from '../services/stockFrame';
+import { isTurned, labelToScreen, printedLabelMm, screenToLabel, screenToLabelDelta } from '../services/stockFrame';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
 import { renderLabel, computeLabelExtent } from '../services/ipl/renderer';
 import { newRealCanvas } from './golden/setup';
@@ -261,6 +261,22 @@ describe('stockFrame: pointer space <-> label space on a turned canvas', () => {
         const pan = { x: 50, y: 30 };
         expect(screenToLabel({ x: 180, y: 120 }, pan, false, H)).toEqual({ x: 130, y: 90 });
         expect(screenToLabelDelta({ x: 25, y: -40 }, false)).toEqual({ x: 25, y: -40 });
+    });
+
+    it('round-trips a label point back through labelToScreen AND screenToLabel', () => {
+        // Both directions, because the pan is the outermost transform: the
+        // canvas translates the scene and then rotates the label's content, so
+        // labelToScreen must add the pan AFTER the turn. Folding it in first
+        // still round-trips through screenToLabel (which subtracts it first) —
+        // which is exactly why a one-way test would have missed the bug.
+        for (const pan of [{ x: 0, y: 0 }, { x: 50, y: 306 }, { x: 12, y: 7 }]) {
+            for (const [u, v] of [[0, 0], [35, 14], [91, 139]] as const) {
+                const device = labelToScreen({ x: u, y: v }, pan, true, H);
+                expect(screenToLabel(device, pan, true, H), `pan ${JSON.stringify(pan)}`).toEqual({ x: u, y: v });
+                // The turn itself: a label point (u,v) lands at (pan.x+v, pan.y+H-u).
+                expect(device).toEqual({ x: pan.x + v, y: pan.y + H - u });
+            }
+        }
     });
 
     it('round-trips a label point through the canvas transform', () => {

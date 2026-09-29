@@ -51,3 +51,23 @@ export const screenToLabelDelta = (
     delta: { x: number; y: number },
     turned: boolean,
 ): { x: number; y: number } => turned ? { x: -delta.y, y: delta.x } : delta;
+
+/**
+ * The FORWARD direction: a label-frame point (plus the pan) as canvas pixels.
+ * A rotation pivot lives in the label's own frame and has to be put through
+ * this before it is compared with pointer positions — using the un-turned
+ * value leaves the pivot off by up to the label's height, and a rotation drag
+ * then measures its angle about the wrong point.
+ */
+export const labelToScreen = (
+    point: { x: number; y: number },
+    pan: { x: number; y: number },
+    turned: boolean,
+    heightPx: number,
+): { x: number; y: number } => {
+    // The pan is the OUTERMOST transform — the canvas translates the scene
+    // first and only then rotates the label's content — so it is added after
+    // the turn, not folded into the point before it.
+    if (!turned) return { x: point.x + pan.x, y: point.y + pan.y };
+    return { x: pan.x + point.y, y: pan.y + heightPx - point.x };
+};

@@ -5,7 +5,7 @@ import { drawElements, getFieldBoundingBox, getHandleAtPos, isPointInRotatedRect
 import { ensureBarcodesReady } from '../services/ipl/barcodes';
 import { Rulers } from './Rulers';
 import { getAxisAlignedBoundingBox, getObjectBoundingBox } from '../services/geometry';
-import { isTurned, screenToLabel, screenToLabelDelta } from '../services/stockFrame';
+import { isTurned, labelToScreen, screenToLabel, screenToLabelDelta } from '../services/stockFrame';
 import { computeDragSelectionIds, snapRotation, expandIdsWithGroups, guideMmFromRuler } from '../services/dragMath';
 
 const RULER_SIZE = 30;
@@ -448,8 +448,22 @@ export const Workspace: React.FC<{
         } else if (dragMode === 'rotate') {
              const { field: initialField } = initialDragState;
              const aabb = getAxisAlignedBoundingBox([initialField], design);
-             const fieldCenterX = mmToCanvas(aabb.minX + (aabb.maxX - aabb.minX)/2) + pan.x;
-             const fieldCenterY = mmToCanvas(aabb.minY + (aabb.maxY - aabb.minY)/2) + pan.y;
+             // The centre is computed in the LABEL's frame, so it must go
+             // through the same quarter turn the canvas draws with before it
+             // meets pointer coordinates — `+ pan` alone leaves the pivot off
+             // by the label's height on a landscape canvas, and the drag then
+             // measures its angle about a point that is not on the field.
+             const centre = labelToScreen(
+                 {
+                     x: mmToCanvas(aabb.minX + (aabb.maxX - aabb.minX) / 2),
+                     y: mmToCanvas(aabb.minY + (aabb.maxY - aabb.minY) / 2),
+                 },
+                 pan,
+                 stockIsTurned(),
+                 stockSizePx().h,
+             );
+             const fieldCenterX = centre.x;
+             const fieldCenterY = centre.y;
 
              const startAngle = Math.atan2(initialDragState.mouseY - fieldCenterY, initialDragState.mouseX - fieldCenterX);
              const currentAngle = Math.atan2(mousePos.y - fieldCenterY, mousePos.x - fieldCenterX);
