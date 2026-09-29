@@ -1201,7 +1201,25 @@ export class IPLViewerParser {
      * digits text like "B2" stays data unless an `o` param follows.
      */
     private parseChained(body: string): void {
-        const COMMAND_START = /^(?:[HBLWUG]\d*|[FA]\*|[FA]\d+|E\d+|R)$/;
+        // The letters that may OPEN a segment, i.e. the commands this walker
+        // hands to a new field/format. It must list every letter parseFieldFrame
+        // itself recognizes, or a command the parser KNOWS how to handle gets
+        // treated as a parameter of whatever came before and silently vanishes.
+        //
+        // <I> and <D> were missing and both are real field commands:
+        //   In  Interpretive Field, Edit (PRM p.200) — "Syntax: In"
+        //   Dn  Field, Delete (PRM p.183) — "Syntax: Dn"
+        // parseFieldFrame handles both, so a chained
+        // "E1;F1;...;I1;o10,60;c0;h3;w3;R" produced ONE element where the same
+        // commands as separate frames produced two — the interpretive field was
+        // gone, with no warning.
+        //
+        // The other letters that reach parseFieldFrame (H B L W U G, and the
+        // format A/F/E) were already here. Letters NOT listed — S, q, C, N, f,
+        // T, and the rest — are handled earlier in this loop (page, rotation,
+        // command tables) or are not field commands at all, and adding them
+        // here would split legitimate text.
+        const COMMAND_START = /^(?:[HBLWUGID]\d*|[FA]\*|[FA]\d+|E\d+|R)$/;
         const segments = body.split(';');
         let buffer = '';
 
@@ -1274,7 +1292,21 @@ export class IPLViewerParser {
             }
             if (COMMAND_START.test(s)) {
                 // Inside d3 data, a header only counts as a boundary when an
-                // origin param follows it — otherwise the text wins.
+                // origin param follows it — otherwise the text wins. That rule
+                // is deliberately kept as it was: real fixtures put d3 last, so
+                // it rarely fires, and loosening or tightening it would change
+                // how genuine field commands are recognized.
+                //
+                // The cost is known and accepted: text that genuinely contains
+                // "…;B2;o5,5;…" is still split, because it is indistinguishable
+                // from a real field command by shape alone.
+                //
+                // `D` is the one exemption, because "Dn" deletes a field and
+                // takes NO origin param — so the `o` test could never be
+                // satisfied for it, and a chained "…;D2;R" was swallowed as
+                // data while the field survived: one element came out where the
+                // separate-frame form produced the deletion. Its shape is
+                // narrow (letter + digits, no params), so it needs no guard.
                 const inD3 = /(?:^|;)d3,/.test(buffer);
                 if (inD3 && s !== 'R') {
                     let next = '';
@@ -1282,7 +1314,8 @@ export class IPLViewerParser {
                         const t = segments[j].trim();
                         if (t) { next = t; break; }
                     }
-                    if (!/^o-?[\d,]+/.test(next)) {
+                    const isFieldDelete = /^D\d+$/.test(s);
+                    if (!isFieldDelete && !/^o-?[\d,]+/.test(next)) {
                         if (buffer) buffer += `;${s}`;
                         continue;
                     }

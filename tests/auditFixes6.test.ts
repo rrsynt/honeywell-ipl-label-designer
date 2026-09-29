@@ -334,3 +334,63 @@ describe('field parameters placed after the d3 data (PRM p.109)', () => {
         expect(t.pointSize).toBe(12);
     });
 });
+
+// ---------------------------------------------------------------------------
+// COMMAND_START must list every letter parseFieldFrame recognizes
+// ---------------------------------------------------------------------------
+//
+// The chain walker keeps its own idea of what opens a segment. Two real field
+// commands were missing from it while parseFieldFrame already handled both:
+//
+//   In  Interpretive Field, Edit (PRM p.200) — "Syntax: In"
+//   Dn  Field, Delete         (PRM p.183) — "Syntax: Dn"
+//
+// A command the parser KNOWS how to handle was therefore treated as a
+// parameter of whatever came before and silently dropped. This is the same
+// shape as the chained-<SI> bug: recognized, then discarded without a word.
+describe('field commands missing from COMMAND_START (2026-09-29)', () => {
+    const P = (body: string) => parseViewerIPL(stx(`<ESC>P;${body}`));
+    const kinds = (l: ReturnType<typeof parseViewerIPL>) =>
+        l.elements.map(e => `${e.kind}${(e as { id?: number }).id ?? ''}`);
+
+    it('keeps an interpretive field (In) in a chain', () => {
+        // The chain produced ONE element where the same commands as separate
+        // frames produced two — the interpretive field was gone.
+        const chained = P('E1;F1;B1;o10,10;c3;h40;w2;d3,123;I1;o10,60;c0;h3;w3;R');
+        const separate = parseViewerIPL([
+            stx('<ESC>P'), stx('E1;F1'), stx('B1;o10,10;c3;h40;w2;d3,123'),
+            stx('I1;o10,60;c0;h3;w3'), stx('R'),
+        ].join(''));
+        expect(kinds(chained)).toEqual(kinds(separate));
+        expect(kinds(chained)).toEqual(['barcode1', 'text']);
+    });
+
+    it('deletes a field (Dn) from a chain', () => {
+        // Dn takes NO origin param, so the "an o-param follows" boundary test
+        // could never be satisfied for it: a chained "…;D2;R" was swallowed as
+        // data and the field survived. It is exempt from that test.
+        expect(kinds(P('E1;F1;H1;o10,10;c0;d0,10;H2;o10,50;c0;d0,10;D2;R'))).toEqual(['text1']);
+        // …and it works whether or not earlier fields carried d3 data.
+        expect(kinds(P('E1;F1;H1;o10,10;c0;d3,X;H2;o10,50;c0;d3,Y;D2;R'))).toEqual(['text1']);
+    });
+
+    it('keeps the accepted text cost of the D exemption pinned', () => {
+        // Documented tradeoff, not an accident: with Dn exempt from the
+        // o-param test, data that literally contains "…;D2;…" is split. It is
+        // indistinguishable from a real delete by shape, no fixture contains
+        // such text, and D0 does appear in real BarTender samples (so the
+        // command genuinely occurs). If this ever needs to change, the rule to
+        // revisit is the exemption, and this test is where it is recorded.
+        const t = parseViewerIPL(stx('<ESC>P;E1;F1;H1;o10,10;c0;d3,A;D2;B;R'))
+            .elements.find(e => e.kind === 'text') as TextElement;
+        expect((t.source as { data: string }).data).toBe('A');
+    });
+
+    it('leaves the pre-existing d3 boundary rule alone for the other letters', () => {
+        // A plain "A;B" is still one text value: the boundary needs an o-param,
+        // and this shape does not have one.
+        const t = parseViewerIPL(stx('<ESC>P;E1;F1;H1;o10,10;c0;d3,A;B;H2;o10,40;c0;d3,SECOND;R'));
+        const first = t.elements.find(e => (e as { id?: number }).id === 1) as TextElement;
+        expect((first.source as { data: string }).data).toBe('A;B');
+    });
+});
