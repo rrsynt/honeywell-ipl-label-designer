@@ -195,6 +195,44 @@ export const parseZPL = (code: string): ViewerLabel => {
         switch (cmd.name) {
             case 'PW': widthDots = num(p[0], widthDots ?? 0); break;
             case 'LL': heightDots = num(p[0], heightDots ?? 0); break;
+            // ^FR reverses the field — the printer lays a black box behind it
+            // and knocks the glyphs out white. That is ink this preview does not
+            // draw, so it gets its own message rather than sharing the generic
+            // "no effect here" line with settings that genuinely change nothing
+            // visible.
+            case 'FR':
+                issue('info', 'zpl-field-reverse',
+                    '^FR prints this field white on a black background; this preview draws it as ordinary black-on-white.',
+                    '^FR');
+                break;
+            // ^LH ^LT ^LS move the WHOLE image on the media, so they belong
+            // with the picture-changing commands, not with the printer
+            // settings. The generic "not part of the supported ZPL subset, so
+            // it has no effect here" said the same thing about these as about
+            // ^MD (darkness) and ^PR (speed) — which genuinely cannot change
+            // what is drawn — and that understates a real divergence: the
+            // preview draws every field at its ^FO coordinate while the printer
+            // offsets the lot.
+            //
+            // Reported as a warning with the offsets named, matching the
+            // precedent IPL already set for its own equivalent (<SI>X "the
+            // image is shifted by N dot(s) in x and M in y", <SI>F, <SI>h).
+            case 'LH': case 'LT': case 'LS': {
+                // ^LH takes x,y; ^LT and ^LS take a single value (^LT moves the
+                // image down, ^LS sideways).
+                const x = num(p[0], 0);
+                const y = cmd.name === 'LH' ? num(p[1], 0) : 0;
+                if (x !== 0 || y !== 0) {
+                    const what = cmd.name === 'LH' ? '^LH moves the label home'
+                        : cmd.name === 'LT' ? '^LT shifts every field down'
+                        : '^LS shifts every field sideways';
+                    const by = cmd.name === 'LH' ? `${x} dot(s) in x and ${y} in y` : `${x} dot(s)`;
+                    issue('warning', 'zpl-image-shifted',
+                        `${what} by ${by}; this preview draws every field at its ^FO position and does not apply that offset.`,
+                        `^${cmd.name}`);
+                }
+                break;
+            }
             case 'FO':
             case 'FT':
                 origin = { x: num(p[0], 0), y: num(p[1], 0) };

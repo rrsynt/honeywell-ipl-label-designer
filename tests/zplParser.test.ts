@@ -127,9 +127,43 @@ describe('parseZPL', () => {
     });
 
     it('notes commands outside the supported subset and still renders the rest', () => {
-        const label = parseZPL('^XA^LH20,20^FO0,0^A0N,20,20^FDHi^FS^XZ');
+        // ^MD is darkness — a printer setting that genuinely cannot change what
+        // is drawn, so the generic "no effect here" line is the honest answer.
+        // (^LH used to be this test's subject; it MOVES the image, so it now has
+        // its own warning — see the shift test below.)
+        const label = parseZPL('^XA^MD15^FO0,0^A0N,20,20^FDHi^FS^XZ');
         expect(label.elements).toHaveLength(1);
-        expect(label.issues.some(i => i.code === 'zpl-unsupported' && i.command === '^LH')).toBe(true);
+        expect(label.issues.some(i => i.code === 'zpl-unsupported' && i.command === '^MD')).toBe(true);
+    });
+
+    it('warns when a command shifts the whole image, and says by how much', () => {
+        // ^LH ^LT ^LS offset every field on the media. Drawing them at their
+        // ^FO coordinates regardless showed a label the printer would not
+        // produce, under a message that implied nothing was wrong.
+        for (const [ipl, code, command] of [
+            ['^XA^LH20,20^FO0,0^A0N,20,20^FDHi^FS^XZ', 'zpl-image-shifted', '^LH'],
+            ['^XA^LT10^FO0,0^A0N,20,20^FDHi^FS^XZ', 'zpl-image-shifted', '^LT'],
+            ['^XA^LS25^FO0,0^A0N,20,20^FDHi^FS^XZ', 'zpl-image-shifted', '^LS'],
+        ] as Array<[string, string, string]>) {
+            const label = parseZPL(ipl);
+            expect(label.elements, command).toHaveLength(1);
+            const hit = label.issues.find(i => i.code === code && i.command === command);
+            expect(hit, command).toBeDefined();
+            expect(hit!.level, command).toBe('warning');
+            expect(hit!.message, command).toMatch(/dot/);
+        }
+    });
+
+    it('stays silent when a shift command is at its no-op value', () => {
+        // ^LH0,0 is where the image already is, so there is nothing to report.
+        const label = parseZPL('^XA^LH0,0^FO0,0^A0N,20,20^FDHi^FS^XZ');
+        expect(label.issues.map(i => i.code)).not.toContain('zpl-image-shifted');
+    });
+
+    it('names a reversed field rather than sharing the harmless message', () => {
+        const label = parseZPL('^XA^FO0,0^FR^A0N,20,20^FDHi^FS^XZ');
+        expect(label.issues.map(i => i.code)).toContain('zpl-field-reverse');
+        expect(label.issues.map(i => i.code)).not.toContain('zpl-unsupported');
     });
 
     it('parses only the first label of a multi-label stream and says so', () => {

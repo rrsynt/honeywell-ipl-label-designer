@@ -386,8 +386,18 @@ export const parseEPL = (code: string): ViewerLabel => {
                     hMag: hMul * face.hMag, wMag: wMul * face.wMag,
                     pointSize: Math.max(1, Math.round(size.height * hMul * 72 / 203)),
                     source: content.isVariable ? { type: 'variable', data: content.text } : { type: 'fixed', data: content.text },
-                    ...((p[6] ?? '').toUpperCase() === 'R' ? { reverse: true } : {}),
                 };
+                // p7 is the reverse flag: 'R' prints the text white on a black
+                // background. Nothing in this renderer READS ElementBase.reverse
+                // — the flag was set here and then ignored, so the label drew as
+                // ordinary black text with no word about it. Reported instead,
+                // because the difference is ink the printer lays down and this
+                // preview does not.
+                if ((p[6] ?? '').toUpperCase() === 'R') {
+                    issue('info', 'epl-reverse-text',
+                        `A field with the reverse flag (p7=R) prints white text on a black background; this preview draws it as ordinary black text.`,
+                        'A');
+                }
                 elements.push(place(el));
                 break;
             }

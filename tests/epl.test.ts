@@ -173,8 +173,19 @@ describe('EPL parser', () => {
         expect([t.hMag, t.wMag]).toEqual([3, 2]);
     });
 
-    it('carries reverse printing through', () => {
-        expect((parseEPL('N\nA10,10,0,2,1,1,R,"INV"').elements[0] as any).reverse).toBe(true);
+    it('reports reverse printing instead of carrying a flag nothing reads', () => {
+        // p7=R prints white on black. The parser used to set ElementBase.reverse
+        // and no renderer ever read it, so the label drew as ordinary black text
+        // with no word said. The flag is gone and the difference is reported.
+        const r = parseEPL('N\nA10,10,0,2,1,1,R,"INV"');
+        expect(r.elements).toHaveLength(1);
+        expect(r.issues.map(i => i.code)).toContain('epl-reverse-text');
+        expect((r.elements[0] as { reverse?: boolean }).reverse).toBeUndefined();
+    });
+
+    it('stays silent for a field that is not reversed', () => {
+        const r = parseEPL('N\nA10,10,0,2,1,1,N,"PLAIN"');
+        expect(r.issues.map(i => i.code)).not.toContain('epl-reverse-text');
     });
 
     it('draws the three 2D symbols EPL2 defines, by their type letter', () => {

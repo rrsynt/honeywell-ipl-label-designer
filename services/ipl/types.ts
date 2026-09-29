@@ -82,8 +82,6 @@ export interface TextElement extends ElementBase {
      * its default anchor was derived from that barcode's rendered box. */
     interpretiveOf?: number;
     source: FieldSource;
-    /** Interpretive-field style options are ignored for plain text. */
-    reverse?: boolean;
 }
 
 export interface BarcodeElement extends ElementBase {
