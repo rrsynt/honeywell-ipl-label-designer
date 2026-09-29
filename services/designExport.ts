@@ -19,6 +19,7 @@ import { ensureCjkReady } from './ipl/codePages';
 import { totalLabelCount } from './ipl/odometer';
 import { streamBatchPages, MAX_BATCH_EXPORT, type BatchPage, type BatchRenderOptions } from './batchExport';
 import { createZipBlob, zipEntryBytes, numberedPngName, sanitizeBaseName, type ZipEntry } from './zipStore';
+import { stockExtentDots } from './printRecords';
 import type { Design } from '../types';
 
 export type ImageExportKind = 'png' | 'pdf' | 'zip';
@@ -51,7 +52,13 @@ export const streamDesignPages = async (
     onPage: (page: BatchPage, index: number) => void,
 ): Promise<number> => {
     const label = await labelOf(design);
-    return streamBatchPages(label, design.printerSettings.dpi, label.settings.formatDirection ?? 0, opts, onPage);
+    // Locked to the STOCK, always. Left to itself the export would grow the page
+    // to fit a field that hangs past the label edge, so an export of a design
+    // whose content overflows came out larger than the media and showed ink the
+    // printer clips away. The designer's own canvas clips at the stock, so this
+    // also keeps the export honest about what the screen shows.
+    return streamBatchPages(label, design.printerSettings.dpi, label.settings.formatDirection ?? 0,
+        { ...opts, extentOverride: stockExtentDots(design) }, onPage);
 };
 
 const triggerDownload = (href: string, filename: string): void => {

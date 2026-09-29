@@ -91,6 +91,21 @@ export const sheetCellDots = (design: Design): { widthDots: number; heightDots: 
 };
 
 /**
+ * The stock as a render EXTENT: the physical page, in dots.
+ *
+ * This is the size a label is DRAWN at. `computeLabelExtent` answers a
+ * different question — how much room the content needs — and so it grows the
+ * canvas when a field hangs past the edge. That is right for a viewer opening a
+ * stranger's stream, and wrong for an export: the printer clips at the stock,
+ * so anything outside it is not printed and must not enlarge the page. Measured
+ * before this existed: a box authored at x=88 spanning to x=118 on a 100mm
+ * stock exported as a 118x65mm PNG with the ink running 18mm past the label,
+ * while the designer canvas clipped it at 100 as the printer would.
+ */
+export const stockExtentDots = (design: Design): { widthDots: number; heightDots: number } =>
+    sheetCellDots(design);
+
+/**
  * Cells laid out on a sheet: rows × columns from the label settings, floored
  * at 1 each (0 would divide the page count by zero).
  */

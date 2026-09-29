@@ -9,7 +9,8 @@ import type { JobPlan } from '../services/csvJob';
 import { rowBatchData } from '../services/csvJob';
 import { generateIPL } from '../services/iplGenerator';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
-import { computeLabelExtent, renderLabel } from '../services/ipl/renderer';
+import { renderLabel } from '../services/ipl/renderer';
+import { stockExtentDots } from '../services/printRecords';
 import { ensureBarcodesReady } from '../services/ipl/barcodes';
 
 export const CsvRowPreview: React.FC<{ design: Design; plan: JobPlan }> = ({ design, plan }) => {
@@ -42,7 +43,9 @@ export const CsvRowPreview: React.FC<{ design: Design; plan: JobPlan }> = ({ des
         generateIPL(design, rowBatchData(plan, row)).then(ipl => {
             if (seq !== seqRef.current) return; // a newer row won
             const label = parseViewerIPL(ipl);
-            const extent = computeLabelExtent(label, dpi);
+            // The stock, not the content bounds: the printer clips at the label
+            // edge, so a field hanging past it must not enlarge the preview.
+            const extent = stockExtentDots(design);
             const pxPerDot = Math.min(2, Math.max(0.15, 240 / Math.max(1, extent.widthDots)));
             renderLabel(canvas, label, extent, { dpi, pxPerDot, quality: 2, rotation: 0 });
         }).catch(() => {
