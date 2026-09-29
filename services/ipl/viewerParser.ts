@@ -1539,6 +1539,76 @@ export class IPLViewerParser {
         flush();
     }
 
+    /**
+     * The commands that follow `<ESC>T` (Test and Service Mode, Enter).
+     *
+     * They are a DIFFERENT command set — "Test and Service Commands", PRM 2.70
+     * p.82 — in which the letters mean other things: B is Printhead Resistance
+     * Test, not Bar Code Field; T is Label Taken Sensor, not the mode enter; C
+     * is Pitch Label, not Advanced Mode. Walking them through parseChained
+     * would report real commands as "Unrecognized command frame ignored",
+     * which is a false alarm on correct input.
+     *
+     * What they can do to the PICTURE is print the printer's OWN test labels,
+     * not this job's. That set is exactly the entries named "…, Print":
+     *
+     *   B  Printhead Resistance Test, Begin      p  Pages, Print
+     *   C  Pitch Label, Print                    Q  Print Quality Label, Print
+     *   f  Formats, Print                        s  Software Configuration Label
+     *   g  UDC and Graphics, Print               t  User-Defined Fonts, Print
+     *   h  Hardware Configuration Label, Print
+     *
+     * The rest are sensor queries and setup (A D G K L M P R S T U V) — they
+     * transmit a value to the HOST, so they cannot change any label. The two
+     * groups are reported differently for that reason.
+     *
+     * Modelled as reports rather than elements, because neither group draws
+     * content for the format being previewed: a test label is a different
+     * document, and a query prints nothing at all.
+     */
+    private reportTestServiceChain(rest: string): void {
+        const PRINT_LABELS: Record<string, string> = {
+            B: 'Printhead Resistance Test', C: 'Pitch Label', f: 'Formats',
+            g: 'User-Defined Characters and Graphics', h: 'Hardware Configuration Label',
+            p: 'Pages', Q: 'Print Quality Label', s: 'Software Configuration Label',
+            t: 'User-Defined Fonts',
+        };
+        const QUERIES: Record<string, string> = {
+            A: 'Ambient Temperature', D: 'Factory Defaults, Reset', G: 'Transmissive Sensor Value',
+            K: 'Dark Adjust', L: 'Label Path Open Sensor Value', M: 'Reflective Sensor Value',
+            P: 'Printhead Temperature Sensor Value', R: 'Test and Service Mode, Exit',
+            S: 'Printhead Resistance Values', T: 'Label Taken Sensor Value',
+            U: '12 Volt Supply Value', V: 'Printhead Volt Supply Value',
+        };
+
+        // Only a BARE Test and Service command counts. These are single letters
+        // (the manual's "Syntax: U", "Syntax: f"), so a segment carrying an
+        // argument or a field id belongs to something else and must not be
+        // reported here: "<ESC>T;E1;F1;H1;…" opens a real FORMAT, and reading
+        // its E as a Test and Service letter warned on correct input.
+        const isBareCommand = (s: string): boolean => /^[A-Za-z]$/.test(s);
+
+        const seen = new Set<string>();
+        for (const seg of rest.split(';')) {
+            const s = seg.trim();
+            if (!s || !isBareCommand(s)) continue;
+            const letter = s.charAt(0);
+            if (seen.has(letter)) continue;
+            seen.add(letter);
+            if (PRINT_LABELS[letter]) {
+                // These print the PRINTER's own label. The preview draws the
+                // JOB's label, so what appears differs — worth saying.
+                this.printer.issue('warning', 'test-service-print',
+                    `Test and Service mode: ${PRINT_LABELS[letter]} (${letter}) prints a printer test label, not this job's label.`,
+                    `<ESC>T;${letter}`);
+            } else if (QUERIES[letter]) {
+                this.printer.issue('info', 'test-service-query',
+                    `Test and Service mode: ${QUERIES[letter]} (${letter}) sends a value to the host and prints nothing.`,
+                    `<ESC>T;${letter}`);
+            }
+        }
+    }
+
     private parseEscFrame(frame: string): void {
         const cmd = frame.charAt(LITERAL_ESC.length);
         const rest = frame.slice(LITERAL_ESC.length + 1);
@@ -1561,6 +1631,34 @@ export class IPLViewerParser {
                 else if (rest2.includes(';')) this.parseChained(rest2);
                 break;
             }
+            case 'T': // Test and Service Mode, Enter (PRM p.117)
+                // "The printer completes all print jobs before executing this
+                // command. When the printer enters Test and Service mode, it
+                // erases any host-entered data that was sent prior to the
+                // command."
+                //
+                // The commands that follow belong to a DIFFERENT table — "Test
+                // and Service Commands" (PRM p.82) — where the letters mean
+                // other things: B is Printhead Resistance Test, not Bar Code
+                // Field; T is Label Taken Sensor, not this command; C is Pitch
+                // Label, not Advanced Mode. Walking them with parseChained would
+                // therefore report real Test and Service commands as
+                // "Unrecognized command frame ignored" — a false alarm on
+                // correct input, which is its own defect.
+                //
+                // What matters for the picture is that several of them PRINT
+                // THE PRINTER'S OWN LABELS: f (Formats, Print), h (Hardware
+                // Configuration Label), p (Pages, Print), s (Software
+                // Configuration Label), t (User-Defined Fonts, Print), C (Pitch
+                // Label), Q (Print Quality Label), g (UDC and Graphics, Print).
+                // The rest are sensor queries that send values to the HOST.
+                // Neither prints this job's label, so the preview is right to
+                // draw nothing — but the manual's own reset example
+                // "<ESC>T;D;R;" (p.219) was previously dropped WHOLE and
+                // silently, which is the failure this records.
+                this.printer.closeFormat();
+                if (rest.includes(';')) this.reportTestServiceChain(rest);
+                break;
             case 'E': // Print invocation (<ESC>E1<CAN>...) - ends format definition
                 this.printer.closeFormat();
                 break;
