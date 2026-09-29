@@ -55,7 +55,30 @@ interface ImportedGraphicDef { w: number; h: number; strips: string[]; rowForm: 
 // (and graphicDefs for U sizes) directly.
 
 
-export const parseIPL = (rawInput: string, dpi: PrinterSettings['dpi']): Design => {
+/** Something the import could not represent, for the caller to surface. */
+export interface ImportNotice {
+    /** Command or command letter that was dropped, e.g. "I1" or "Z9". */
+    command: string;
+    message: string;
+}
+
+export const parseIPL = (
+    rawInput: string,
+    dpi: PrinterSettings['dpi'],
+    /**
+     * Optional sink for fields the design model cannot represent.
+     *
+     * The designer has no concept of an IPL interpretive field (In) — it
+     * attaches an HRI row to its barcode instead — so an In that is not an HRI
+     * font declaration has nowhere to go, and an unrecognized letter has
+     * nowhere at all. Both used to disappear silently: the viewer produced two
+     * elements where the importer produced one, and nothing said why. Reported
+     * rather than modelled, so the caller can tell the user what was lost.
+     *
+     * Optional so existing callers and tests keep their current signature.
+     */
+    onNotice?: (notice: ImportNotice) => void,
+): Design => {
     // Every regex below speaks literal notation (<STX>…), but the doc
     // contract is "raw control bytes and literals both accepted" — the viewer
     // hands this parser bytesToByteString output straight from a file. Full
@@ -185,7 +208,33 @@ export const parseIPL = (rawInput: string, dpi: PrinterSettings['dpi']): Design 
     commands.forEach(commandStr => {
         const commandParts = commandStr.split(';');
         const commandIdMatch = commandParts[0].match(/^([HBLWU])(\d+)/);
-        if (!commandIdMatch) return;
+        if (!commandIdMatch) {
+            // Two things land here and both used to vanish without a word:
+            //   I<n>  an interpretive field. The designer has no such concept
+            //         (it attaches an HRI row to its barcode), and the HRI
+            //         font pass above has already consumed the ones that were
+            //         font declarations — so what is left is a real field with
+            //         nowhere to go.
+            //   any other letter, which is simply not a field this model has.
+            // Reported so the caller can say what was dropped, rather than
+            // leaving the user to notice a missing field themselves.
+            const head = commandParts[0].trim();
+            // An In that the HRI pass above consumed IS represented — as the
+            // bar code's human-readable row — so it is not a loss and must not
+            // be reported. Only an interpretive field with no matching bar code
+            // has nowhere to go.
+            const interpId = /^I(\d+)$/.exec(head);
+            const consumedAsHri = interpId !== null && hriFontMap.has(parseInt(interpId[1], 10));
+            if (onNotice && /^[A-Za-z]\d*/.test(head) && !consumedAsHri) {
+                onNotice({
+                    command: head.slice(0, 24),
+                    message: interpId
+                        ? `Interpretive field "${head.slice(0, 24)}" was not imported: this designer attaches the human-readable row to its bar code instead of holding it as its own field.`
+                        : `Command "${head.slice(0, 24)}" was not imported: it is not a field type this designer can represent.`,
+                });
+            }
+            return;
+        }
 
         const typeChar = commandIdMatch[1];
         const fieldId = parseInt(commandIdMatch[2]);

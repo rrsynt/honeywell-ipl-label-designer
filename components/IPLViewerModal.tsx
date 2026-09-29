@@ -425,8 +425,16 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
 
     const handleImport = useCallback(async () => {
         try {
-            const design = parseIPL(debouncedCode, dpi);
+            // Collect what the import could not represent. The designer model
+            // has no interpretive field and no slot for an unknown command, so
+            // those used to disappear with nothing said — the user would find
+            // a missing field later, with no clue it had ever been there.
+            const lost: string[] = [];
+            const design = parseIPL(debouncedCode, dpi, n => lost.push(n.message));
             if (design.fields.length === 0) return;
+            if (lost.length > 0) {
+                notify(`Imported with ${lost.length} field${lost.length === 1 ? '' : 's'} not carried over. ${lost.join(' ')}`);
+            }
             // Route through App's guarded action: importing replaces the canvas,
             // so unsaved work gets the same confirm as New/Load/Import. Only
             // close the modal when the replacement actually happened.

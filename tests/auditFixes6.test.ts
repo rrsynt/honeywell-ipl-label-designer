@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
+import { parseIPL } from '../services/iplParser';
 import type { TextElement, BarcodeElement, BoxElement, LineElement } from '../services/ipl/types';
 
 // Batch 6 audit remainder: d2 master/slave sources (T2), chained-frame d3
@@ -392,5 +393,52 @@ describe('field commands missing from COMMAND_START (2026-09-29)', () => {
         const t = parseViewerIPL(stx('<ESC>P;E1;F1;H1;o10,10;c0;d3,A;B;H2;o10,40;c0;d3,SECOND;R'));
         const first = t.elements.find(e => (e as { id?: number }).id === 1) as TextElement;
         expect((first.source as { data: string }).data).toBe('A;B');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// The importer reports what it cannot represent
+// ---------------------------------------------------------------------------
+//
+// parseIPL had no notice channel at all: a field it could not build simply did
+// not exist in the output. The viewer produced two elements where the importer
+// produced one for the same stream, and nothing said why — the user would find
+// a missing field later with no clue it had ever been there.
+describe('importer notices for fields it cannot represent (2026-09-29)', () => {
+    const parse = (frames: string[]) => {
+        const notes: string[] = [];
+        const design = parseIPL(
+            [stx('<ESC>P'), stx('E1;F1'), ...frames.map(stx), stx('R')].join(''), 203,
+            n => notes.push(n.command),
+        );
+        return { fields: design.fields.map(f => `${f.type}${f.id ?? ''}`), notes };
+    };
+
+    it('reports an interpretive field with no bar code to attach to', () => {
+        const { fields, notes } = parse(['B1;o10,10;c3;h40;w2;d3,123', 'I1;o10,60;c0']);
+        expect(fields).toEqual(['barcode1']);
+        expect(notes).toEqual(['I1']);
+    });
+
+    it('reports a command letter the designer has no field for', () => {
+        expect(parse(['H1;o10,10;c0;d3,X', 'Z9;o10,50;c0']).notes).toEqual(['Z9']);
+    });
+
+    it('stays silent for an In that becomes a bar code HRI row', () => {
+        // This In IS represented — as the bar code's human-readable row — so it
+        // is not a loss. Reporting it would train users to ignore the message.
+        const { fields, notes } = parse(['B1;o10,10;c3;h40;w2;i1;d3,123', 'I1;c25;k9']);
+        expect(fields).toEqual(['barcode1']);
+        expect(notes).toEqual([]);
+    });
+
+    it('stays silent for ordinary fields', () => {
+        expect(parse(['H1;o10,10;c0;d3,X']).notes).toEqual([]);
+    });
+
+    it('works without a callback, so existing callers are unaffected', () => {
+        const design = parseIPL(
+            [stx('<ESC>P'), stx('E1;F1'), stx('I9;c25'), stx('R')].join(''), 203);
+        expect(design.fields).toEqual([]);
     });
 });
