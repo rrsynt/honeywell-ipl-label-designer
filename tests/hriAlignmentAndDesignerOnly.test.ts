@@ -317,3 +317,48 @@ describe('stockFrame: pointer space <-> label space on a turned canvas', () => {
         expect(isTurned({ orientation: 'portrait' })).toBe(false);
     });
 });
+
+// Guides belong to the SCREEN's axes: a guide is pulled off a ruler and lands at
+// that pixel, and its purpose is to be lined up against something by eye. Drawn
+// through the label's own quarter turn instead (as they were before), a vertical
+// guide pulled off the left ruler on a landscape stock came out as a horizontal
+// line across the label — the opposite axis from the one dragged.
+describe('ruler guides keep the SCREEN axis on a turned stock', () => {
+    const guideInk = (orientation: 'portrait' | 'landscape', guides: { horizontal: number[]; vertical: number[] }) => {
+        const d = designOf([barcodeField()]);
+        d.labelSettings = { ...d.labelSettings, orientation };
+        d.guides = guides;
+        const c = newRealCanvas(1200, 1200) as any;
+        const ctx = c.getContext('2d');
+        drawElements(ctx, d, [], { zoom: 1, pan: { x: 0, y: 0 } } as any, { x: null, y: null }, null, null);
+        const data = ctx.getImageData(0, 0, 1200, 1200).data;
+        // The guide is cyan-400 over the white stock; the stock underneath is
+        // pure white and everything else on a bare design is black bars, so a
+        // blue-green-dominant pixel is the guide.
+        let minX = Infinity, maxX = -1, minY = Infinity, maxY = -1, n = 0;
+        for (let y = 0; y < 1200; y++) for (let x = 0; x < 1200; x++) {
+            const i = (y * 1200 + x) * 4;
+            if (data[i + 3] > 0 && data[i + 2] > 150 && data[i + 2] - data[i] > 40) {
+                n++;
+                if (x < minX) minX = x; if (x > maxX) maxX = x;
+                if (y < minY) minY = y; if (y > maxY) maxY = y;
+            }
+        }
+        return { n, w: maxX - minX + 1, h: maxY - minY + 1, minX, minY };
+    };
+
+    it('a VERTICAL guide is drawn tall, on both orientations', () => {
+        const portrait = guideInk('portrait', { horizontal: [], vertical: [20] });
+        const landscape = guideInk('landscape', { horizontal: [], vertical: [20] });
+        expect(portrait.h).toBeGreaterThan(portrait.w * 5);
+        // The regression: this used to come out WIDE on a turned stock.
+        expect(landscape.h).toBeGreaterThan(landscape.w * 5);
+    });
+
+    it('a HORIZONTAL guide is drawn wide, on both orientations', () => {
+        const portrait = guideInk('portrait', { horizontal: [20], vertical: [] });
+        const landscape = guideInk('landscape', { horizontal: [20], vertical: [] });
+        expect(portrait.w).toBeGreaterThan(portrait.h * 5);
+        expect(landscape.w).toBeGreaterThan(landscape.h * 5);
+    });
+});

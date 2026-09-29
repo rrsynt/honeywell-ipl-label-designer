@@ -374,6 +374,18 @@ const drawMarquee = (ctx: CanvasRenderingContext2D, marquee: { x: number; y: num
     ctx.restore();
 }
 
+/**
+ * Ruler guides. They belong to the SCREEN's axes, not the label's: the rulers
+ * are screen furniture, a guide is pulled off a ruler and lands at that pixel,
+ * and the whole point of one is to be lined up against something by eye. So
+ * they are drawn here in screen space rather than through the label's own
+ * quarter turn — otherwise pulling a vertical guide off the ruler on a
+ * landscape canvas draws a horizontal line across the stock, nowhere near the
+ * pixel it was dropped on.
+ *
+ * The consequence, which the ruler's own read-out makes explicit: on a turned
+ * stock the left ruler measures the label's LENGTH and the top ruler its WIDTH.
+ */
 const drawRulerGuides = (ctx: CanvasRenderingContext2D, design: Design, workspace: WorkspaceState) => {
     const { guides } = design;
     const { zoom } = workspace;
@@ -469,6 +481,15 @@ export const drawElements = (
     ctx.fillRect(0, 0, labelWidthPx, labelHeightPx);
     ctx.shadowColor = 'transparent';
 
+    // Guides run the full span of the stock in SCREEN space (see drawRulerGuides),
+    // so they are painted against the unturned box, before the label's own turn.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, labelWidthPx, labelHeightPx);
+    ctx.clip();
+    drawRulerGuides(ctx, design, workspace);
+    ctx.restore();
+
     ctx.save();
     // Clip drawing to the label boundaries
     ctx.beginPath();
@@ -482,7 +503,6 @@ export const drawElements = (
         ctx.rotate(-Math.PI / 2);
     }
 
-    drawRulerGuides(ctx, design, workspace);
     drawUnprintableMargin(ctx, design, workspace);
 
     fields.forEach(field => {
