@@ -97,12 +97,36 @@ describe('d3 fixed data with ";" inside chained frames (audit T-chain)', () => {
         expect((ts.find(t => t.id === 1)!.source as { data: string }).data).toBe('A;B');
         expect((ts.find(t => t.id === 2)!.source as { data: string }).data).toBe('SECOND');
     });
-    it('a bare header-shaped text segment stays data unless an o-param follows', () => {
-        // "B2" mid-text with no origin param after it: still data.
+    it('a header-shaped text segment with a FIELD ID splits the data (tradeoff)', () => {
+        // UPDATED 2026-09-29, and this is a real tradeoff rather than a fix.
+        //
+        // The old rule kept "B2" as data unless an o-param followed, so this
+        // test expected "X;B2;Y". That rule also swallowed a REAL field: `o` is
+        // optional (PRM p.203, default 0,0), so a chained "H2;c0;d3,S" after
+        // another d3 field vanished into the text — a field lost vs. a text
+        // split.
+        //
+        // The rule now splits on a letter+digits header, so "B2" here ends the
+        // data. Text like the manual's own ("A;B", "BASIS WT. 39-4838",
+        // "CUSTOMER ORDER NUMBER") is unaffected, because none of it opens with
+        // letter+digit.
         const code = stx('<ESC>P;E1;F1;H1;o10,10;c0;d3,X;B2;Y;H2;o10,40;c0;d3,OK;R');
         const ts = parseViewerIPL(code).elements.filter(e => e.kind === 'text') as TextElement[];
-        expect((ts.find(t => t.id === 1)!.source as { data: string }).data).toBe('X;B2;Y');
+        expect((ts.find(t => t.id === 1)!.source as { data: string }).data).toBe('X');
         expect((ts.find(t => t.id === 2)!.source as { data: string }).data).toBe('OK');
+    });
+
+    it('text that does NOT open with a field id stays whole', () => {
+        // The other side of the tradeoff, and the reason the letter+digits
+        // requirement exists: all three of these are the manual's own d3 text.
+        for (const [code, want] of [
+            ['<STX><ESC>P;E1;F1;H1;o10,10;c0;d3,A;B;R<ETX>', 'A;B'],
+            ['<STX><ESC>P;E1;F1;H1;o10,10;c0;d3,BASIS WT. 39-4838;R<ETX>', 'BASIS WT. 39-4838'],
+            ['<STX><ESC>P;E1;F1;H1;o10,10;c0;d3,CUSTOMER ORDER NUMBER;R<ETX>', 'CUSTOMER ORDER NUMBER'],
+        ] as Array<[string, string]>) {
+            const t = parseViewerIPL(code).elements.find(e => e.kind === 'text') as TextElement;
+            expect((t.source as { data: string }).data, code).toBe(want);
+        }
     });
     it('the paired format header E<n>;F<n> raises no unrecognized-frame warning', () => {
         // "E1;F1" is one format header, but the chain walker used to flush
@@ -375,13 +399,17 @@ describe('field commands missing from COMMAND_START (2026-09-29)', () => {
         expect(kinds(P('E1;F1;H1;o10,10;c0;d3,X;H2;o10,50;c0;d3,Y;D2;R'))).toEqual(['text1']);
     });
 
-    it('keeps the accepted text cost of the D exemption pinned', () => {
-        // Documented tradeoff, not an accident: with Dn exempt from the
-        // o-param test, data that literally contains "…;D2;…" is split. It is
-        // indistinguishable from a real delete by shape, no fixture contains
-        // such text, and D0 does appear in real BarTender samples (so the
-        // command genuinely occurs). If this ever needs to change, the rule to
-        // revisit is the exemption, and this test is where it is recorded.
+    it('keeps the accepted text cost for a D-shaped segment pinned', () => {
+        // Documented tradeoff, not an accident — and note the reason changed
+        // on 2026-09-29. `D2` used to need a special exemption from the
+        // o-param test; the boundary rule now keys on letter+digits, which
+        // covers `Dn` without any special case, so this behavior is a
+        // consequence of the general rule rather than of an exception to it.
+        //
+        // The cost is the same either way: data that literally contains
+        // "…;D2;…" is split, because it is indistinguishable from a real
+        // delete by shape. No fixture contains such text, while D0 does appear
+        // in real BarTender samples, so the command genuinely occurs.
         const t = parseViewerIPL(stx('<ESC>P;E1;F1;H1;o10,10;c0;d3,A;D2;B;R'))
             .elements.find(e => e.kind === 'text') as TextElement;
         expect((t.source as { data: string }).data).toBe('A');

@@ -1291,34 +1291,27 @@ export class IPLViewerParser {
                 }
             }
             if (COMMAND_START.test(s)) {
-                // Inside d3 data, a header only counts as a boundary when an
-                // origin param follows it — otherwise the text wins. That rule
-                // is deliberately kept as it was: real fixtures put d3 last, so
-                // it rarely fires, and loosening or tightening it would change
-                // how genuine field commands are recognized.
+                // Inside d3 data, only a header WITH A FIELD ID ends the run.
                 //
-                // The cost is known and accepted: text that genuinely contains
-                // "…;B2;o5,5;…" is still split, because it is indistinguishable
-                // from a real field command by shape alone.
+                // `COMMAND_START` accepts a bare letter too, because in command
+                // position "F1" and "E1" are formats and "R" closes one. But as
+                // a boundary inside DATA that is far too loose: the manual's own
+                // d3 text reads "A;B" (a part number list), where the B is a
+                // label, not a bar code field — treating it as a header split
+                // "A;B" into "A" plus a phantom barcode.
                 //
-                // `D` is the one exemption, because "Dn" deletes a field and
-                // takes NO origin param — so the `o` test could never be
-                // satisfied for it, and a chained "…;D2;R" was swallowed as
-                // data while the field survived: one element came out where the
-                // separate-frame form produced the deletion. Its shape is
-                // narrow (letter + digits, no params), so it needs no guard.
+                // Requiring letter+digit matches every field command the manual
+                // writes ("H2", "B1", "I1") and none of the text it shows.
+                //
+                // This replaces an older rule that also demanded an `o…` param
+                // next. That one broke a REAL field: `o` is optional (PRM p.203,
+                // default "n = 0, m = 0"), so a chained "H2;c0;d3,S" after
+                // another d3 field was swallowed whole as text —
+                // "T;H2;c0;d3,S" — losing the second field entirely.
                 const inD3 = /(?:^|;)d3,/.test(buffer);
-                if (inD3 && s !== 'R') {
-                    let next = '';
-                    for (let j = i + 1; j < segments.length; j++) {
-                        const t = segments[j].trim();
-                        if (t) { next = t; break; }
-                    }
-                    const isFieldDelete = /^D\d+$/.test(s);
-                    if (!isFieldDelete && !/^o-?[\d,]+/.test(next)) {
-                        if (buffer) buffer += `;${s}`;
-                        continue;
-                    }
+                if (inD3 && s !== 'R' && !/^[A-Za-z]\d/.test(s)) {
+                    if (buffer) buffer += `;${s}`;
+                    continue;
                 }
                 flush();
                 if (s === 'R') {
