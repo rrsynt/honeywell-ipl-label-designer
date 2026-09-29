@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
+import { KIND_PREFIX } from '../services/ipl/virtualPrinter';
 
 const stx = (f: string) => `<STX>${f}<ETX>`;
 const stream = (...extra: string[]) => [
@@ -197,5 +198,49 @@ describe('the sweep that found them is reproducible', () => {
         }
         // And it should point a reader at the sweep that keeps it honest.
         expect(header).toContain('commandSurface');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// KIND_PREFIX — the fifth command-letter list, and the one that is clean
+// ---------------------------------------------------------------------------
+//
+// Four other lists diverged from the dispatch they mirror (parseChained's
+// COMMAND_START, IN_BLOCK_CONTROL_CHARS, parseEscFrame, and the importer's
+// field matcher). This one does not, and these tests are what keep it that
+// way: the divergences were all silent, so the only defence is to state the
+// invariants and fail when one breaks.
+describe('KIND_PREFIX agrees with the field dispatch (2026-09-29)', () => {
+    it('maps every element kind to the letter parseFieldFrame dispatches', () => {
+        const expected = { text: 'H', barcode: 'B', line: 'L', box: 'W', graphic: 'U' };
+        const src = readFileSync(join(__dirname, '..', 'services', 'ipl', 'viewerParser.ts'), 'utf8');
+        // The dispatch is the authority: read the letters it actually handles,
+        // so a new kind added there without a KIND_PREFIX entry fails here
+        // rather than silently failing to evict or name that element.
+        for (const [kind, letter] of Object.entries(expected)) {
+            expect(KIND_PREFIX[kind as keyof typeof KIND_PREFIX], kind).toBe(letter);
+            expect(src, `parseFieldFrame must still dispatch "${letter}"`).toContain(`case '${letter}':`);
+        }
+    });
+
+    it('gives every kind a UNIQUE letter', () => {
+        // evictField matches elements by KIND_PREFIX[e.kind] === kindChar, so
+        // two kinds sharing a letter would make a redefined field evict the
+        // wrong element.
+        const letters = Object.values(KIND_PREFIX);
+        expect(new Set(letters).size, `duplicate letter in ${JSON.stringify(KIND_PREFIX)}`).toBe(letters.length);
+    });
+
+    it('uses a placeholder that cannot collide with a real command', () => {
+        // '?' is not an IPL command letter, so the unknown marker can never be
+        // mistaken for one — which is exactly why it is a safe choice.
+        const body = readFileSync(join(
+            __dirname, '..', 'docs', 'manuals', 'IPL_2.70_Programmers_Reference_Manual.txt'), 'utf8');
+        expect(body).toContain('? Question mark');
+        for (const letter of Object.values(KIND_PREFIX)) {
+            if (letter === '?') continue;
+            expect(body, `"${letter}" should be a real command letter`).toMatch(
+                new RegExp(`^${letter} [A-Za-z]`, 'm'));
+        }
     });
 });
