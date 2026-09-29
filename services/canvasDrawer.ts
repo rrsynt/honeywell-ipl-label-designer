@@ -466,14 +466,16 @@ export const drawElements = (
     // cell and the clip below then cut away every field outside it: the screen
     // hid ink the printer would print.
     //
-    // Landscape is not a smaller stock, it is the SAME stock turned a quarter:
-    // the generator swaps what it sends (`<SI>W`/`<SI>L`, the field origins and
-    // every rotation, services/iplGenerator.ts). So the box on screen swaps too
-    // and the content is drawn through a rotated context — the same 90° CCW the
-    // viewer's renderLabel uses for rot 1, so both agree with the printer.
-    const isLandscape = labelSettings.orientation === 'landscape';
-    const labelWidthPx = (isLandscape ? height : width) * PREVIEW_SCALE * zoom;
-    const labelHeightPx = (isLandscape ? width : height) * PREVIEW_SCALE * zoom;
+    // Landscape is DESCRIPTIVE, not a transform. A landscape stock is simply one
+    // whose width exceeds its length, and both dimensions are used as written —
+    // the generator sends <SI>W=width, <SI>L=height, and every field at its own
+    // coordinates with its own rotation. Confirmed against the driver's own
+    // output for a btLandscape page (samples/bartender-sweep-one-box-landscape.ipl
+    // and its fixture in tools/bartender/BuildParityLabels.cs:228), so nothing
+    // here turns: a quarter turn would print the design somewhere the screen
+    // never showed.
+    const labelWidthPx = width * PREVIEW_SCALE * zoom;
+    const labelHeightPx = height * PREVIEW_SCALE * zoom;
 
     ctx.fillStyle = 'white';
     ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
@@ -481,28 +483,15 @@ export const drawElements = (
     ctx.fillRect(0, 0, labelWidthPx, labelHeightPx);
     ctx.shadowColor = 'transparent';
 
-    // Guides run the full span of the stock in SCREEN space (see drawRulerGuides),
-    // so they are painted against the unturned box, before the label's own turn.
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, labelWidthPx, labelHeightPx);
-    ctx.clip();
-    drawRulerGuides(ctx, design, workspace);
-    ctx.restore();
-
     ctx.save();
     // Clip drawing to the label boundaries
     ctx.beginPath();
     ctx.rect(0, 0, labelWidthPx, labelHeightPx);
     ctx.clip();
 
-    // From here the context is in the UNROTATED label's frame: (0,0) is its
-    // top-left and its axes run as the field coordinates are authored.
-    if (isLandscape) {
-        ctx.translate(0, labelHeightPx);
-        ctx.rotate(-Math.PI / 2);
-    }
-
+    // From here the context is in the label's frame: (0,0) is its top-left and
+    // its axes run as the field coordinates are authored.
+    drawRulerGuides(ctx, design, workspace);
     drawUnprintableMargin(ctx, design, workspace);
 
     fields.forEach(field => {
@@ -741,17 +730,6 @@ export const drawElements = (
 
     ctx.restore(); // Restore from clipping
 
-    // The overlays below sit in the same unrotated label frame as the fields
-    // above — a 3px offset within the rotated content is still 3px of ink, but
-    // a selection box drawn outside it would frame the wrong place on the
-    // turned label. Snap guides re-derive their own screen space further down,
-    // so the matching restore is immediately before those.
-    if (isLandscape) {
-        ctx.save();
-        ctx.translate(0, labelHeightPx);
-        ctx.rotate(-Math.PI / 2);
-    }
-
     const selectedFields = fields.filter(f => selectedFieldIds.includes(f.id));
     selectedFields.forEach(selectedField => {
        if (selectedField.visible === false) return;
@@ -804,8 +782,7 @@ export const drawElements = (
     }
     
     // Snap guides are computed in SCREEN space by the caller (Workspace adds
-    // pan to them), so the rotated label frame must not apply to them.
-    if (isLandscape) ctx.restore();
+    // pan to them).
 
     // Snapping guides are drawn relative to the canvas, not the panned workspace
     if (selectedFields.length > 0) {

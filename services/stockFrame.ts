@@ -1,76 +1,26 @@
-// How the designer canvas and the pointer space relate.
-//
-// The canvas draws a landscape label TURNED a quarter — the same 90° CCW the
-// viewer's renderLabel uses for rot 1, because that is what the generator does
-// to the stream (<SI>W/<SI>L swap, services/iplGenerator.ts). Every pointer
-// interaction therefore needs one of two conversions, and they are NOT each
-// other's inverse:
-//
-//   screenToLabel  — a POINT. A label point (u,v) lands on the canvas at
-//                    (v, H-u), so the inverse is u = H - local.y, v = local.x.
-//   screenToLabelDelta — a DIRECTION. A label direction (du,dv) lands at
-//                    (-dv, du), so the inverse is du = -dy, dv = dx.
-//
-// Getting these the wrong way round is invisible in portrait (both are the
-// identity there) and wrong only on a turned canvas, which is exactly the kind
-// of bug that survives a test suite that never sets landscape.
-
 import type { LabelSettings } from '../types';
 
-export const isTurned = (labelSettings: Pick<LabelSettings, 'orientation'>): boolean =>
-    labelSettings.orientation === 'landscape';
-
-/** The printed label's size in millimetres: the swap the generator performs. */
+/**
+ * The label's printed size, in millimetres.
+ *
+ * This is a PASS-THROUGH of the settings. It exists as a named seam because the
+ * app once treated `orientation: 'landscape'` as a request to turn the stock a
+ * quarter — transposing `<SI>W`/`<SI>L`, every field origin and every rotation,
+ * and turning the designer canvas to match. That was wrong: a landscape stock
+ * is simply one whose width exceeds its length, and the driver leaves the
+ * coordinates alone. Verified against a `btLandscape` page the driver itself
+ * produced (samples/bartender-sweep-one-box-landscape.ipl, fixture in
+ * tools/bartender/BuildParityLabels.cs:228): a box authored 0.6 in from the
+ * page's LEFT edge prints there, and the stream declares W388 for a 96x48 mm
+ * stock — the width as written, with nothing transposed.
+ *
+ * So orientation is DESCRIPTIVE today, and this function is the single place
+ * that decision is recorded. If a "turn the stock" feature is ever wanted, it
+ * belongs here, and every caller of this function inherits it.
+ */
 export const printedLabelMm = (
-    labelSettings: Pick<LabelSettings, 'width' | 'height' | 'orientation'>,
-): { widthMm: number; heightMm: number } => {
-    const { width, height } = labelSettings;
-    const widthMm = width;
-    const heightMm = height;
-    return isTurned(labelSettings) ? { widthMm: heightMm, heightMm: widthMm } : { widthMm, heightMm };
-};
-
-/**
- * A point in the panned canvas, expressed in the label's own unrotated frame
- * with the label's top-left as the origin. `heightPx` is the turned label's
- * height on the canvas — the `H` of the transform, not the stock's height.
- */
-export const screenToLabel = (
-    point: { x: number; y: number },
-    pan: { x: number; y: number },
-    turned: boolean,
-    heightPx: number,
-): { x: number; y: number } => {
-    const local = { x: point.x - pan.x, y: point.y - pan.y };
-    return turned ? { x: heightPx - local.y, y: local.x } : local;
-};
-
-/**
- * A drag direction in canvas pixels, expressed along the label's own axes. The
- * label-to-canvas map for a direction drops the translation, so this is a plain
- * quarter turn the other way.
- */
-export const screenToLabelDelta = (
-    delta: { x: number; y: number },
-    turned: boolean,
-): { x: number; y: number } => turned ? { x: -delta.y, y: delta.x } : delta;
-
-/**
- * The FORWARD direction: a label-frame point (plus the pan) as canvas pixels.
- * A rotation pivot lives in the label's own frame and has to be put through
- * this before it is compared with pointer positions — using the un-turned
- * value leaves the pivot off by up to the label's height, and a rotation drag
- * then measures its angle about the wrong point.
- */
-export const labelToScreen = (
-    point: { x: number; y: number },
-    pan: { x: number; y: number },
-    turned: boolean,
-    heightPx: number,
-): { x: number; y: number } => {
-    // The pan is the OUTERMOST transform — the canvas translates the scene
-    // first and only then rotates the label's content — so it is added after
-    // the turn, not folded into the point before it.
-    if (!turned) return { x: point.x + pan.x, y: point.y + pan.y };
-    return { x: pan.x + point.y, y: pan.y + heightPx - point.x };
-};
+    labelSettings: Pick<LabelSettings, 'width' | 'height'>,
+): { widthMm: number; heightMm: number } => ({
+    widthMm: labelSettings.width,
+    heightMm: labelSettings.height,
+});

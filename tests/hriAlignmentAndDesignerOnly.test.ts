@@ -12,13 +12,14 @@ import { ensureBarcodesReady } from '../services/ipl/barcodes';
 import { drawElements } from '../services/canvasDrawer';
 import { generateIPL } from '../services/iplGenerator';
 import { designerOnlyWarnings } from '../services/designerOnly';
-import { isTurned, labelToScreen, printedLabelMm, screenToLabel, screenToLabelDelta } from '../services/stockFrame';
+import { printedLabelMm } from '../services/stockFrame';
 import { sheetCellDots } from '../services/printRecords';
+import { elementVisualBox } from '../services/ipl/renderer';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
 import { renderLabel, computeLabelExtent } from '../services/ipl/renderer';
 import { newRealCanvas } from './golden/setup';
 import { DPI_MAP } from '../constants';
-import type { BarcodeField, Design, LineField } from '../types';
+import type { BarcodeField, BoxField, Design, LineField } from '../types';
 
 beforeAll(async () => { await ensureBarcodesReady(); });
 
@@ -235,87 +236,30 @@ describe('stock geometry: the canvas draws the label the printer is told to make
         expect(rightmost).toBeGreaterThan(240);
     });
 
-    it('swaps the drawn stock for landscape, exactly as <SI>W/<SI>L swap', async () => {
-        const portrait = stockPx({ orientation: 'portrait' });
-        const landscape = stockPx({ orientation: 'landscape' });
-        // 80x50 portrait; 50x80 landscape.
-        expect(portrait).toEqual({ w: 320, h: 200 });
-        expect(landscape).toEqual({ w: 200, h: 320 });
-        const p = await streamSize({ orientation: 'portrait' });
-        const l = await streamSize({ orientation: 'landscape' });
-        expect(p).toEqual({ W: 640, L: 400 });
-        expect(l).toEqual({ W: 400, L: 640 });
-        // The swap is the same in both worlds.
-        expect(landscape.w / portrait.w).toBeCloseTo(p.L / l.L, 5);
+    it('draws and sends the stock exactly as declared, landscape included', async () => {
+        // A landscape stock IS one whose width exceeds its length; nothing
+        // transposes. Both the canvas and the stream use width as written.
+        const wide = stockPx({ orientation: 'landscape' });
+        expect(wide).toEqual({ w: 320, h: 200 });
+        const streamed = await streamSize({ orientation: 'landscape' });
+        expect(streamed).toEqual({ W: 640, L: 400 });
+        // The same numbers the driver sends for a landscape page: its 4x2 in
+        // fixture declares W388 and no <SI>L, for a stock 96x48 mm.
+        const narrow = stockPx({ orientation: 'portrait', width: 50, height: 80 });
+        expect(narrow).toEqual({ w: 200, h: 320 });
     });
 });
 
-// The pointer space is a quarter turn away from the label space on a landscape
-// canvas, and the two conversions there are NOT inverses of each other: a point
-// maps (u,v) -> device (v, H-u), while a DIRECTION maps (du,dv) -> (-dv, du).
-// Writing the delta as the point's inverse moves a dragged field the wrong way
-// — and only on landscape, which no test here had ever set.
-describe('stockFrame: pointer space <-> label space on a turned canvas', () => {
-    const H = 320; // the turned label's height in px
-
-    it('is the identity for portrait, so nothing that worked can change', () => {
-        const pan = { x: 50, y: 30 };
-        expect(screenToLabel({ x: 180, y: 120 }, pan, false, H)).toEqual({ x: 130, y: 90 });
-        expect(screenToLabelDelta({ x: 25, y: -40 }, false)).toEqual({ x: 25, y: -40 });
-    });
-
-    it('round-trips a label point back through labelToScreen AND screenToLabel', () => {
-        // Both directions, because the pan is the outermost transform: the
-        // canvas translates the scene and then rotates the label's content, so
-        // labelToScreen must add the pan AFTER the turn. Folding it in first
-        // still round-trips through screenToLabel (which subtracts it first) —
-        // which is exactly why a one-way test would have missed the bug.
-        for (const pan of [{ x: 0, y: 0 }, { x: 50, y: 306 }, { x: 12, y: 7 }]) {
-            for (const [u, v] of [[0, 0], [35, 14], [91, 139]] as const) {
-                const device = labelToScreen({ x: u, y: v }, pan, true, H);
-                expect(screenToLabel(device, pan, true, H), `pan ${JSON.stringify(pan)}`).toEqual({ x: u, y: v });
-                // The turn itself: a label point (u,v) lands at (pan.x+v, pan.y+H-u).
-                expect(device).toEqual({ x: pan.x + v, y: pan.y + H - u });
-            }
-        }
-    });
-
-    it('round-trips a label point through the canvas transform', () => {
-        // Canvas transform: device = (pan + (v, H - u)). Feeding a device point
-        // back in must give the label point it came from.
-        const pan = { x: 12, y: 7 };
-        for (const [u, v] of [[0, 0], [50, 20], [H, 100]] as const) {
-            const device = { x: pan.x + v, y: pan.y + (H - u) };
-            expect(screenToLabel(device, pan, true, H)).toEqual({ x: u, y: v });
-        }
-    });
-
-    it('turns a DIRECTION the other way, which is what a drag needs', () => {
-        // A label +x step appears on the canvas as device +y; a label +y step
-        // appears as device -x.
-        const alongX = screenToLabel({ x: 0, y: 0 }, { x: 0, y: 0 }, true, H);
-        expect(alongX).toEqual({ x: H, y: 0 }); // the origin maps to the corner
-        // Compared as numbers: the turn produces -0 where a component is
-        // zero, which toEqual distinguishes from +0.
-        const down = screenToLabelDelta({ x: 0, y: 10 }, true);
-        expect([down.x, down.y]).toEqual([-10, 0]);
-        const right = screenToLabelDelta({ x: 10, y: 0 }, true);
-        expect([right.x + 0, right.y]).toEqual([0, 10]);
-    });
-
-    it('a direction is NOT the point conversion applied to a delta', () => {
-        // The two differ, and that difference is the bug this pins.
-        const delta = { x: 30, y: 0 };
-        const asDelta = screenToLabelDelta(delta, true);
-        const asPoint = screenToLabel(delta, { x: 0, y: 0 }, true, 0);
-        expect(asDelta).not.toEqual(asPoint);
-    });
-
-    it('printedLabelMm swaps for landscape, exactly as the stream does', () => {
-        expect(printedLabelMm({ width: 100, height: 60, orientation: 'portrait' })).toEqual({ widthMm: 100, heightMm: 60 });
-        expect(printedLabelMm({ width: 100, height: 60, orientation: 'landscape' })).toEqual({ widthMm: 60, heightMm: 100 });
-        expect(isTurned({ orientation: 'landscape' })).toBe(true);
-        expect(isTurned({ orientation: 'portrait' })).toBe(false);
+// Orientation is DESCRIPTIVE: a landscape stock is one whose width exceeds its
+// length, and nothing transposes. The app used to turn the stock a quarter for
+// it — `<SI>W`/`<SI>L`, every field origin, every rotation, and the canvas — and
+// the driver does not (samples/bartender-sweep-one-box-landscape.ipl, fixture in
+// tools/bartender/BuildParityLabels.cs:228: a box 0.6 in from the page's LEFT
+// edge prints there, on a stock that declares W388 for 96x48 mm).
+describe('printedLabelMm: the stock is what the settings say', () => {
+    it('never transposes, whatever the orientation says', () => {
+        expect(printedLabelMm({ width: 100, height: 60 })).toEqual({ widthMm: 100, heightMm: 60 });
+        expect(printedLabelMm({ width: 60, height: 100 })).toEqual({ widthMm: 60, heightMm: 100 });
     });
 });
 
@@ -380,12 +324,12 @@ describe('sheet preview cells match the printed label', () => {
         expect(cell).toEqual({ widthDots: 800, heightDots: 520 });
     });
 
-    it('landscape swaps, because that is what <SI>W/<SI>L send', () => {
+    it('landscape uses the width as written, which is what the stream sends', () => {
+        // The app used to transpose here. The driver does not: its landscape
+        // fixture declares W388 for a 96x48 mm stock and prints the box where
+        // it was authored.
         const cell = sheetCellDots(design('landscape'));
-        expect(cell).toEqual({ widthDots: 520, heightDots: 800 });
-        // The cell is the extent renderLabel draws into, so a wrong size here
-        // stretches the label rather than merely misfiling it.
-        expect(cell.heightDots).toBeGreaterThan(cell.widthDots);
+        expect(cell).toEqual({ widthDots: 800, heightDots: 520 });
     });
 
     it('agrees with printedLabelMm in both orientations', () => {
@@ -396,5 +340,56 @@ describe('sheet preview cells match the printed label', () => {
             expect(cell.widthDots).toBe(Math.round(widthMm * 8));
             expect(cell.heightDots).toBe(Math.round(heightMm * 8));
         }
+    });
+});
+
+// The invariant that was broken for landscape: a field authored at (x,y) must
+// come back out of the stream at (x,y). The old transpose moved it to
+// (height − y, x) with a quarter turn, so the same design printed somewhere the
+// designer never showed — measured as (55, −20) mm for a field authored at
+// (10, 10) on a 65x100 stock, i.e. off the label entirely.
+describe('generate -> parse: a field stays where it was authored', () => {
+    const boxAt = (x: number, y: number, rotation: 0 | 90 | 180 | 270 = 0): BoxField => ({
+        id: 1, type: 'box', name: 'B', x, y, rotation, width: 30, height: 20, thickness: 1,
+    });
+
+    const placedMm = async (orientation: 'portrait' | 'landscape', field: BoxField) => {
+        const d = designOf([field]);
+        d.labelSettings = { ...d.labelSettings, orientation };
+        const label = await parseViewerIPL(await generateIPL(d));
+        const el = label.elements.find(e => e.kind === 'box')!;
+        const b = elementVisualBox(el, 203);
+        const MM = 203 / 25.4;
+        return { x: b.x / MM, y: b.y / MM, w: b.w / MM, h: b.h / MM, f: el.f };
+    };
+
+    it('portrait: unrotated box lands on its own corner', async () => {
+        const p = await placedMm('portrait', boxAt(10, 10));
+        expect(p.x).toBeCloseTo(10, 1);
+        expect(p.y).toBeCloseTo(10, 1);
+        expect(p.f).toBe(0);
+    });
+
+    it('landscape: the SAME, with no transpose and no added rotation', async () => {
+        const l = await placedMm('landscape', boxAt(10, 10));
+        expect(l.x).toBeCloseTo(10, 1);
+        expect(l.y).toBeCloseTo(10, 1);
+        expect(l.f).toBe(0); // the old code forced f1 here
+    });
+
+    it('landscape: a field near the right edge stays inside the stock', async () => {
+        // The old transpose pushed fields off the label; this one is authored
+        // with 5mm to spare on a 100mm-wide stock.
+        const l = await placedMm('landscape', boxAt(65, 20));
+        // The 1-dot rounding of a half-thickness stroke shows up as 0.06mm.
+        expect(l.x).toBeCloseTo(65, 0);
+        expect(l.x + l.w).toBeLessThanOrEqual(100);
+    });
+
+    it('landscape: a rotation the user set is preserved, not compounded', async () => {
+        // The old code added 90 to every field's rotation on top of the
+        // transpose, so an authored 90 came back as 180.
+        const l = await placedMm('landscape', boxAt(10, 10, 90));
+        expect(l.f).toBe(1);
     });
 });

@@ -341,20 +341,23 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
     if (!design) return "";
     const { printerSettings, labelSettings, fields, dataSources } = design;
     const { dpi, quantity, mediaSenseMode, mediaType, printSpeed, darkness, directGraphics } = printerSettings;
-    const { width, height, orientation } = labelSettings;
+    const { width, height } = labelSettings;
     const EOL = '\n';
-    
-    const isLandscape = orientation === 'landscape';
-    // Swap dimensions for the printer in landscape mode
-    const printerLabelWidthMm = isLandscape ? height : width;
 
     const commands: string[] = [];
-    
+
     // --- 1. Initial Printer Setup ---
+    // The stock is exactly what the settings say: `<SI>W` is the width and
+    // `<SI>L` the length. There is no landscape transpose — a landscape stock
+    // is just one whose width exceeds its length, and both dimensions are
+    // written as entered. Verified against the driver's own output for a
+    // 4x2 in btLandscape page (samples/bartender-sweep-one-box-landscape.ipl:
+    // W388 and no <SI>L for a 96x48 mm stock), and against the page its fixture
+    // declares (BuildParityLabels.cs:228): the box authored 0.6 in from the
+    // page's LEFT edge lands there, not at a transposed coordinate.
     commands.push(`<STX>R<ETX>`);
-    commands.push(`<STX><ESC>C<SI>W${mmToDots(printerLabelWidthMm, dpi)}<ETX>`);
-    // Maximum label length (feed direction). Swapped for landscape, same as width.
-    commands.push(`<STX><SI>L${mmToDots(isLandscape ? width : height, dpi)}<ETX>`);
+    commands.push(`<STX><ESC>C<SI>W${mmToDots(width, dpi)}<ETX>`);
+    commands.push(`<STX><SI>L${mmToDots(height, dpi)}<ETX>`);
     
     const mediaModeMap = { gap: '1', reflective: '2', continuous: '0' };
     commands.push(`<STX><SI>T${mediaModeMap[mediaSenseMode]}<ETX>`);
@@ -418,12 +421,13 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
         if (field.bitmap.length === 0 || !field.bitmap[0]) continue;
         if (directGraphics) {
             const bitmap = bitmapRowsToMatrix(field.bitmap);
-            const labelHeightDots = mmToDots(isLandscape ? width : height, dpi);
-            // Landscape rotates the whole label, so the graphic's origin moves
-            // with it: new X is the distance from the portrait label's right
-            // edge, new Y the distance from its top (same rule as fields below).
-            const oxDots = mmToDots(isLandscape ? height - field.y - field.height : field.x, dpi);
-            const oyDots = mmToDots(isLandscape ? field.x : field.y, dpi);
+            // The graphic sits where it was drawn: the stock is not turned, so
+            // its origin is simply the field's own, and the label height is the
+            // settings' height. (The DG frame is bottom-up, which the encoder
+            // already handles.)
+            const labelHeightDots = mmToDots(height, dpi);
+            const oxDots = mmToDots(field.x, dpi);
+            const oyDots = mmToDots(field.y, dpi);
             directGraphicImages.push({
                 field,
                 hex: encodeColumnsToNibblizedRle(bitmap, oxDots, oyDots, labelHeightDots),
@@ -477,15 +481,7 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
     commands.push(`<STX>E${formatId};F${formatId}<ETX>`);
 
     visibleFields.filter(field => formatOf(field) === 0 || formatOf(field) === formatId - 1).forEach(field => {
-        let { x: x_mm, y: y_mm, rotation } = field;
-        
-        if (isLandscape) {
-            const original_x = x_mm;
-            const original_y = y_mm;
-            x_mm = height - original_y; // New X is distance from right edge of portrait label
-            y_mm = original_x; // New Y is distance from top edge of portrait label
-            rotation = (rotation + 90) % 360 as Field['rotation'];
-        }
+        const { x: x_mm, y: y_mm, rotation } = field;
         
         let final_ox_mm = x_mm;
         let final_oy_mm = y_mm;
