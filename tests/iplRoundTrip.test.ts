@@ -316,3 +316,63 @@ describe('parseIPL robustness', () => {
         expect(parseIPL('', DPI).fields).toHaveLength(0);
     });
 });
+
+// ---------------------------------------------------------------------------
+// The importer and the viewer must read fixed text the same way
+// ---------------------------------------------------------------------------
+//
+// parseIPL splits a frame body on ';' to get its field commands. That plain
+// split truncated the label's OWN TEXT: "H0;o10,10;d3,A;B" is one field whose
+// fixed data reads "A;B", but the split produced "d3,A" plus a stray "B", so
+// the importer yielded "A" where the viewer yielded "A;B".
+//
+// This file already promises "viewer parity" in three places, so the two are
+// meant to agree by contract — these tests are what hold it.
+describe('d3 fixed text with semicolons: importer/viewer parity (2026-09-29)', () => {
+    const stx = (f: string) => `<STX>${f}<ETX>`;
+    const importedText = (field: string): string => {
+        const design = parseIPL(
+            [stx('<ESC>P'), stx('E5;F5'), stx(field), stx('R')].join(''), DPI);
+        const f = design.fields[0] as TextField;
+        const ds = f.dataSource as { data?: string; defaultData?: string };
+        return ds.data ?? ds.defaultData ?? '';
+    };
+    const viewedText = (field: string): string => {
+        const el = parseViewerIPL(
+            [stx('<ESC>P'), stx('E5;F5'), stx(field), stx('R')].join(''))
+            .elements[0] as { source: { data: string } };
+        return el.source.data;
+    };
+
+    it('keeps the label\'s own semicolons, in both parsers', () => {
+        // All three are shapes the manual's own examples use.
+        for (const text of ['A;B', 'A;B;C', 'LOT;ROLLS;39', 'BASIS WT. 39-4838']) {
+            const field = `H0;o10,10;c0;d3,${text}`;
+            expect(importedText(field), `importer: ${text}`).toBe(text);
+            expect(viewedText(field), `viewer: ${text}`).toBe(text);
+        }
+    });
+
+    it('still reads a parameter placed AFTER the fixed data', () => {
+        // PRM 2.70 p.109 puts k12 after the data. The trailing run of
+        // well-formed parameters is split off, so this keeps working while the
+        // text above stays whole.
+        const design = parseIPL(
+            [stx('<ESC>P'), stx('E5;F5'), stx('H0;o35,40;c25;d3,Cat.;k12'), stx('R')].join(''), DPI);
+        const f = design.fields[0] as TextField;
+        expect((f.dataSource as { data: string }).data).toBe('Cat.');
+        expect(f.fontSize).toBe(12);
+    });
+
+    it('agrees with the viewer on every case in one pass', () => {
+        // The invariant, stated once and directly.
+        for (const field of [
+            'H0;o10,10;c0;d3,A;B',
+            'H0;o10,10;c0;d3,LOT;ROLLS;39',
+            'H0;o10,10;c0;d3,AB;h3;w2',
+            'H0;o35,40;c25;d3,Cat.;k12',
+        ]) {
+            expect(importedText(field), field).toBe(viewedText(field));
+        }
+    });
+});

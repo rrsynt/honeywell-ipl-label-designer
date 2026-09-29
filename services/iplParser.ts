@@ -12,6 +12,47 @@ const mmToDots = (mm: number, dpi: PrinterSettings['dpi']): number => {
     return Math.round(mm * DPI_MAP[dpi]);
 };
 
+/**
+ * A field parameter that follows the fixed data: ONE lowercase letter with a
+ * purely numeric value ("k12", "h3", "w2", "c25", "o10,40", "f0").
+ *
+ * Same shape and same purpose as FIELD_PARAM_AFTER_DATA in viewerParser — the
+ * two parsers read the same streams, so they must agree on where fixed text
+ * ends. Kept in step deliberately rather than shared, because the importer
+ * works on the already-split frame body while the viewer works on the whole
+ * frame; the RULE is what has to match, not the mechanics.
+ */
+const FIELD_PARAM_AFTER_DATA = /^[abcefhijkmnpqrstuwz][\d,.\-]+$/;
+
+/**
+ * Splits one frame body into field-command segments, keeping `d3` fixed text
+ * greedy.
+ *
+ * Plain `split(';')` truncated the label's own text: "H0;o10,10;d3,A;B" is one
+ * field whose fixed data READS "A;B" (PRM 2.70 p.109 puts a field parameter
+ * after the data the same way), but the split made it "d3,A" plus a stray "B",
+ * so the importer produced "A" where the viewer — which has always handled this
+ * — produced "A;B". Three comments in this file already promise "viewer
+ * parity"; this is the place that broke it.
+ *
+ * Only a TRAILING RUN of well-formed parameters is split off, so a
+ * param-shaped segment in the middle of intended text cannot cut it. That is
+ * the same rule and the same tradeoff as viewerParser.splitParams.
+ */
+const splitFieldCommand = (body: string): string[] => {
+    const di = body.search(/(?:^|;)d3,/);
+    if (di < 0) return body.split(';');
+    const head = body.slice(0, di).split(';').filter(s => s.length > 0);
+    const tail = body.slice(di + 1);              // from "d3," to the end
+    const segs = tail.split(';');
+    let cut = segs.length;
+    while (cut > 1 && FIELD_PARAM_AFTER_DATA.test(segs[cut - 1])) cut--;
+    // segs[cut - 1] ends with the frame's customary trailing ';' when present;
+    // strip exactly one, as the single-frame path does.
+    const d3Seg = segs.slice(0, cut).join(';').replace(/;$/, '');
+    return [...head, d3Seg, ...segs.slice(cut)];
+};
+
 function parseParameters(paramArray: string[]): { params: { [key: string]: string }, dataSource: FieldDataSource | null } {
     const params: { [key: string]: string } = {};
     let dataSource: FieldDataSource | null = null;
@@ -206,7 +247,7 @@ export const parseIPL = (
     }
 
     commands.forEach(commandStr => {
-        const commandParts = commandStr.split(';');
+        const commandParts = splitFieldCommand(commandStr);
         const commandIdMatch = commandParts[0].match(/^([HBLWU])(\d+)/);
         if (!commandIdMatch) {
             // A FIELD this model cannot hold. Only an In qualifies, and only an
