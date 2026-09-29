@@ -212,6 +212,7 @@ const drawPlaceholderBox = (
 const barcodeParams = (el: BarcodeElement): BarcodeParams => ({
     eanUpcVersion: el.eanUpcVersion,
     code39Mode: el.code39Mode,
+    code39Prefix: el.code39Prefix,
     code128StartSubset: el.code128StartSubset,
     code128Ucc: el.code128Ucc,
     code128KeepInterpretive: el.code128KeepInterpretive,

@@ -87,6 +87,20 @@ interface FieldParam {
  */
 const FIELD_PARAM_AFTER_DATA = /^[abcefhijkmnpqrstuwz][\d,.\-]+$/;
 
+/**
+ * `p` (Code 39 Prefix Character, PRM p.181) is the ONE field parameter whose
+ * value is not numeric: `p[n1][n2][n3][n4]` takes up to four characters from
+ * "A to Z (uppercase only) and 0 to 9", or a leading '@' meaning "clears all
+ * prefixes". It therefore fails FIELD_PARAM_AFTER_DATA, and a trailing
+ * `pABC4` after d3 was read as part of the PRINTED TEXT — the field drew
+ * "123;pABC4" where the printer draws "123" with an ABC4 prefix on the bars.
+ *
+ * Pinned to the manual's own alphabet and length so ordinary text ending in
+ * ";p…" still stays data: a lowercase letter, a fifth character, or any
+ * punctuation other than a leading '@' all fail this and remain text.
+ */
+const CODE39_PREFIX_AFTER_DATA = /^p(?:@|[A-Z0-9]{1,4})$/;
+
 const splitParams = (body: string): FieldParam[] => {
     // d3 (fixed text) is greedy up to a POINT parameter: everything after `d3,`
     // is the payload, ';' included, because splitting it by ';' truncated 'A;B'
@@ -110,7 +124,7 @@ const splitParams = (body: string): FieldParam[] => {
         const tail = body.slice(di + 4).replace(/;$/, '');
         const segs = tail.split(';');
         let cut = segs.length;
-        while (cut > 0 && FIELD_PARAM_AFTER_DATA.test(segs[cut - 1])) cut--;
+        while (cut > 0 && (FIELD_PARAM_AFTER_DATA.test(segs[cut - 1]) || CODE39_PREFIX_AFTER_DATA.test(segs[cut - 1]))) cut--;
         const data = segs.slice(0, cut).join(';');
         const params = head.length > 0 ? splitParamsPlain(head) : [];
         for (const seg of segs.slice(cut)) {
@@ -2280,6 +2294,39 @@ export class IPLViewerParser {
             this.printer.issue('info', 'picket-width-widened', `Bar width w1 in picket mode (bars across the web, f${this.rotationOf(params, cmd)}) prints as 2 dots — the printer cannot place a 1-dot bar across the head (PRM p.53).`, cmd);
         }
         const code39Mode = parts[0] === '0' ? parts[1] : undefined;
+        // Code 39 Prefix Character, Define (PRM p.181): "Defines the prefix for
+        // a Code 39 field. The prefix is only valid for Code 39 fields." Syntax
+        // p[n1][n2][n3][n4] — up to four characters, "A to Z (uppercase only)
+        // and 0 to 9", and "When you enter the @ character as n1, it clears all
+        // prefixes."
+        //
+        // It changes the PRINTED SYMBOL: measured against the encoder, each
+        // prefix character adds exactly one character's worth of modules
+        // (123 → 80 modules, P123 → 96, AB123 → 112 at the 3:1 default). The
+        // characters are part of the bar code but NOT of the interpretive
+        // field ("Prefix characters do not appear in the interpretive field"),
+        // which is why the prefix is carried as a parameter and prepended at
+        // encode time rather than merged into the field's data.
+        //
+        // Kept on the element only for Code 39: on any other symbology the
+        // manual scopes it away, the printer ignores it, and this preview
+        // drawing no prefix is the CORRECT result — not a divergence to warn
+        // about.
+        let code39Prefix: string | undefined;
+        const prefixRaw = params.find(p => p.key === 'p')?.value;
+        if (parts[0] === '0' && prefixRaw) {
+            // n1 = '@' is the documented clear spelling, not a prefix character.
+            const body = prefixRaw.startsWith('@') ? '' : prefixRaw;
+            const cleaned = body.replace(/[^A-Z0-9]/g, '');
+            if (body.length > 4) {
+                this.printer.issue('warning', 'code39-prefix-invalid', `Code 39 prefix "${prefixRaw}" is longer than the four characters the syntax allows (PRM p.181); the first four are used.`, cmd);
+            } else if (cleaned !== body) {
+                this.printer.issue('warning', 'code39-prefix-invalid', `Code 39 prefix "${prefixRaw}" contains characters outside the documented set (A-Z uppercase and 0-9, PRM p.181); they are ignored.`, cmd);
+            }
+            // Length is judged on the raw value (the syntax's n1..n4 slots);
+            // the four kept characters are the first four VALID ones.
+            code39Prefix = cleaned.slice(0, 4) || undefined;
+        }
         // c6[,m1][,m2][,m3] (PRM p.144): m1=1 selects UCC-128 SSCC, m2=1
         // keeps parentheses/spaces in the interpretive field, m3 forces the
         // start subset. m3 is only valid with m1=0 (PF4i/PM4i fw 2.10+).
@@ -2489,6 +2536,7 @@ export class IPLViewerParser {
         };
         if (eanUpcVersion !== undefined) element.eanUpcVersion = eanUpcVersion;
         if (code39Mode) element.code39Mode = code39Mode;
+        if (code39Prefix) element.code39Prefix = code39Prefix;
         if (code128StartSubset) element.code128StartSubset = code128StartSubset;
         if (code128Ucc && code128Ucc !== '0') element.code128Ucc = code128Ucc;
         if (code128Keep && code128Keep !== '0') element.code128KeepInterpretive = code128Keep;

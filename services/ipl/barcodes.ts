@@ -202,6 +202,9 @@ const code39Plan = (mode: string | undefined): { bcid: string; includecheck: boo
 export interface BarcodeParams {
     eanUpcVersion?: number;
     code39Mode?: string;
+    /** p — Code 39 prefix characters (1-4, A-Z0-9). Encoded into the symbol,
+     *  excluded from the interpretive field (PRM p.181). */
+    code39Prefix?: string;
     /** Code 128 c6,m3 start-subset selector: 1=A, 2=B, 3=C; 0/undefined = auto. */
     code128StartSubset?: string;
     /** Code 128 c6,m1: '1' = UCC-128 Serial Shipping Container Code (PRM p.144). */
@@ -316,7 +319,16 @@ export const buildBwipSpec = (symbology: string, data: string, params: BarcodePa
         const opts: Record<string, unknown> = {};
         if (plan.includecheck) opts.includecheck = true;
         if (plan.validatecheck) opts.validatecheck = true;
-        return { main: { bcid: plan.bcid, text: data, opts } };
+        // Code 39 prefix (PRM p.181): the characters are part of the SYMBOL,
+        // so they are prepended to the encoded text — measured, one prefix
+        // character adds exactly one character's worth of modules (80 → 96 at
+        // the 3:1 default). bwip has no prefix option, and prepending is what
+        // makes the printer-generated check digit (c0,1/c0,4/c0,7) cover the
+        // prefix the same way the printer's does. The HRI deliberately does
+        // NOT show them: "Prefix characters do not appear in the interpretive
+        // field" — interpretiveText receives the payload alone.
+        const text = params.code39Prefix ? params.code39Prefix + data : data;
+        return { main: { bcid: plan.bcid, text, opts } };
     }
     if (symbology === '6') {
         if (params.code128Ucc === '1') {
@@ -578,7 +590,8 @@ export const barcodeEncodeCount = (): number => encodeCount;
 /** Cache key capturing every input that can change the encoded symbol.
  *  NUL separators so data containing '|' cannot collide with other keys. */
 const paramsKey = (p: BarcodeParams): string =>
-    [p.eanUpcVersion ?? 0, p.code39Mode ?? '', p.code128StartSubset ?? '',
+    [p.eanUpcVersion ?? 0, p.code39Mode ?? '', p.code39Prefix ?? '',
+        p.code128StartSubset ?? '',
         p.code128Ucc ?? '', p.code128KeepInterpretive ?? '',
         p.ratio ?? 1, p.narrowDots ?? 0,
         p.qrModel ?? '', p.qrEcl ?? '', p.qrMask ?? '',

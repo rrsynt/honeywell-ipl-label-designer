@@ -25,6 +25,18 @@ const mmToDots = (mm: number, dpi: PrinterSettings['dpi']): number => {
 const FIELD_PARAM_AFTER_DATA = /^[abcefhijkmnpqrstuwz][\d,.\-]+$/;
 
 /**
+ * `p` (Code 39 Prefix Character, PRM p.181) is the ONE field parameter whose
+ * value is not numeric — `p[n1][n2][n3][n4]`, "A to Z (uppercase only) and 0
+ * to 9", or a leading '@' meaning "clears all prefixes". Without this, a
+ * trailing `pABC4` stayed glued to the fixed data exactly as it did in the
+ * viewer: "d3,123;pABC4" imported as the literal text "123;pABC4".
+ *
+ * Kept identical to viewerParser.CODE39_PREFIX_AFTER_DATA — the rule has to
+ * match across the two parsers even though the mechanics differ.
+ */
+const CODE39_PREFIX_AFTER_DATA = /^p(?:@|[A-Z0-9]{1,4})$/;
+
+/**
  * Splits one frame body into field-command segments, keeping `d3` fixed text
  * greedy.
  *
@@ -46,7 +58,7 @@ const splitFieldCommand = (body: string): string[] => {
     const tail = body.slice(di + 1);              // from "d3," to the end
     const segs = tail.split(';');
     let cut = segs.length;
-    while (cut > 1 && FIELD_PARAM_AFTER_DATA.test(segs[cut - 1])) cut--;
+    while (cut > 1 && (FIELD_PARAM_AFTER_DATA.test(segs[cut - 1]) || CODE39_PREFIX_AFTER_DATA.test(segs[cut - 1]))) cut--;
     // segs[cut - 1] ends with the frame's customary trailing ';' when present;
     // strip exactly one, as the single-frame path does.
     const d3Seg = segs.slice(0, cut).join(';').replace(/;$/, '');
@@ -366,6 +378,22 @@ export const parseIPL = (
                          '1': 'printer-generated', '2': 'host-verifies',
                      };
                      barcodeField.code39_checkDigit = checkDigitRev[cParts[1]] || 'none';
+                 }
+                 // Code 39 Prefix Character, Define (PRM p.181). The prefix is
+                 // part of the printed SYMBOL, so dropping it silently would
+                 // change the bar pattern — a real loss, not a cosmetic one.
+                 // The design model has no prefix concept, so it is reported
+                 // the same way the interpretive field is: the caller tells the
+                 // user what the import could not carry. Only Code 39 is worth
+                 // a word — "only valid for Code 39 fields", so on any other
+                 // symbology the printer ignores it and nothing is lost.
+                 const prefixParam = params['p'];
+                 if (symbology === '0' && prefixParam && onNotice) {
+                     const shown = prefixParam.startsWith('@') ? 'p@' : `p${prefixParam}`;
+                     onNotice({
+                         command: shown.slice(0, 24),
+                         message: `Code 39 prefix "${shown.slice(0, 24)}" was not imported: this designer has no prefix setting, so the bar code regenerates without it. The characters are part of the printed symbol (PRM p.181).`,
+                     });
                  }
                  if (symbology === '6' && cParts.length >= 4) {
                      const subsetRev: { [key: string]: 'auto' | 'a' | 'b' | 'c' } = {

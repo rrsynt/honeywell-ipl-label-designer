@@ -102,6 +102,9 @@ export interface BarcodeElement extends ElementBase {
     source: FieldSource;
     /** c0,m — Code 39 charset/check-digit mode 0-8 (PRM p.150). */
     code39Mode?: string;
+    /** p — Code 39 prefix characters, 1-4 of A-Z0-9 (PRM p.181). They are
+     * encoded into the symbol but "do not appear in the interpretive field". */
+    code39Prefix?: string;
     /** c6,m3 — Code 128 forced start subset: 1=A, 2=B, 3=C. */
     code128StartSubset?: string;
     /** c6,m1 — '1' selects UCC-128 Serial Shipping Container Code. */
