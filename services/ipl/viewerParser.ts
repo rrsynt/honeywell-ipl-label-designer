@@ -1044,6 +1044,30 @@ export class IPLViewerParser {
             this.appendGraphicColumn(parseInt(m[1], 10), m[2]);
             return;
         }
+        // Command Tables, Load (bare C, PRM p.182): "Downloads a command table,
+        // with t as the command table identifier" — t=1 redefines the <ESC>
+        // command table itself, 0 the print commands, 2 the <SI> shift table.
+        //
+        // Must precede the /^[A-Z]/ catch-all below, which otherwise routes it
+        // to parseFieldFrame and reports it as an unrecognized frame — hiding
+        // that this is a command with a name and a known effect.
+        //
+        // Deliberately NOT modelled: the manual scopes it to the NEXT session
+        // ("New commands become effective after you reset the printer or turn
+        // the power off and back on", p.182), so it cannot change how THIS
+        // stream parses. Loading a table would give the renderer state it could
+        // never verify against the stream in front of it.
+        if (/^C\d*(?:,|$)/.test(frame)) {
+            const table = /^C(\d+)/.exec(frame);
+            const which = table
+                ? { '0': 'print-mode', '1': 'escape', '2': 'shift', '3': 'status-response', '4': 'protocol' }[table[1]]
+                    ?? `table ${table[1]}`
+                : 'command';
+            this.printer.issue('info', 'command-table-load',
+                `Command Tables, Load redefines the ${which} command table. It takes effect only after a printer reset, so it does not change how this stream is read.`,
+                frame.slice(0, 24));
+            return;
+        }
         if (/^[UVBLH]\d*$/.test(frame) || /^[A-Z]/.test(frame)) {
             this.parseFieldFrame(frame);
             return;

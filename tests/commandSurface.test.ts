@@ -120,6 +120,46 @@ describe('the <ESC> surface, swept the same way', () => {
     });
 });
 
+describe('the interface tables (Appendix D) are swept too', () => {
+    // PRM 2.70 Appendix D lists three tables the host can REDEFINE: t=0 print
+    // commands, t=1 the <ESC> command table, t=2 the <SI> shift table. Sweeping
+    // t=1 against parseEscFrame's dispatch was mostly a re-check of the <ESC>
+    // sweep above — most of its letters are already handled — with one real
+    // find: the bare "C" command that loads a table in the first place.
+
+    it('the manual still documents the tables and their reset scoping', () => {
+        const body = readFileSync(join(
+            __dirname, '..', 'docs', 'manuals', 'IPL_2.70_Programmers_Reference_Manual.txt'), 'utf8');
+        expect(body).toContain('Escape Print Commands (t=1)');
+        expect(body).toContain('Shift Print Commands (t = 2)');
+        // The sentence that decides the whole feature: a loaded table cannot
+        // affect the stream that loads it, so the renderer must not try.
+        expect(body).toContain('New commands become effective after you reset the printer');
+        // And the t=1 table's own distinctive entries, so a reworded appendix
+        // is noticed rather than silently emptying this sweep.
+        expect(body).toContain('Set Field Increment');
+        expect(body).toContain('Disable Increment/Decrement');
+    });
+
+    it('Command Tables, Load is reported by name, not as an unknown frame', () => {
+        // It used to fall to the /^[A-Z]/ catch-all and be reported as an
+        // unrecognized frame, hiding that it is a named command whose effect is
+        // known and (per the manual) deliberately out of scope for this stream.
+        const stx = (f: string) => `<STX>${f}<ETX>`;
+        const codes = (frame: string) => parseViewerIPL(
+            [stx('<ESC>P'), stx('E1;F1;'), stx('H1;o20,20;c25;k14'), stx(frame), stx('R'), stx('<ESC>E1')].join(''),
+        ).issues.map(i => i.code);
+        for (const frame of ['C', 'C1,16,20,43', 'C0,00,01', 'C2,41,43']) {
+            const got = codes(frame);
+            expect(got, `${frame} should be a named command`).toContain('command-table-load');
+            expect(got, `${frame} must not be an unknown frame`).not.toContain('unknown-frame');
+        }
+        // <ESC>C is a DIFFERENT command (Select Advanced Mode) and must not be
+        // caught by the new rule; the same for field frames starting with C.
+        expect(codes('<ESC>C'), '<ESC>C is Advanced Mode').not.toContain('command-table-load');
+    });
+});
+
 describe('the sweep that found them is reproducible', () => {
     it('the manual\'s command index is still the authority for the list', () => {
         // The two commands above were found by enumerating this file. If it
