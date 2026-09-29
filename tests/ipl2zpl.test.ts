@@ -97,3 +97,44 @@ describe('ipl2zpl keeps prior behavior', () => {
         }
     });
 });
+
+// ---------------------------------------------------------------------------
+// Nothing is dropped in silence (2026-09-29)
+// ---------------------------------------------------------------------------
+//
+// `if (symCmd)` emitted nothing for a symbology with no ZPL counterpart. The
+// cross-check then compared a label that had LOST a bar code against one that
+// still had it, and the ink totals came out closer than they should — a pass
+// for the wrong reason. The viewer draws all of these; only the converter
+// lacked a mapping.
+describe('ipl2zpl keeps every mapped-or-not field visible', () => {
+    const streamFor = (field: string): string => [
+        '<STX><ESC>P<ETX>', '<STX><SI>W812<ETX>', '<STX><SI>L406<ETX>',
+        '<STX>E1;F1<ETX>', `<STX>${field}<ETX>`, '<STX>R<ETX>',
+    ].join('');
+
+    it('emits something for every symbology the viewer can draw', () => {
+        // The ids the viewer renders (see tests/barcodeSymbologies.test.ts).
+        // Whether ZPL has an equivalent is the converter's problem; losing the
+        // field is nobodys answer.
+        for (const sym of ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+            '11', '12', '14', '16', '17', '18', '19', '20', '22']) {
+            const zpl = iplToZpl(streamFor(`B1;o10,10;c${sym};h50;w2;d3,1234`), 203);
+            expect(zpl, `c${sym} vanished`).toMatch(/\^FD/);
+        }
+    });
+
+    it('names the missing equivalent instead of silently omitting it', () => {
+        for (const sym of ['18', '20', '14', '9', '11']) {
+            const zpl = iplToZpl(streamFor(`B1;o10,10;c${sym};h50;w2;d3,1234`), 203);
+            expect(zpl, `c${sym}`).toContain(`no ZPL equivalent for c${sym}`);
+        }
+    });
+
+    it('does not mark the symbologies that DO have one', () => {
+        for (const sym of ['0', '6', '17']) {
+            const zpl = iplToZpl(streamFor(`B1;o10,10;c${sym};h50;w2;d3,1234`), 203);
+            expect(zpl, `c${sym}`).not.toContain('no ZPL equivalent');
+        }
+    });
+});

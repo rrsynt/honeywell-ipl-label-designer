@@ -173,7 +173,17 @@ export function iplToZpl(iplCode, dpi = 203) {
                 '7': ({ 13: '^BEN,' + hri, 8: '^B8N,' + hri, 12: '^BUN,' + hri })[data.replace(/\D/g, '').length] || '^BCN,' + hri,
                 '12': `^B7N,${hri},4,5,60`, '17': `^BXN,${Math.max(3, wMod * 2)},200`,
             }[sym];
-            if (symCmd) out.push(symCmd, `^FD${zplEscape(data)}^FS`, '^FWN');
+            if (symCmd) {
+                out.push(symCmd, `^FD${zplEscape(data)}^FS`, '^FWN');
+            } else {
+                // A symbology with no ZPL counterpart. Dropping it silently made
+                // the Labelary cross-check compare a label that had lost a bar
+                // code against one that still had it, and the ink totals came
+                // out closer than they should — a pass for the wrong reason.
+                // The reader is told instead, and the payload is kept as text so
+                // the area is not blank.
+                out.push('^FX', `^FD[no ZPL equivalent for c${sym}]^FS`, '^FWN');
+            }
         } else if (kind === 'L') {
             const len = intP(params, 'l', 100), th = Math.max(2, intP(params, 'w', 2));
             const [vx, vy] = visualTopLeft(oRaw[0], oRaw[1], f, len, th);
