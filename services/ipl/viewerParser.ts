@@ -1002,6 +1002,66 @@ export class IPLViewerParser {
     }
 
     /**
+     * Page, Delete (`sn`, PRM 2.70 p.206): "Deletes page n." The page is a
+     * printer-memory object, so deleting one that was never defined prints
+     * nothing and loses nothing — silence is correct there. Deleting the page
+     * that THIS stream defined is the case that matters: the composition it
+     * described is gone, and a preview still drawing it would show a label the
+     * printer no longer holds. Reported, because that difference is invisible
+     * in the stream that caused it.
+     */
+    private deletePage(id: number): void {
+        const page = this.printer.label.page;
+        if (page && page.id === id) {
+            this.printer.label.page = undefined;
+            this.printer.issue('warning', 'page-deleted',
+                `Page ${id} is deleted, so the composition this stream defined no longer applies.`,
+                `s${id}`);
+        }
+    }
+
+    /**
+     * Format Position From Page, Delete (`mp`, PRM 2.70 p.194): "Deletes the
+     * format position p from a page, where p is the page position." Same family
+     * as `sn`, and silent in the same two ways: no path at all in a chain, and
+     * only a generic "unrecognized frame" standing alone.
+     *
+     * Modelled rather than reported, because unlike `e` the effect is fully
+     * determined: the placement leaves the page and the format it carried stops
+     * contributing to the label. Deleting a position that was never assigned
+     * removes nothing, so that case stays silent.
+     */
+    private deletePagePosition(position: string): void {
+        const page = this.printer.label.page;
+        if (!page) return;
+        const before = page.placements.length;
+        page.placements = page.placements.filter(p => p.position !== position);
+        if (page.placements.length !== before) {
+            this.printer.issue('info', 'page-position-deleted',
+                `Format position ${position} is removed from page ${page.id}, so the format it carried no longer prints.`,
+                `m${position}`);
+        }
+    }
+
+    /**
+     * Data Source for Format in a Page, Define (`en[,m1][,m2]`, PRM p.183) —
+     * the page-level analogue of d2: n=1 makes a format the SLAVE of another
+     * format at position m1, with m2 as the data offset.
+     *
+     * Reported, not modelled, for the same reason <SI>o0 and <SI>z1 are: the
+     * effect depends on facts the page composition does not carry here — which
+     * format sits at the master position, and what the host sends at print
+     * time — and a guess in that space is what this project has paid for twice.
+     * The alternative was silence, which is what the sweep exists to remove.
+     */
+    private reportPageDataSource(args: string, frame: string): void {
+        if (!/^1(?:[,;\s]|$)/.test(args)) return; // n=0 is the documented default: nothing changes.
+        this.printer.issue('warning', 'page-data-source-modelled',
+            `Data Source for Format in a Page (e${args}) makes a format the slave of another format on the page, which this preview does not reproduce: the slave takes its data from the master format at print time.`,
+            frame.slice(0, 24));
+    }
+
+    /**
      * Duplicate field ids overwrite each other on a real printer; the viewer
      * keeps only the last definition and flags the conflict.
      */
@@ -1091,6 +1151,27 @@ export class IPLViewerParser {
         // creates page n and assigns formats to positions with offsets.
         if (/^S\d+/.test(frame)) {
             this.parsePageFrame(frame);
+            return;
+        }
+        // Standalone "sn" — Page, Delete (PRM 2.70 p.206). Must precede the
+        // /^[A-Z]/ catch-all, which would otherwise report it as an
+        // unrecognized frame. `m<p>` (Format Position From Page, Delete) is the
+        // same family; it is a lowercase field-looking letter, so it is handled
+        // with the page commands and not as a parameter.
+        if (/^s\d+$/.test(frame)) {
+            this.deletePage(parseInt(frame.slice(1), 10));
+            return;
+        }
+        // Standalone "mp" — Format Position From Page, Delete (PRM p.194), and
+        // "en…" — Data Source for Format in a Page, Define (PRM p.183). Both are
+        // in the Page Editing table (p.94) and both were reaching the
+        // /^[A-Z]/ catch-all (for `e`) or nothing at all (for `m`).
+        if (/^m[a-z]$/.test(frame)) {
+            this.deletePagePosition(frame.charAt(1));
+            return;
+        }
+        if (/^e\d/.test(frame)) {
+            this.reportPageDataSource(frame.slice(1), frame);
             return;
         }
         // Standalone "qn" — Format Direction in a Page (PRM p.192) sent
@@ -1301,6 +1382,65 @@ export class IPLViewerParser {
                     flush();
                     this.openFormat(parseInt(s.slice(1), 10), `${s};${partner}`.slice(0, 24));
                     i = partnerAt;
+                    continue;
+                }
+            }
+            // Page composition commands (PRM 2.70 p.94 "Page Editing Commands":
+            // e M m O q, plus "Page, Create or Edit" S and
+            // "Page, Delete" s from the Programming table) reach their own
+            // parsers only as standalone frames. In a chain they had no path at
+            // all, and the failure was SILENT — worse than a dropped command:
+            //
+            //   <STX>S3;Ma,1;Mb,2<ETX>     composed the page
+            //   <STX>s3;S3;Ma,1;Mb,2<ETX>  produced NO page at all, no warning
+            //
+            // The second is not hypothetical: it is the form the shipped
+            // samples/bartender-auto.ipl sends (line 466). `s3` is not in
+            // COMMAND_START, so it never started a buffer; `S3;Ma,1;Mb,2` then
+            // arrived as a PARAMETER of the empty buffer and the whole page
+            // definition went into it — composition lost, and with it every
+            // position offset the page applied.
+            //
+            // `s<n>` (Page, Delete) and `m<p>` (Format Position From Page,
+            // Delete) are handled where the page is complete, so an edge that
+            // deletes a page must not be mistaken for a parameter either.
+            // Anchored on letter+value so a segment that merely STARTS with
+            // one of these letters stays data.
+            if (!inD3Data) {
+                if (/^S\d+/.test(s)) {
+                    flush();
+                    // The page frame's parameters are separate segments once
+                    // the chain is split, so the frame has to be REBUILT before
+                    // it is handed to parsePageFrame — dispatching the bare
+                    // "S3" composes a page with no placements, which is how the
+                    // first version of this fix turned a lost page into an
+                    // empty one. Only the documented page-parameter shapes are
+                    // consumed (Mp,n assign, On,m offset, qn rotation), so the
+                    // next real command still ends the frame.
+                    const parts = [s];
+                    while (i + 1 < segments.length) {
+                        const nxt = segments[i + 1].trim();
+                        if (/^M[a-z],\d+$/.test(nxt) || /^O-?\d+,-?\d+$/.test(nxt) || /^q[0-3]$/.test(nxt)) {
+                            parts.push(nxt);
+                            i++;
+                        } else break;
+                    }
+                    this.parsePageFrame(parts.join(';'));
+                    continue;
+                }
+                if (/^s\d+$/.test(s)) {
+                    flush();
+                    this.deletePage(parseInt(s.slice(1), 10));
+                    continue;
+                }
+                if (/^m[a-z]$/.test(s)) {
+                    flush();
+                    this.deletePagePosition(s.charAt(1));
+                    continue;
+                }
+                if (/^e\d/.test(s)) {
+                    flush();
+                    this.reportPageDataSource(s.slice(1), s);
                     continue;
                 }
             }
