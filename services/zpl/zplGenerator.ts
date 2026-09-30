@@ -120,10 +120,22 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
         const ori = ORIENTATION[field.rotation / 90] ?? 'N';
 
         if (field.type === 'text') {
-            const h = dots(field.fontSize * (25.4 / 72));
+            // Size like the designer and the other generators: a BITMAP font is
+            // sized by its magnifications (h_mag x w_mag on the cell), an OUTLINE
+            // font by its point size. Reading fontSize for both ignored h/w on a
+            // bitmap field (the designer hides the point-size editor for those),
+            // so a field drawn as 7x18 dots exported at a default 34x34.
+            const face = FONT_MAP[field.font];
+            const isBitmap = face?.type === 'bitmap';
+            const h = isBitmap
+                ? Math.max(1, (face.baseHeight ?? 9) * (field.h_mag || 1))
+                : dots(field.fontSize * (25.4 / 72));
+            const w = isBitmap
+                ? Math.max(1, (face.baseWidth ?? 7) * (field.w_mag || 1))
+                : h;
             const data = escapeFd(fieldData(field, design));
-            lines.push(`^FO${origin.x},${origin.y}`, `^A0${ori},${h},${h}`, `^FD${data}^FS`);
-            if (!FONT_MAP[field.font]) warnings.push(`"${field.name}" uses an uploaded font. ZPL prints it as font 0 at the same size, which a printer may render narrower or wider.`);
+            lines.push(`^FO${origin.x},${origin.y}`, `^A0${ori},${h},${w}`, `^FD${data}^FS`);
+            if (!face) warnings.push(`"${field.name}" uses an uploaded font. ZPL prints it as font 0 at the same size, which a printer may render narrower or wider.`);
             continue;
         }
         if (field.type === 'barcode') {

@@ -46,6 +46,24 @@ describe('generateZPL', () => {
         expect(zpl).toContain('^LL800');
     });
 
+    it('sizes a bitmap font by h_mag/w_mag and an outline font by point size', () => {
+        // The designer (and EPL/TSPL) size a bitmap font from its cell x
+        // magnification and hide the point-size editor for one; ZPL read
+        // fontSize for both, so a bitmap field drawn 7x18 dots exported at a
+        // default 34x34. ^A0 is h,w — cell height x w_mag, cell width x w_mag.
+        const sizeOf = (over: Partial<Field>) => {
+            const f = { id: 1, type: 'text', name: 'T', x: 10, y: 10, rotation: 0,
+                dataSource: { type: 'fixed', data: 'Hi' }, font: '0', fontSize: 12, h_mag: 1, w_mag: 1, ...over } as Field;
+            return ((generateZPL(design([f])).zpl.match(/\^A0[^\^]*/) ?? [''])[0]).trim();
+        };
+        // Font 0 is 7x9; h_mag 2, w_mag 3 -> 9*2=18 tall, 7*3=21 wide.
+        expect(sizeOf({ h_mag: 2, w_mag: 3 })).toBe('^A0N,18,21');
+        // A bitmap field ignores fontSize even when it is set.
+        expect(sizeOf({ font: '0', fontSize: 99, h_mag: 1, w_mag: 1 })).toBe('^A0N,9,7');
+        // An outline font (25, the designer default) still uses the point size.
+        expect(sizeOf({ font: '25', fontSize: 20 })).toBe('^A0N,56,56');
+    });
+
     it('round-trips a text field back to the same visual position', () => {
         const { zpl } = generateZPL(design([text()]));
         const label = parseZPL(zpl);
