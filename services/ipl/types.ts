@@ -155,6 +155,9 @@ export interface BarcodeElement extends ElementBase {
     /** c17,m1 — Data Matrix ECC version, '100' or '200' (PRM p.162). They are
      *  different encodings with different parity, so this is not a preference. */
     dmVersion?: string;
+    /** c17,m2 — Data Matrix shape: 'rectangle' for m2=1 (PRM p.162); square is
+     *  the default and stays unset. */
+    dmShape?: string;
     /** EPL b…D,v1 — an INVERSE Data Matrix, white on black (EPL manual p. 3-20). */
     inverse?: boolean;
     /** EPL b…D,c/r — the symbol's column and row count. */

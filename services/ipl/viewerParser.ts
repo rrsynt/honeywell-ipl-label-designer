@@ -2800,6 +2800,8 @@ export class IPLViewerParser {
         let maxiMode: string | undefined;
         // c17,m1 — the Data Matrix ECC version, 100 or 200 (PRM p.162).
         let dmVersion: string | undefined;
+        // c17,m2 — 0 square (default), 1 rectangular (PRM p.162).
+        let dmShape: string | undefined;
         if (parts[0] === '21') {
             // EAN.UCC Composite c21[,m1][,m2][,m3][,m4][,m5][,m6] (PRM p.162):
             // m1 selects the linear component and the CC variant paired with it
@@ -2914,6 +2916,29 @@ export class IPLViewerParser {
                 else {
                     this.printer.issue('warning', 'dm-version-invalid',
                         `Data Matrix version c17,m1="${v}" is not 100 (ECC-100) or 200 (ECC-200) (PRM p.162); the encoder's default is used.`, cmd);
+                }
+            }
+            if (dmVersion === '100') {
+                // ECC-100 and ECC-200 carry DIFFERENT PARITY, so a stream asking
+                // for ECC-100 is asking for a different symbol. bwip's datamatrix
+                // encoder is ECC-200 only — it has no ECC-100 mode, and forcing
+                // an option it does not know (a former `format: 'full'`) made it
+                // THROW, which dropped the field as "data fails encoding rules".
+                // An honest notice naming the real divergence replaces that:
+                // the field draws, as ECC-200, and says so.
+                this.printer.issue('info', 'dm-ecc100-unsupported',
+                    'Data Matrix ECC-100 (c17,m1=100) has no encoder here; the field is drawn as ECC-200, which carries different parity (PRM p.162).', cmd);
+            }
+            // m2 selects the symbol's SHAPE (PRM p.162): 0 square (default),
+            // 1 rectangular. bwip's datamatrix encoder takes format=
+            // 'rectangle' and genuinely draws the wide 36x12 form, so this is
+            // carried to the encoder rather than only named.
+            const shape = parts[2];
+            if (shape !== undefined && shape.trim() !== '' && shape.trim() !== '0') {
+                if (shape.trim() === '1') dmShape = 'rectangle';
+                else {
+                    this.printer.issue('warning', 'dm-shape-invalid',
+                        `Data Matrix shape c17,m2="${shape}" is not 0 (square) or 1 (rectangular) (PRM p.162); drew a square symbol.`, cmd);
                 }
             }
             if (parts.slice(3).some(x => x !== undefined && x.trim() !== '')) {
@@ -3031,7 +3056,7 @@ export class IPLViewerParser {
                 qrModel, qrEcl, qrMask, microColumns, microRows,
                 pdfColumns, pdfEcLevel, pdfTruncate,
                 compositeVersion, compositeColumns, compositeRowHeight,
-                rssVersion, rssSepHeight, rssSegments, maxiMode, dmVersion,
+                rssVersion, rssSepHeight, rssSegments, maxiMode, dmVersion, dmShape,
             })) {
                 this.printer.issue('error', 'barcode-data-invalid', parts[0] === '6' && code128Ucc === '1'
                     ? `UCC-128 (c6,1) requires exactly 19 numeric characters (parentheses and spaces may be kept for the interpretive). Data: "${encodable.slice(0, 24)}"`
@@ -3074,6 +3099,7 @@ export class IPLViewerParser {
         if (rssSegments) element.rssSegments = rssSegments;
         if (maxiMode) element.maxiMode = maxiMode;
         if (dmVersion) element.dmVersion = dmVersion;
+        if (dmShape) element.dmShape = dmShape;
 
         this.printer.commitElement(element);
     }

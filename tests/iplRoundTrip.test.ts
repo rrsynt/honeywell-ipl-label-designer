@@ -514,25 +514,45 @@ describe('Data Matrix parameters survive both languages (2026-09-30)', () => {
         const ir = parseViewerIPL([stx('<ESC>C<SI>W812<SI>L400'), stx('<ESC>P'),
             stx('E1;F1;'), stx(spec), stx('R')].join(''));
         const el = ir.elements.find(e => e.kind === 'barcode') as
-            { dmVersion?: string; dmCols?: string; dmRows?: string; inverse?: boolean } | undefined;
+            { dmVersion?: string; dmShape?: string; dmCols?: string; dmRows?: string; inverse?: boolean } | undefined;
         return { el, codes: ir.issues.map(i => i.code) };
     };
     const eplEl = (src: string) => {
         const r = parseEPL(`N\n${src}\nP1\n`);
         const el = r.elements[0] as
-            { dmVersion?: string; dmCols?: string; dmRows?: string; inverse?: boolean } | undefined;
+            { dmVersion?: string; dmShape?: string; dmCols?: string; dmRows?: string; inverse?: boolean } | undefined;
         return { el, codes: r.issues.map(i => i.code) };
     };
 
-    it('carries the IPL ECC version through to the encoder', () => {
+    it('names ECC-100 instead of forcing an option the encoder rejects', () => {
         // ECC-100 and ECC-200 are different encodings, so this is not a
-        // rendering preference: a stream asking for ECC-100 was drawn ECC-200.
-        const spec = buildBwipSpec('17', 'DATA', { dmVersion: '100' });
-        expect((spec?.main.opts as Record<string, unknown>)?.format, 'ECC-100 encodes as the full format').toBe('full');
-        // The control: ECC-200 is the encoder's own default, so no option.
-        expect((buildBwipSpec('17', 'DATA', { dmVersion: '200' })?.main.opts as Record<string, unknown>)?.format)
+        // rendering preference. But bwip's datamatrix is ECC-200 ONLY — there
+        // is no ECC-100 mode, and the former `format: 'full'` guess made the
+        // encoder THROW, so an ECC-100 field dropped out as "data fails
+        // encoding rules" — an error blaming the data for an encoder gap.
+        // Now the field draws (as ECC-200) and the substitution is named.
+        expect((buildBwipSpec('17', 'DATA', { dmVersion: '100' })?.main.opts as Record<string, unknown>)?.format)
             .toBeUndefined();
-        expect(iplEl('B1;o10,10;c17,100;d3,DATA').el?.dmVersion).toBe('100');
+        const { el, codes } = iplEl('B1;o10,10;c17,100;d3,DATA');
+        expect(el?.dmVersion).toBe('100');
+        expect(codes).toContain('dm-ecc100-unsupported');
+        // The control: ECC-200 is the encoder's own default, so nothing to say.
+        expect(iplEl('B1;o10,10;c17,200;d3,DATA').codes).toEqual([]);
+    });
+
+    it('reads c17,m2 and draws the rectangular Data Matrix', () => {
+        // m2 selects the SHAPE (PRM p.162): 0 square, 1 rectangular. It was
+        // never read — parts[1] is m1 and parts.slice(3) is m3-m6 — so a
+        // rectangular request drew square in silence.
+        const { el, codes } = iplEl('B1;o10,10;c17,200,1;d3,123456789012345678901234567890');
+        expect(el?.dmShape).toBe('rectangle');
+        expect(codes).not.toContain('dm-shape-invalid');
+        expect((buildBwipSpec('17', 'DATA', { dmShape: 'rectangle' })?.main.opts as Record<string, unknown>)?.format)
+            .toBe('rectangle');
+        // Controls: m2=0 is the square default (no option, no message), and an
+        // out-of-range m2 is named rather than misread as rectangular.
+        expect(iplEl('B1;o10,10;c17,200,0;d3,DATA').el?.dmShape).toBeUndefined();
+        expect(iplEl('B1;o10,10;c17,200,9;d3,DATA').codes).toContain('dm-shape-invalid');
     });
 
     it('rejects an ECC version that is not 100 or 200', () => {

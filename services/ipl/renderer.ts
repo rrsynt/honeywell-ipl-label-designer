@@ -234,6 +234,7 @@ const barcodeParams = (el: BarcodeElement): BarcodeParams => ({
     rssSegments: el.rssSegments,
     maxiMode: el.maxiMode,
     dmVersion: el.dmVersion,
+    dmShape: el.dmShape,
     inverse: el.inverse,
     dmCols: el.dmCols,
     dmRows: el.dmRows,

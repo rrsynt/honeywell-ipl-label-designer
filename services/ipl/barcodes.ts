@@ -251,6 +251,9 @@ export interface BarcodeParams {
     maxiMode?: string;
     /** c17,m1 — Data Matrix ECC version, '100' or '200' (PRM p.162). */
     dmVersion?: string;
+    /** c17,m2 — Data Matrix shape: 'rectangle' selects bwip's rectangular
+     *  format (PRM p.162); square is the encoder default and stays unset. */
+    dmShape?: string;
     /** EPL b…D,v1 — an inverse Data Matrix, white on black. */
     inverse?: boolean;
     /** EPL b…D,c/r — the symbol's column and row count. */
@@ -515,7 +518,11 @@ export const buildBwipSpec = (symbology: string, data: string, params: BarcodePa
         //   EPL h   module size, handled by the renderer rather than here
         //   EPL v   inverse (white on black)
         const opts: Record<string, unknown> = {};
-        if (params.dmVersion === '100') opts.format = 'full';
+        // c17,m1=100 asks for ECC-100, but this encoder is ECC-200 only:
+        // there is no option for it, and a guess the encoder rejects (the
+        // former `format: 'full'`) made every ECC-100 field throw and drop.
+        // The parser names the substitution; here the field draws as ECC-200.
+        if (params.dmShape === 'rectangle') opts.format = 'rectangle'; // c17,m2=1
         // Rejecting the size is the encoder's own job — the manual's symbol
         // geometries table is what decides which c/r pairs are real — so an
         // out-of-range pair is passed through and the encoder refuses it,
@@ -633,7 +640,7 @@ const paramsKey = (p: BarcodeParams): string =>
         p.compositeVersion ?? '', p.compositeColumns ?? '', p.compositeRowHeight ?? '',
         p.rssVersion ?? '', p.rssSepHeight ?? '', p.rssSegments ?? '',
         p.maxiMode ?? '', p.dmVersion ?? '', p.inverse ? '1' : '',
-        p.dmCols ?? '', p.dmRows ?? ''].join('\x00');
+        p.dmCols ?? '', p.dmRows ?? '', p.dmShape ?? ''].join('\x00');
 
 /**
  * True when the field is painted from bwip raw() module runs instead of the
