@@ -438,3 +438,54 @@ describe('the checked-in EPL sample', () => {
         expect(label.issues.filter(i => i.level === 'error')).toHaveLength(0);
     });
 });
+
+// q and Q are the label's own size (manual pp. 3-89, 3-91), in dots. They were
+// ignored, so the viewer sized every EPL page from its content bbox instead:
+// a 4x2 in landscape label measured 91x21 mm — the ink — rather than the paper.
+describe('label size from q and Q', () => {
+    const withSize = (q?: number, Q?: string) => parseEPL([
+        'N',
+        ...(q === undefined ? [] : [`q${q}`]),
+        ...(Q === undefined ? [] : [`Q${Q}`]),
+        'A10,10,0,3,1,1,N,"X"',
+        'P1',
+    ].join('\n'));
+
+    it('reports the width and length the stream declares', () => {
+        const label = withSize(812, '406,24');
+        expect(label.widthDots).toBe(812);
+        expect(label.heightDots).toBe(406);
+    });
+
+    it('a landscape stock is wider than it is long, as declared', () => {
+        const label = withSize(812, '406');
+        expect(label.widthDots! > label.heightDots!).toBe(true);
+    });
+
+    it('the gap parameter of Q is not mistaken for the length', () => {
+        // Q406,24 — the length is 406; 24 is the gap for the next label.
+        expect(withSize(812, '406,24').heightDots).toBe(406);
+    });
+
+    it('one dimension alone is reported as no size, not as half a page', () => {
+        // The viewer's fallback (size from content) is honest; a 812-wide page
+        // of unknown length would not be.
+        expect(withSize(812, undefined).widthDots).toBeNull();
+        expect(withSize(undefined, '406').heightDots).toBeNull();
+    });
+
+    it('a stream with no size at all still reports none', () => {
+        const label = withSize(undefined, undefined);
+        expect(label.widthDots).toBeNull();
+        expect(label.heightDots).toBeNull();
+    });
+
+    it('R does not clear a size already set', () => {
+        // R is the reference point, and it offsets elements rather than sizing
+        // the page; most streams set it, so treating it as a reset would drop
+        // the size of nearly every label.
+        const label = parseEPL(['N', 'q812', 'R10,20', 'Q406', 'A10,10,0,3,1,1,N,"X"', 'P1'].join('\n'));
+        expect(label.widthDots).toBe(812);
+        expect(label.heightDots).toBe(406);
+    });
+});

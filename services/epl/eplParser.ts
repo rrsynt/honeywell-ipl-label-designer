@@ -267,6 +267,22 @@ export const parseEPL = (code: string): ViewerLabel => {
     // it draws the whole label shifted.
     let refX = 0;
     let refY = 0;
+
+    // Label size in dots: `q` is the width and `Q` the length (manual pp. 3-89,
+    // 3-91). Both are needed to state a size — a stream that gives only one is
+    // reported as having none, so the viewer falls back to the content bounds
+    // rather than drawing a page half of which is invented.
+    //
+    // This is what makes an EPL landscape label come out as paper instead of a
+    // strip of its own ink: 4x2 in at 203 dpi is q812/Q406, and without these
+    // the page measured 91x21 mm — the ink bbox.
+    //
+    // `R` does NOT clear them. The manual's note that the reference point
+    // "cancels a previously set width" describes how the head is positioned,
+    // not this value; treating it as a reset would drop the size of every
+    // stream that sets a reference point, which most do.
+    let qWidthDots: number | null = null;
+    let qLengthDots: number | null = null;
     // Font and soft-font notes repeat on every field of a large label; the
     // issue list is for the user, so each distinct note is said once.
     const saidOnce = new Set<string>();
@@ -564,8 +580,15 @@ export const parseEPL = (code: string): ViewerLabel => {
             }
 
             case 'q':
-                // Set Label Width (manual p. 3-89). Superseded by R: the manual
-                // says the reference point cancels a previously set width.
+                // Set Label Width (manual p. 3-89): the width of the label in
+                // dots, across the printhead.
+                qWidthDots = Math.max(1, Math.trunc(num(cmd.params.split(',')[0], 0)));
+                break;
+
+            case 'Q':
+                // Set Label Length (manual p. 3-91): the length in dots along
+                // the feed, with the gap as its second parameter.
+                qLengthDots = Math.max(1, Math.trunc(num(cmd.params.split(',')[0], 0)));
                 break;
 
             default: {
@@ -584,5 +607,13 @@ export const parseEPL = (code: string): ViewerLabel => {
         }
     }
 
-    return { widthDots: null, heightDots: null, elements, issues, settings: {} };
+    // Both or neither: a lone q or Q is half a page, and half a page is worse
+    // than none — the viewer's own fallback (size from content) is honest about
+    // what it does not know.
+    const sized = qWidthDots !== null && qLengthDots !== null;
+    return {
+        widthDots: sized ? qWidthDots : null,
+        heightDots: sized ? qLengthDots : null,
+        elements, issues, settings: {},
+    };
 };
