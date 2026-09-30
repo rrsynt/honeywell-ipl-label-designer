@@ -150,14 +150,25 @@ describe('designerOnlyWarnings — screen-only properties are named, not dropped
         expect(designerOnlyWarnings('ipl', designOf([lineField({ lineEnding: 'arrow', visible: false })]))).toEqual([]);
     });
 
-    it('reports the same gap for every printer language, not just IPL', () => {
-        // Neither the arrow head nor the HRI anchor is representable in ZPL,
-        // EPL or TSPL either, so a language other than IPL must not lose the
-        // warning just because the message names no IPL command.
-        const d = designOf([lineField({ lineEnding: 'arrow' }), barcodeField({ hriAlign: 'right' })]);
+    it('reports the arrow-head gap for every printer language', () => {
+        // The arrow head is representable in NO language, so every target must
+        // warn — a language other than IPL must not lose it just because the
+        // message names no IPL command.
+        const d = designOf([lineField({ lineEnding: 'arrow' })]);
         for (const lang of ['ipl', 'zpl', 'epl', 'tspl'] as const) {
-            expect(designerOnlyWarnings(lang, d), lang).toHaveLength(2);
+            expect(designerOnlyWarnings(lang, d), lang).toHaveLength(1);
         }
+    });
+
+    it('warns about the HRI alignment on every language EXCEPT TSPL', () => {
+        // TSPL's BARCODE p4 is 1 left / 2 centre / 3 right (manual p. 38), so
+        // it PRINTS a centre or right alignment — warning there would be wrong.
+        // IPL, ZPL and EPL anchor at the start and cannot carry it.
+        const d = designOf([barcodeField({ hriAlign: 'right' })]);
+        for (const lang of ['ipl', 'zpl', 'epl'] as const) {
+            expect(designerOnlyWarnings(lang, d), lang).toHaveLength(1);
+        }
+        expect(designerOnlyWarnings('tspl', d)).toEqual([]);
     });
 
     it('names multi-up stock, which no language can gang', () => {

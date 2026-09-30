@@ -252,8 +252,13 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
             // TSPL's human readable is 0 none / 1 left / 2 center / 3 right —
             // ALL below the bar, and there is no above at all. A design asking
             // for "above" gets it below WITH a warning: dropping it would lose
-            // the digits, which is worse than moving them.
-            const hri = field.humanReadable === 'none' ? 0 : 1;
+            // the digits, which is worse than moving them. TSPL is the ONE
+            // language here whose BARCODE carries the horizontal alignment, so
+            // a centre/right hriAlign is emitted (2/3) rather than lost.
+            const hri = field.humanReadable === 'none' ? 0
+                : field.hriAlign === 'center' ? 2
+                : field.hriAlign === 'right' ? 3
+                : 1;
             if (field.humanReadable === 'above') {
                 warnings.push(`"${field.name}" asks for the human-readable line above the bar code. TSPL can only print it below, so it will print below.`);
             }

@@ -402,6 +402,17 @@ describe('TSPL generator', () => {
         expect(lines([barcodeField({ humanReadable: 'none' })]).find(l => l.startsWith('BARCODE'))!.split(',')[4]).toBe('0');
     });
 
+    it('carries the HRI alignment in TSPL BARCODE p4', () => {
+        // TSPL is the one language here whose BARCODE carries the horizontal
+        // alignment: 1 left, 2 centre, 3 right (manual p. 38). The generator
+        // wrote 1 for anything other than 'none', collapsing centre/right.
+        const p4 = (align?: string) => lines([barcodeField({ humanReadable: 'below', hriAlign: align })])
+            .find(l => l.startsWith('BARCODE'))!.split(',')[4];
+        expect(p4('left')).toBe('1');
+        expect(p4('center')).toBe('2');
+        expect(p4('right')).toBe('3');
+    });
+
     it('emits BOX with the FAR CORNER', () => {
         const p = lines([{ id: 3, type: 'box', name: 'X', x: 5, y: 5, rotation: 0 as Rotation, width: 20, height: 10, thickness: 0.5 }])
             .find(l => l.startsWith('BOX'))!.slice(4).split(',').map(Number);
