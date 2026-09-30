@@ -469,6 +469,20 @@ describe('EPL generator', () => {
         expect(eplLines([barcodeField()]).find(l => l.startsWith('B'))!.split(',')[3]).toBe('3');
     });
 
+    it('emits 1A/1B/1C for a forced Code 128 start subset, so it round-trips', () => {
+        // EPL Table 2-1: '1' is auto A/B/C, '1A'/'1B'/'1C' force a start
+        // subset. The generator wrote plain '1' for a forced subset and the
+        // parser mapped 1A/1B/1C to plain code128 — the subset lost both ways.
+        const typeOf = (sub?: string) => eplLines([barcodeField({ symbology: '6', code128_subset: sub })])
+            .find(l => l.startsWith('B'))!.split(',')[3];
+        expect(typeOf('a')).toBe('1A');
+        expect(typeOf('b')).toBe('1B');
+        expect(typeOf('c')).toBe('1C');
+        expect(typeOf('auto')).toBe('1');
+        const { epl } = generateEPL(withFields([barcodeField({ symbology: '6', code128_subset: 'c' })]));
+        expect((parseEPL(epl).elements[0] as { code128StartSubset?: string }).code128StartSubset).toBe('c');
+    });
+
     it('emits the BAR height, not the HRI-inclusive box height', () => {
         // p7 is "Bar code height in dots" (manual p. 3-11); the interpretive row
         // is a separate parameter. box.height adds that row, so emitting it

@@ -70,6 +70,10 @@ interface EplBarcode {
     eanUpcVersion?: number;
     /** For '0' (Code 39), the c0 mode: 2 = check a digit the host supplied. */
     code39Mode?: string;
+    /** For '1A'/'1B'/'1C', the Code 128 start subset ('a'/'b'/'c'); '1' is
+     *  auto. The IR symbology is code128 either way, so this keeps the forced
+     *  subset from being silently lost on a design saved and reloaded. */
+    code128StartSubset?: string;
     /** True for the 2-of-5 types whose mod 10 check digit the PRINTER appends
      *  ('2C' and '2D'). The viewer has no encoder option for it, so it is named
      *  rather than drawn — a plausible-looking wrong check digit is worse than
@@ -81,13 +85,14 @@ const EPL_BARCODE_TYPES: Record<string, EplBarcode> = {
     // Code 39 (manual p. 3-12). '3C' validates a check digit already in the data.
     '3': { symbology: '0', code39Mode: '0' },
     '3C': { symbology: '0', code39Mode: '2' },
-    // Code 128: '1' is auto A/B/C, '1A'/'1B'/'1C' force a subset, '0' is
-    // UCC/SSCC, '1E' is UCC/EAN 128. All paint as code128 here.
+    // Code 128: '1' is auto A/B/C, '1A'/'1B'/'1C' force a start subset, '0' is
+    // UCC/SSCC, '1E' is UCC/EAN 128. All paint as code128 here; the forced
+    // subset is carried so the design keeps it (IPL c6,m3 is the same value).
     '0': { symbology: '6' },
     '1': { symbology: '6' },
-    '1A': { symbology: '6' },
-    '1B': { symbology: '6' },
-    '1C': { symbology: '6' },
+    '1A': { symbology: '6', code128StartSubset: 'a' },
+    '1B': { symbology: '6', code128StartSubset: 'b' },
+    '1C': { symbology: '6', code128StartSubset: 'c' },
     '1E': { symbology: '6' },
     // 2 of 5 (manual Table 2-1, p. 3-12). '2C' is "Interleaved 2 of 5 with mod
     // 10 check digit" and '2D' is "... with human readable check digit" — both
@@ -512,6 +517,7 @@ export const parseEPL = (code: string): ViewerLabel => {
                     source: content.isVariable ? { type: 'variable', data: content.text } : { type: 'fixed', data: content.text },
                     ...(mapped.eanUpcVersion !== undefined ? { eanUpcVersion: mapped.eanUpcVersion } : {}),
                     ...(mapped.code39Mode !== undefined ? { code39Mode: mapped.code39Mode } : {}),
+                    ...(mapped.code128StartSubset !== undefined ? { code128StartSubset: mapped.code128StartSubset } : {}),
                 };
                 elements.push(place(el));
                 break;

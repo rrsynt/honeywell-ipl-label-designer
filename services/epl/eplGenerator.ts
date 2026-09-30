@@ -215,7 +215,13 @@ export const generateEPL = (design: Design): EplGenerateResult => {
             // host-verifies — a design saved and reloaded changed its bar code
             // silently, the exact drift the reverse-table comment forbids.
             const code39HostChecked = sym === '0' && field.code39_checkDigit === 'host-verifies';
-            const eplType = sym === '7' ? eplEanType(data) : (code39HostChecked ? '3C' : EPL_BARCODE_FOR[sym]);
+            // Code 128's forced start subset is EPL type '1A'/'1B'/'1C' (manual
+            // Table 2-1); '1' is the automatic default. Emitting plain '1' for a
+            // forced subset lost it, while the parser reads the letter back.
+            const c128 = sym === '6' && (field.code128_subset === 'a' || field.code128_subset === 'b' || field.code128_subset === 'c')
+                ? `1${field.code128_subset.toUpperCase()}`
+                : undefined;
+            const eplType = sym === '7' ? eplEanType(data) : (code39HostChecked ? '3C' : (c128 ?? EPL_BARCODE_FOR[sym]));
             if (field.code39_checkDigit === 'printer-generated' && sym === '0') {
                 // EPL has no "printer enters the check digit" Code 39 type — '3C'
                 // is the host-verified one. The nearest honest form is plain '3',
