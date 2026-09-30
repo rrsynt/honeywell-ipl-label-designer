@@ -446,3 +446,53 @@ describe('chained frames import like split frames (2026-09-30)', () => {
         expect((text.dataSource as { data: string }).data).toBe('Hello World!');
     });
 });
+
+// The per-field parameter DEFAULTS, taken from the manual's own tables rather
+// than from the parser, so a drift in either direction is caught. These tables
+// are the authority for what a field means when the stream states nothing:
+//
+//   Bar Code Field      h = 50, w = 1, i = Disabled
+//   Interpretive Field  h = 2,  w = 2
+//   Line Field          l = 100, w = 1
+//
+// (IPL_2.70_Programmers_Reference_Manual, "X Field Default Parameters".) The
+// sweep that added these checked every field type's parameters against its own
+// table and found no divergence — the parser already agreed — so what they pin
+// is that it keeps agreeing.
+describe('IPL field parameters match the manual defaults (2026-09-30)', () => {
+    const stx = (f: string) => '<STX>' + f + '<ETX>';
+    const head = [stx('<ESC>C<SI>W812<SI>L400'), stx('<ESC>P'), stx('E1;F1;')];
+    // The element kinds differ per test, so this reads the fields each one
+    // actually carries; the cast goes through `unknown` because the union has
+    // no index signature.
+    const first = (frames: string[]) => parseViewerIPL([...head, ...frames, stx('R')].join(''))
+        .elements[0] as unknown as Record<string, number | string | undefined>;
+
+    it('leaves a bar code at the documented h = 50 and w = 1', () => {
+        const el = first([stx('B1;o10,10;c0;d3,123')]);
+        expect(el.kind).toBe('barcode');
+        expect(el.heightDots, 'Bar Code Field h default').toBe(50);
+    });
+
+    it('leaves a line at the documented l = 100 and w = 1', () => {
+        // w is the LINE WIDTH here — the stroke — not a second dimension, which
+        // is what makes reading it as a length the obvious wrong move.
+        const el = first([stx('L1;o10,10')]);
+        expect(el.lengthDots, 'Line Field l default').toBe(100);
+        expect(el.thicknessDots, 'Line Field w default').toBe(1);
+    });
+
+    it('leaves text and interpretive at the documented h = 2 and w = 2', () => {
+        const text = first([stx('H1;o10,10;d3,HI')]);
+        expect([text.hMag, text.wMag], 'Human-Readable Text defaults').toEqual([2, 2]);
+    });
+
+    it('parses the shipped sample without a single issue', () => {
+        // The end-to-end control for this batch: whatever the parameter sweep
+        // touched, a real stream must still come through clean.
+        const ir = parseViewerIPL(fs.readFileSync(
+            path.join(process.cwd(), 'samples', 'product.ipl'), 'utf8'));
+        expect(ir.elements.length).toBeGreaterThan(3);
+        expect(ir.issues, 'the sample is valid IPL').toEqual([]);
+    });
+});
