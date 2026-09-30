@@ -1253,10 +1253,24 @@ export const parseTSPL = (code: string): ViewerLabel => {
 
             default: {
                 if (PRINTER_SETTINGS.has(cmd.name)) break;
+                // Each of these says WHAT the command is and WHY it cannot be
+                // drawn. A generic "not part of the supported subset" reads as
+                // "this app chose not to", which was wrong for DMATRIX,
+                // MAXICODE, RSS, AZTEC and CODABLOCK in turn — every one of
+                // them turned out to be drawable. The remaining ones are
+                // genuinely outside what a stream can express here.
                 if (cmd.name === 'PUTBMP' || cmd.name === 'PUTPCX') {
-                    issue('info', 'tspl-bitmap-unsupported', `TSPL graphics (${cmd.name}) are not part of this viewer yet.`, cmd.name);
+                    issue('info', 'tspl-bitmap-unsupported',
+                        `${cmd.name} tells the printer to load an image FILE by name from its own storage (manual pp. 61-63). The file is not in the stream, so there is nothing to draw.`, cmd.name);
+                } else if (cmd.name === 'BITMAP') {
+                    issue('info', 'tspl-bitmap-unsupported',
+                        'BITMAP carries the image as raw hexadecimal rows after the last comma (manual p. 45); the tokenizer reads parameters, not binary tails, so the bitmap is not captured.', 'BITMAP');
+                } else if (cmd.name === 'TLC39') {
+                    issue('info', 'tspl-tlc39-unsupported',
+                        'TLC39 is a composite symbol — Code 39 carrying a MicroPDF417 (manual p. 44) — and no encoder here produces that pairing, so it is not drawn.', 'TLC39');
                 } else if (cmd.name === 'BLOCK') {
-                    issue('info', 'tspl-block-unsupported', 'TSPL BLOCK (multi-line text) is not part of this viewer yet.', 'BLOCK');
+                    issue('info', 'tspl-block-unsupported',
+                        'BLOCK lays a paragraph out inside a width/height box, wrapping and aligning the text to fit (manual p. 80). This preview draws single-line TEXT fields, so the paragraph is not laid out.', 'BLOCK');
                 } else {
                     issue('info', 'tspl-unsupported', `${cmd.name} is not part of the supported TSPL subset, so it has no effect here.`, cmd.name);
                 }

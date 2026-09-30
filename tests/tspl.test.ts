@@ -293,6 +293,25 @@ describe('TSPL parser', () => {
         expect(rest.issues.some(i => i.code === 'tspl-bitmap-unsupported')).toBe(true);
     });
 
+    it('says WHY each remaining command cannot be drawn, not just that it is unsupported', () => {
+        // A generic "not part of the supported subset" reads as a choice this
+        // app made, and that reading was wrong five times over (DMATRIX,
+        // MAXICODE, RSS, AZTEC, CODABLOCK all turned out to be drawable). The
+        // ones left are outside what a stream can express, and each says so.
+        const why = (line: string) => {
+            const r = parseTSPL(`CLS\n${line}`);
+            const hit = r.issues.find(i => i.level === 'info' && i.command);
+            return hit?.message ?? '';
+        };
+        expect(why('PUTBMP 10,10,"a.bmp"'), 'a file, not a stream').toMatch(/FILE/i);
+        expect(why('BITMAP 200,200,2,16,0,0000'), 'raw hex rows').toMatch(/hexadecimal|raw/i);
+        expect(why('TLC39 10,50,0,"123456,SN1,00601"'), 'a composite pairing').toMatch(/Code 39|composite/i);
+        expect(why('BLOCK 10,10,100,60,"3",0,1,1,"text"'), 'a laid-out paragraph').toMatch(/paragraph/i);
+        // and the family each message names is right — TLC39 is its own code,
+        // not the generic bitmap one.
+        expect(parseTSPL('CLS\nTLC39 10,50,0,"x"').issues.map(i => i.code)).toContain('tspl-tlc39-unsupported');
+    });
+
     it('says nothing about ordinary printer settings', () => {
         expect(parseTSPL('SIZE 50 mm,25 mm\nGAP 3 mm,0\nSPEED 4\nDENSITY 8\nCLS\nPRINT 1,1').issues).toHaveLength(0);
     });
