@@ -33,6 +33,18 @@ export const elementVisualBox = (
     el: ViewerElement,
     dpi: number,
 ): { x: number; y: number; w: number; h: number } => {
+    // A diagonal's end point is ABSOLUTE, so its box comes from the two points
+    // rather than from a length-and-rotation reading. `f` is 0 for it and the
+    // switch below must not be applied — the end can lie in any direction.
+    if (el.kind === 'diagonal') {
+        const x = Math.min(el.ox, el.ex) - el.thicknessDots;
+        const y = Math.min(el.oy, el.ey) - el.thicknessDots;
+        return {
+            x, y,
+            w: Math.abs(el.ex - el.ox) + el.thicknessDots * 2,
+            h: Math.abs(el.ey - el.oy) + el.thicknessDots * 2,
+        };
+    }
     const { lengthDots: L, crossDots: C } = estimateElementSize(el, dpi);
     switch (el.f) {
         case 1: return { x: el.ox, y: el.oy - L, w: C, h: L };
@@ -169,6 +181,16 @@ export const estimateElementSize = (
             return { lengthDots: Math.round(estWidth), crossDots: el.heightDots + hriExtra };
         }
         case 'line': return { lengthDots: el.lengthDots, crossDots: el.thicknessDots };
+        case 'reverse': return { lengthDots: el.widthDots, crossDots: el.heightDots };
+        case 'ellipse': return { lengthDots: el.widthDots, crossDots: el.heightDots };
+        case 'diagonal':
+            // The extent of a slanted line is its own bounding box, measured
+            // from the start point — the end can lie in any of the four
+            // quadrants, so a signed difference is not enough.
+            return {
+                lengthDots: Math.abs(el.ex - el.ox) + el.thicknessDots,
+                crossDots: Math.abs(el.ey - el.oy) + el.thicknessDots,
+            };
         case 'box': return { lengthDots: el.widthDots, crossDots: el.heightDots };
         case 'graphic': return { lengthDots: el.widthDots, crossDots: el.heightDots };
         case 'unknown': return { lengthDots: 60, crossDots: 20 };
@@ -472,6 +494,89 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
             // element order, which is the order the printer lays them down.
             ctx.fillStyle = el.white ? '#ffffff' : '#000000';
             ctx.fillRect(0, 0, Math.max(1, el.lengthDots * s), Math.max(1, el.thicknessDots * s));
+            break;
+        }
+        case 'ellipse': {
+            // An OUTLINED ellipse: "thickness" strokes the outline rather than
+            // filling, so it is a stroke of the given width centred on the
+            // path — the same reading as TSPL's BOX, which strokes its border.
+            const w = Math.max(1, el.widthDots * s);
+            const h = Math.max(1, el.heightDots * s);
+            const t = Math.max(1, el.thicknessDots * s);
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = t;
+            ctx.beginPath();
+            // The bounding box is inset by half the stroke so the outline's
+            // OUTER edge lands on the declared width/height, which is what the
+            // manual's corner coordinates describe.
+            ctx.ellipse(w / 2, h / 2, Math.max(0.5, w / 2 - t / 2), Math.max(0.5, h / 2 - t / 2), 0, 0, Math.PI * 2);
+            ctx.stroke();
+            break;
+        }
+        case 'diagonal': {
+            // Both ends are absolute, and applyFieldTransform has already
+            // translated (and, for an ordinary field, rotated) the context by
+            // (ox,oy) — so the end point is drawn RELATIVE to the start.
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = Math.max(1, el.thicknessDots * s);
+            ctx.lineCap = 'butt';
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo((el.ex - el.ox) * s, (el.ey - el.oy) * s);
+            ctx.stroke();
+            // A single point carries no direction, and a zero-length path is
+            // invisible in most rasterizers — a dot is what the printer lays.
+            if (el.ex === el.ox && el.ey === el.oy) {
+                const t = Math.max(1, el.thicknessDots * s);
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(-t / 2, -t / 2, t, t);
+            }
+            break;
+        }
+        case 'reverse': {
+            // "This command reverses a region in image buffer" (TSC manual
+            // p. 75). Every dot inside flips — white to black and black to
+            // white — so this is NOT a white fill: a white fill would leave
+            // existing black ink where it is and still claim to have erased it.
+            // Painting WHITE would be right only if nothing were under it.
+            //
+            // The readback runs on the label's own backing pixels. It is the
+            // one place in this renderer that reads rather than writes, which
+            // is what an invert fundamentally needs.
+            // The region is in the field's own frame, but the context carries
+            // the field transform (rotation) AND renderLabel's quality scale,
+            // so the device rectangle is the bounding box of the four
+            // transformed corners — not the local size. Multiplying by `s`
+            // alone would miss the quality factor, and using only the
+            // translation would miss a rotated field.
+            const localW = Math.max(1, el.widthDots * s);
+            const localH = Math.max(1, el.heightDots * s);
+            const t = ctx.getTransform();
+            const corners = [[0, 0], [localW, 0], [localW, localH], [0, localH]]
+                .map(([cx, cy]) => [cx * t.a + cy * t.c + t.e, cx * t.b + cy * t.d + t.f]);
+            const cw = ctx.canvas.width;
+            const ch = ctx.canvas.height;
+            // getImageData must stay inside the canvas; a region partly off it
+            // is clipped rather than throwing.
+            const x0 = Math.min(Math.max(0, Math.floor(Math.min(...corners.map(c => c[0])))), cw);
+            const y0 = Math.min(Math.max(0, Math.floor(Math.min(...corners.map(c => c[1])))), ch);
+            const x1 = Math.min(Math.max(0, Math.ceil(Math.max(...corners.map(c => c[0])))), cw);
+            const y1 = Math.min(Math.max(0, Math.ceil(Math.max(...corners.map(c => c[1])))), ch);
+            const w = x1 - x0;
+            const h = y1 - y0;
+            if (w > 0 && h > 0) {
+                const img = ctx.getImageData(x0, y0, w, h);
+                const d = img.data;
+                for (let i = 0; i < d.length; i += 4) {
+                    d[i] = 255 - d[i];
+                    d[i + 1] = 255 - d[i + 1];
+                    d[i + 2] = 255 - d[i + 2];
+                    // Alpha is left alone: the label is an opaque sheet, and
+                    // inverting it would make erased areas transparent instead
+                    // of white.
+                }
+                ctx.putImageData(img, x0, y0);
+            }
             break;
         }
         case 'graphic': {

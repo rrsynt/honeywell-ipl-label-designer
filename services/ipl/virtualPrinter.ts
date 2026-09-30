@@ -30,6 +30,12 @@ export const KIND_PREFIX: Record<ViewerElement['kind'], string> = {
     line: 'L',
     box: 'W',
     graphic: 'U',
+    // TSPL's REVERSE/CIRCLE/ELLIPSE/DIAGONAL have no IPL field equivalents, so
+    // these prefixes only ever label a diagnostic. They are kept distinct from
+    // every real IPL field letter (H/B/L/W/G/U) rather than colliding with one.
+    reverse: 'V',
+    ellipse: 'C',
+    diagonal: 'D',
     unknown: '?',
 };
 

@@ -179,6 +179,19 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
         const box = getObjectBoundingBox(field, design);
         const { x, y, rotation } = placeField(field, box, dpi);
 
+        // TSPL has a NATIVE ellipse command, so a design ellipse is emitted as
+        // one instead of going through the rasterize-and-download path the
+        // other languages need — a circle and an ellipse are separate commands
+        // (manual pp. 48-49), told apart by their two axes.
+        if (field.type === 'ellipse') {
+            const e = field as unknown as { width: number; height: number; thickness: number };
+            const w = Math.max(1, dots(e.width));
+            const h = Math.max(1, dots(e.height));
+            const t = Math.max(1, dots(e.thickness));
+            lines.push(w === h ? `CIRCLE ${x},${y},${w},${t}` : `ELLIPSE ${x},${y},${w},${h},${t}`);
+            continue;
+        }
+
         if (field.type === 'text') {
             const tsplFont = TSPL_FONT_FOR[field.font];
             if (tsplFont === undefined) {

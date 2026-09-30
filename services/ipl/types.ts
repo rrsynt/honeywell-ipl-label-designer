@@ -212,6 +212,48 @@ export interface GraphicElement extends ElementBase {
     data?: string[];
 }
 
+/**
+ * A rectangle the printer INVERTS: every dot inside flips, so white areas turn
+ * black and black areas turn white ("This command reverses a region in image
+ * buffer", TSC manual p. 75). It is not a fill of either colour — a white fill
+ * would leave existing black ink untouched, and this must erase it.
+ */
+export interface ReverseElement extends ElementBase {
+    kind: 'reverse';
+    widthDots: number;
+    heightDots: number;
+}
+
+/**
+ * An outlined ellipse: `ox,oy` is the UPPER-LEFT corner of its bounding box
+ * (TSPL CIRCLE/ELLIPSE both document it that way), and a circle is the special
+ * case where the two axes are equal.
+ */
+export interface EllipseElement extends ElementBase {
+    kind: 'ellipse';
+    widthDots: number;
+    heightDots: number;
+    thicknessDots: number;
+}
+
+/**
+ * A line between two FREE POINTS, which is what TSPL's DIAGONAL is. It is not
+ * a LineElement with a rotation: a line of a given length rotated by a quarter
+ * turn can only ever be horizontal or vertical, so an arbitrary angle has to
+ * carry both endpoints.
+ *
+ * The endpoints are absolute and are already resolved out of any field frame,
+ * so `ox,oy` repeats the start point and `f` is always 0 — rotating an element
+ * whose coordinates are absolute would move it twice.
+ */
+export interface DiagonalElement extends ElementBase {
+    kind: 'diagonal';
+    /** End point in dots, absolute like `ox`/`oy`. */
+    ex: number;
+    ey: number;
+    thicknessDots: number;
+}
+
 export interface UnknownElement extends ElementBase {
     kind: 'unknown';
     command: string;
@@ -226,6 +268,9 @@ export type ViewerElement =
     | TextElement
     | BarcodeElement
     | LineElement
+    | ReverseElement
+    | EllipseElement
+    | DiagonalElement
     | BoxElement
     | GraphicElement
     | UnknownElement;

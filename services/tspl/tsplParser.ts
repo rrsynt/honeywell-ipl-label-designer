@@ -715,6 +715,76 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 break;
             }
 
+            case 'REVERSE': {
+                // REVERSE x_start,y_start,x_width,y_height (TSC manual p. 75).
+                // It INVERTS the region of the image buffer, so it is its own
+                // element rather than a fill: a white fill would leave black
+                // ink under it and claim to have erased it.
+                if (p.length < 4) {
+                    issue('warning', 'tspl-reverse-params', `REVERSE needs x,y,width,height. Found ${p.length}. Skipped.`, 'REVERSE');
+                    break;
+                }
+                const rw = Math.max(0, Math.trunc(num(p[2], 0)));
+                const rh = Math.max(0, Math.trunc(num(p[3], 0)));
+                if (rw === 0 || rh === 0) {
+                    issue('info', 'tspl-reverse-empty', 'A REVERSE region with no width or height changes nothing.', 'REVERSE');
+                    break;
+                }
+                elements.push(place({
+                    kind: 'reverse', id: nextId++,
+                    ox: num(p[0], 0), oy: num(p[1], 0), f: 0,
+                    widthDots: rw, heightDots: rh,
+                } as ViewerElement));
+                break;
+            }
+
+            case 'DIAGONAL': {
+                // DIAGONAL x1,y1,x2,y2,thickness (TSC manual p. 76). Both ends
+                // are FREE POINTS, so it is not a rotated line of a given
+                // length unless one of the axes happens to match. It is drawn
+                // as a pair of points on its own element.
+                if (p.length < 4) {
+                    issue('warning', 'tspl-diagonal-params', `DIAGONAL needs x1,y1,x2,y2. Found ${p.length}. Skipped.`, 'DIAGONAL');
+                    break;
+                }
+                const th = Math.max(1, Math.trunc(num(p[4], 1) || 1));
+                elements.push({
+                    kind: 'diagonal', id: nextId++,
+                    ox: num(p[0], 0), oy: num(p[1], 0), f: 0,
+                    ex: num(p[2], 0), ey: num(p[3], 0),
+                    thicknessDots: th,
+                } as ViewerElement);
+                break;
+            }
+
+            case 'CIRCLE':
+            case 'ELLIPSE': {
+                // CIRCLE x,y,diameter,thickness (p. 48)
+                // ELLIPSE x,y,width,height,thickness (p. 49)
+                // Both give the UPPER-LEFT corner of the bounding box, not the
+                // centre, which is the one thing about them that is easy to get
+                // backwards — the manual says "x-coordinate of upper left
+                // corner" for both.
+                const isCircle = cmd.name === 'CIRCLE';
+                if (p.length < 4) {
+                    issue('warning', 'tspl-shape-params', `${cmd.name} needs ${isCircle ? 'x,y,diameter' : 'x,y,width,height'}. Found ${p.length}. Skipped.`, cmd.name);
+                    break;
+                }
+                const ew = Math.max(0, Math.trunc(num(p[2], 0)));
+                const eh = isCircle ? ew : Math.max(0, Math.trunc(num(p[3], 0)));
+                const thick = Math.max(1, Math.trunc(num(p[isCircle ? 3 : 4], 1) || 1));
+                if (ew === 0 || eh === 0) {
+                    issue('info', 'tspl-shape-empty', `A ${cmd.name} with no width or height draws nothing.`, cmd.name);
+                    break;
+                }
+                elements.push(place({
+                    kind: 'ellipse', id: nextId++,
+                    ox: num(p[0], 0), oy: num(p[1], 0), f: 0,
+                    widthDots: ew, heightDots: eh, thicknessDots: thick,
+                } as ViewerElement));
+                break;
+            }
+
             case 'AZTEC': {
                 // AZTEC x,y,rotate,[size,]ecp,]flg,]menu,]multi,]rev,] "content"
                 // (TSC manual p. 59). Every parameter after the rotation is

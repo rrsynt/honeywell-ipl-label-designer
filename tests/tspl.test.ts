@@ -24,7 +24,7 @@ import { join } from 'node:path';
 import { parseTSPL, tokenizeTspl, unescapeTspl, TSPL_FONT_SIZES } from '../services/tspl/tsplParser';
 import { generateTSPL, escapeTsplData } from '../services/tspl/tsplGenerator';
 import { buildBwipSpec, measureBarcode, ensureBarcodesReady } from '../services/ipl/barcodes';
-import { estimateElementSize } from '../services/ipl/renderer';
+import { estimateElementSize, elementVisualBox } from '../services/ipl/renderer';
 import { jobSendabilityError, renderJobChunk, type PrintJob } from '../services/printQueue';
 import { validateTarget } from '../services/printTargets';
 import type { Design } from '../types';
@@ -962,6 +962,73 @@ describe('MicroPDF417 works in TSPL (2026-09-30)', () => {
         const back = parseTSPL(`CLS\n${line}`).elements[0] as any;
         expect(back.codablockRowHeight).toBe('16');
         expect(back.codablockModuleWidth).toBe('1');
+    });
+
+    it('CIRCLE and ELLIPSE describe a BOUNDING BOX, and a circle is one command', () => {
+        // Manual pp. 48-49: both give the "x-coordinate of upper left corner"
+        // of the bounding box — not the centre, which is the one thing about
+        // them that is easy to get backwards.
+        const circle = parseTSPL('CLS\nCIRCLE 250,20,100,5').elements[0] as any;
+        expect(circle.kind).toBe('ellipse');
+        expect(circle.ox).toBe(250);
+        expect(circle.oy).toBe(20);
+        expect(circle.widthDots, 'a circle uses its diameter on both axes').toBe(100);
+        expect(circle.heightDots).toBe(100);
+        expect(circle.thicknessDots).toBe(5);
+
+        const ell = parseTSPL('CLS\nELLIPSE 10,10,400,100,2').elements[0] as any;
+        expect(ell.widthDots).toBe(400);
+        expect(ell.heightDots).toBe(100);
+        expect(ell.thicknessDots).toBe(2);
+
+        // The extent is the box, so the label grows to hold it.
+        expect(elementVisualBox(ell, 203).w).toBe(400);
+
+        // A design ellipse is emitted as TSPL's native command rather than
+        // rasterized, and the two axes choose which of the two commands.
+        const ellipseLine = (w: number, h: number) => lines([{
+            id: 1, type: 'ellipse', name: 'E', x: 5, y: 5, rotation: 0,
+            width: w, height: h, thickness: 1,
+        }]).find(l => l.startsWith('CIRCLE') || l.startsWith('ELLIPSE'))!;
+        expect(ellipseLine(20, 20)).toContain('CIRCLE ');
+        expect(ellipseLine(40, 20)).toContain('ELLIPSE ');
+    });
+
+    it('DIAGONAL keeps BOTH endpoints, which a rotated line cannot express', () => {
+        // Manual p. 76: DIAGONAL x1,y1,x2,y2,thickness — both ends are free
+        // points. Modelling it as a line of a given length with a rotation
+        // would only ever reach horizontal or vertical.
+        const d = parseTSPL('CLS\nDIAGONAL 20,20,100,80,4').elements[0] as any;
+        expect(d.kind).toBe('diagonal');
+        expect([d.ox, d.oy, d.ex, d.ey]).toEqual([20, 20, 100, 80]);
+        expect(d.thicknessDots).toBe(4);
+        // The coordinates are ABSOLUTE, so the element must not be rotated on
+        // top of them or the end point would move twice.
+        expect(d.f).toBe(0);
+
+        // Its bounding box spans both points, in either direction.
+        const box = elementVisualBox(d, 203);
+        expect(box.x + box.w).toBeGreaterThanOrEqual(100);
+
+        const down = parseTSPL('CLS\nDIAGONAL 100,100,20,20,4').elements[0] as any;
+        const downBox = elementVisualBox(down, 203);
+        expect(downBox.x, 'a right-to-left diagonal starts at its lower x').toBeLessThanOrEqual(20);
+    });
+
+    it('REVERSE is its own element, not a fill of either colour', () => {
+        // "This command reverses a region in image buffer" (manual p. 75).
+        // A white fill would leave black ink underneath it and still look like
+        // it had erased it — the difference only shows when something is under
+        // the region, which is exactly what these tests measure.
+        const r = parseTSPL('CLS\nREVERSE 20,20,50,30').elements[0] as any;
+        expect(r.kind).toBe('reverse');
+        expect([r.ox, r.oy, r.widthDots, r.heightDots]).toEqual([20, 20, 50, 30]);
+        expect(r.f, 'a region in the image buffer is not a rotated field').toBe(0);
+
+        // Zero size changes nothing and says so rather than adding an element.
+        const none = parseTSPL('CLS\nREVERSE 20,20,0,30');
+        expect(none.elements).toHaveLength(0);
+        expect(none.issues.map(i => i.code)).toContain('tspl-reverse-empty');
     });
 
     it('never tells the user a symbol TSPL defines is absent from the language', () => {
