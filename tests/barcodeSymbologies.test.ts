@@ -270,4 +270,49 @@ describe('designer <-> viewer conversions for POSTNET/Planet (review 2026-09-21)
         expect(f.h_mag).toBe(52); // 13 dots x mag 4
         expect(f.w_mag).toBe(2);
     });
+
+    it('designer import: the Code 39 check digit survives the charset groups', async () => {
+        // PRM p.150: c0's m repeats its check-digit meaning in each charset
+        // group — 0/1/2 8646, 3/4/5 full ASCII, 6/7/8 43-character. The reverse
+        // map had only 1 and 2, so 4/5/7/8 (a check digit in another group)
+        // imported as 'none' and the digit was dropped.
+        const { parseIPL } = await import('../services/iplParser');
+        const ck = async (m: string) => {
+            const design = parseIPL([
+                '<STX><ESC>C<SI>W812<ETX>', '<STX><ESC>P<ETX>', '<STX>E1;F1<ETX>',
+                `<STX>B1;o40,40;c0,${m};d3,12345<ETX>`, '<STX>R<ETX>',
+            ].join('\n'), 203);
+            return (design.fields.find(x => x.type === 'barcode') as { code39_checkDigit?: string }).code39_checkDigit;
+        };
+        expect(await ck('1')).toBe('printer-generated');
+        expect(await ck('4'), 'full ASCII printer check digit').toBe('printer-generated');
+        expect(await ck('7'), '43-char printer check digit').toBe('printer-generated');
+        expect(await ck('2')).toBe('host-verifies');
+        expect(await ck('5'), 'full ASCII host check digit').toBe('host-verifies');
+        expect(await ck('8'), '43-char host check digit').toBe('host-verifies');
+        // The controls: 0/3/6 carry no check digit.
+        expect(await ck('0')).toBe('none');
+        expect(await ck('3')).toBe('none');
+        expect(await ck('6')).toBe('none');
+    });
+
+    it('designer import: names the Code 39 charset it cannot carry', async () => {
+        // The designer models the check digit but not the CHARSET, so full ASCII
+        // (3-5) and 43-character (6-8) regenerate as 8646 — identical for A-Z0-9
+        // but not for the lowercase and symbols those sets exist for.
+        const { parseIPL } = await import('../services/iplParser');
+        const notices = (m: string) => {
+            const out: string[] = [];
+            parseIPL([
+                '<STX><ESC>C<SI>W812<ETX>', '<STX><ESC>P<ETX>', '<STX>E1;F1<ETX>',
+                `<STX>B1;o40,40;c0,${m};d3,12345<ETX>`, '<STX>R<ETX>',
+            ].join('\n'), 203, (n: { message: string }) => out.push(n.message));
+            return out.join(' ');
+        };
+        expect(notices('4')).toMatch(/full ASCII/);
+        expect(notices('7')).toMatch(/43-character/);
+        // The controls: the 8646 group is what the generator emits, so nothing.
+        expect(notices('1')).toBe('');
+        expect(notices('0')).toBe('');
+    });
 });

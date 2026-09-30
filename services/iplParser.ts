@@ -496,10 +496,30 @@ export const parseIPL = (
                      barcodeField.h_mag = 13 * mag;
                  }
                  if (symbology === '0' && cParts.length >= 2) {
+                     // PRM p.150: c0 groups m by CHARSET, and the check-digit
+                     // meaning repeats within each group — 0/1/2 = 8646,
+                     // 3/4/5 = full ASCII, 6/7/8 = 43-character; +0 none,
+                     // +1 printer enters, +2 host enters. Reading only 1 and 2
+                     // sent 4/5/7/8 (a printer/host check digit in the full-ASCII
+                     // and 43-char groups) to 'none', so those imported with the
+                     // check digit silently dropped.
                      const checkDigitRev: { [key: string]: 'none' | 'printer-generated' | 'host-verifies' } = {
-                         '1': 'printer-generated', '2': 'host-verifies',
+                         '1': 'printer-generated', '4': 'printer-generated', '7': 'printer-generated',
+                         '2': 'host-verifies', '5': 'host-verifies', '8': 'host-verifies',
                      };
                      barcodeField.code39_checkDigit = checkDigitRev[cParts[1]] || 'none';
+                     // The CHARSET itself is not modeled — this designer's Code 39
+                     // is the 8646 set the generator emits. Full ASCII (3-5) and
+                     // 43-character (6-8) therefore regenerate as 8646, which
+                     // encodes identically for A-Z0-9 but REJECTS the lowercase
+                     // and symbols those sets exist for, so the loss is named.
+                     const charset = parseInt(cParts[1], 10);
+                     if (onNotice && (charset >= 3 && charset <= 8)) {
+                         onNotice({
+                             command: `c0,${cParts[1]}`.slice(0, 24),
+                             message: `Code 39 charset c0,${cParts[1]} (${charset <= 5 ? 'full ASCII' : '43-character'}) was not imported: this designer emits the 8646 set (PRM p.150), so the bar code regenerates as 8646. It encodes A-Z and 0-9 identically, but not the lowercase and symbols the other sets carry.`,
+                         });
+                     }
                  }
                  // Code 39 Prefix Character, Define (PRM p.181). The prefix is
                  // part of the printed SYMBOL, so dropping it silently would
