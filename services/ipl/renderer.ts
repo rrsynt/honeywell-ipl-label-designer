@@ -116,7 +116,39 @@ export const estimateElementSize = (
     switch (el.kind) {
         case 'text': {
             const data = el.source.type === 'fixed' || el.source.type === 'variable' ? el.source.data : '[DATE]';
-            const lines = data.split('\n');
+            let lines = data.split('\n');
+            // A BLOCK paragraph lays out inside its box, so its size is the BOX
+            // rather than the unwrapped text — measuring the raw characters
+            // would report a single long line running off the label.
+            if (el.wrapDots !== undefined && el.wrapDots > 0) {
+                // The paragraph's size IS its box: the block was laid out to
+                // fit width x height, so measuring the unwrapped characters
+                // would report one long line running off the label.
+                // Line height comes from the same cell metrics the painter
+                // uses, so layout and ink agree.
+                const wrapMeta = FONT_MAP[el.font] ?? FONT_FALLBACK;
+                const wrapGap = el.intercharGapDots ?? wrapMeta.gapWidth ?? 2;
+                const advance = ((wrapMeta.baseWidth ?? 7) + wrapGap) * el.wMag;
+                const cellH = (wrapMeta.baseHeight ?? 9) * el.hMag;
+                const perLine = Math.max(1, Math.floor(el.wrapDots / Math.max(1, advance)));
+                const wrapped: string[] = [];
+                for (const line of lines) {
+                    if (line === '') { wrapped.push(''); continue; }
+                    let rest = line;
+                    while (rest.length > perLine) {
+                        const window = rest.slice(0, perLine + 1);
+                        const space = window.lastIndexOf(' ');
+                        const cut = space > 0 ? space : perLine;
+                        wrapped.push(rest.slice(0, cut));
+                        rest = rest.slice(cut).replace(/^ +/, '');
+                    }
+                    wrapped.push(rest);
+                }
+                return {
+                    lengthDots: Math.max(1, el.wrapDots),
+                    crossDots: Math.max(1, el.boxHeightDots ?? wrapped.length * cellH),
+                };
+            }
             const maxChars = Math.max(1, ...lines.map(l => l.length));
             if (el.pointSize && OUTLINE_FONTS.has(el.font)) {
                 const hDots = Math.round((el.pointSize / 72) * dpi);
@@ -290,7 +322,7 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
             const meta: { type: 'bitmap' | 'outline'; family?: string; baseHeight?: number; baseWidth?: number; gapWidth?: number }
                 = FONT_MAP[el.font] ?? { type: 'outline', family: 'monospace' };
             const data = resolveDisplayData(el.source);
-            const lines = (data || '').split('\n');
+            let lines = (data || '').split('\n');
 
             let charW: number;
             let lineH: number;
@@ -337,8 +369,45 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
                 lineH = cellH;
                 ctx.font = `${cellH}px ${FONT_FAMILIES.monospace}`;
             }
+            // TSPL BLOCK wraps its paragraph at the box width (manual p. 80).
+            // An ordinary TEXT field never does — its content prints exactly as
+            // written — so this runs ONLY when the field carries a wrap width.
+            // The advance is per character, so the break is a character count.
+            if (el.wrapDots !== undefined && el.wrapDots > 0) {
+                const perLine = Math.max(1, Math.floor(el.wrapDots / Math.max(1, charW)));
+                const wrapped: string[] = [];
+                for (const line of lines) {
+                    // An explicit line break in the data is honoured; each piece
+                    // is then wrapped on its own, so a hard break is not undone.
+                    if (line === '') { wrapped.push(''); continue; }
+                    let rest = line;
+                    while (rest.length > perLine) {
+                        // Break at the last space that fits, falling back to a
+                        // hard cut when a single word is longer than the box.
+                        const window = rest.slice(0, perLine + 1);
+                        const space = window.lastIndexOf(' ');
+                        const cut = space > 0 ? space : perLine;
+                        wrapped.push(rest.slice(0, cut));
+                        rest = rest.slice(cut).replace(/^ +/, '');
+                    }
+                    wrapped.push(rest);
+                }
+                lines = wrapped.length > 0 ? wrapped : [''];
+                // "Add or delete the space between lines (in dots)" — so a
+                // BLOCK's own leading REPLACES the line pitch for this field.
+                if (el.spaceDots !== undefined) lineH = Math.max(1, el.spaceDots * s);
+            }
             ctx.fillStyle = '#000000';
             ctx.textBaseline = 'top';
+            // BLOCK's align (2 centre, 3 right) positions each line inside the
+            // box; an ordinary field keeps its own origin, which is why this is
+            // applied only when an alignment was asked for.
+            const lineX = (line: string): number => {
+                if (el.align === undefined || el.wrapDots === undefined) return 0;
+                if (el.align === 2) return Math.max(0, (el.wrapDots - line.length * charW) / 2);
+                if (el.align === 3) return Math.max(0, el.wrapDots - line.length * charW);
+                return 0;
+            };
             if (el.borderDots && el.borderDots > 0) {
                 // Border b (PRM p.167): white letters on a black n-dot surround.
                 // The surround must cover the `m` gaps too — measuring the run
@@ -412,14 +481,14 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
                 // parameter was reported for).
                 const gapPx = el.intercharGapDots * s;
                 lines.forEach((line, li) => {
-                    let cx = 0;
+                    let cx = lineX(line);
                     for (const ch of line) {
                         ctx.fillText(ch, cx, li * lineH);
                         cx += outlineW!(ch) + gapPx;
                     }
                 });
             } else {
-                lines.forEach((line, i) => ctx.fillText(line, 0, i * lineH));
+                lines.forEach((line, i) => ctx.fillText(line, lineX(line), i * lineH));
             }
             break;
         }

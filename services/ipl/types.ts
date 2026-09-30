@@ -81,6 +81,21 @@ export interface TextElement extends ElementBase {
     /** Set when this is an interpretive field (I<n>) bound to barcode <n>;
      * its default anchor was derived from that barcode's rendered box. */
     interpretiveOf?: number;
+    /**
+     * TSPL BLOCK (manual p. 80): a paragraph laid out inside a width/height
+     * box, wrapped at the box width. Absent for an ordinary single-line TEXT
+     * field, whose content is drawn as written — the two must not be confused,
+     * because wrapping text that has no box would reflow a label that prints
+     * exactly as authored.
+     */
+    wrapDots?: number;
+    /** BLOCK's box height, and the extra leading between lines in dots. */
+    boxHeightDots?: number;
+    spaceDots?: number;
+    /** BLOCK's align: 0/1 left, 2 centre, 3 right. */
+    align?: number;
+    /** BLOCK's fit flag — shrink the text so the paragraph fits the box. */
+    fit?: boolean;
     source: FieldSource;
 }
 

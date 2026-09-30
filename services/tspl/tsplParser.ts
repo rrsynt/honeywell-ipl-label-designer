@@ -715,6 +715,69 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 break;
             }
 
+            case 'BLOCK': {
+                // BLOCK x,y,width,height,"font",rotation,x-mul,y-mul,[space,]
+                // [align,][fit,]"content" (TSC manual p. 80). It is a PARAGRAPH
+                // laid out inside a box: the text WRAPS at the box width, which
+                // an ordinary TEXT field never does. Reading it as TEXT would
+                // draw one long line running off the label.
+                //
+                // The trailing options are positional AND optional, so they are
+                // read from the END towards the content: content is last, and
+                // whatever sits between y-mul and it is the optional tail.
+                if (p.length < 9) {
+                    issue('warning', 'tspl-block-params', `BLOCK needs x,y,width,height,"font",rotation,x-mul,y-mul,"content". Found ${p.length}. Skipped.`, 'BLOCK');
+                    break;
+                }
+                const content = p[p.length - 1] ?? '';
+                if (content === '') {
+                    issue('warning', 'tspl-block-empty', 'A text block with no content prints nothing.', 'BLOCK');
+                    break;
+                }
+                const font = (p[4] ?? '0').trim();
+                const rotation = quadrantFromClockwise(p[5]);
+                const xmul = Math.max(1, Math.trunc(num(p[6], 1) || 1));
+                const ymul = Math.max(1, Math.trunc(num(p[7], 1) || 1));
+                // The optional tail is [space,] [align,] [fit,] — it sits in
+                // FIXED POSITIONS 9, 10 and 11, and can only be omitted from
+                // the END (you cannot write `fit` without `space` and `align`).
+                // So the slots are read positionally with their documented
+                // defaults, which is what the manual's own two examples show:
+                // one with no tail at all, one with `20,2` = space + align.
+                //
+                // Reading them from the END instead mis-assigned `20,2`: two
+                // values made it think `20` was an alignment, fail its 0-3
+                // test, and drop the leading silently.
+                const spaceRaw = p[8];
+                const alignRaw = p[9];
+                const fitRaw = p[10];
+                const spaceDots = spaceRaw !== undefined && spaceRaw !== '' && Number.isFinite(Number(spaceRaw))
+                    ? Math.trunc(Number(spaceRaw)) : undefined;
+                const align = alignRaw !== undefined && /^[0-3]$/.test(alignRaw.trim())
+                    ? Number(alignRaw.trim()) : undefined;
+                const fit = fitRaw !== undefined && fitRaw !== '' ? fitRaw.trim() === '1' : undefined;
+                const blockFont = (TSPL_FONT_SIZES[font] ? font : '2');
+                if (!TSPL_FONT_SIZES[font] && !font.endsWith('.TTF') && !font.endsWith('.FNT') && !font.endsWith('.EFT')) {
+                    issue('info', 'tspl-block-font', `BLOCK font "${font}" is not one of the resident fonts; resident font 2 is drawn instead.`, 'BLOCK');
+                }
+                elements.push(place({
+                    kind: 'text', id: nextId++,
+                    ox: num(p[0], 0), oy: num(p[1], 0), f: rotation,
+                    font: blockFont,
+                    hMag: ymul, wMag: xmul,
+                    source: { type: 'fixed', data: content },
+                    wrapDots: Math.max(1, Math.trunc(num(p[2], 100))),
+                    boxHeightDots: Math.max(1, Math.trunc(num(p[3], 20))),
+                    ...(spaceDots !== undefined ? { spaceDots } : {}),
+                    ...(align !== undefined ? { align } : {}),
+                    ...(fit === true ? { fit: true } : {}),
+                } as TextElement));
+                if (fit === true) {
+                    issue('info', 'tspl-block-fit', 'BLOCK fit=1 shrinks the text until the paragraph fits the box; this preview wraps it without shrinking.', 'BLOCK');
+                }
+                break;
+            }
+
             case 'REVERSE': {
                 // REVERSE x_start,y_start,x_width,y_height (TSC manual p. 75).
                 // It INVERTS the region of the image buffer, so it is its own

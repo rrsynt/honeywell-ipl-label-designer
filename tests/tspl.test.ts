@@ -306,7 +306,8 @@ describe('TSPL parser', () => {
         expect(why('PUTBMP 10,10,"a.bmp"'), 'a file, not a stream').toMatch(/FILE/i);
         expect(why('BITMAP 200,200,2,16,0,0000'), 'raw hex rows').toMatch(/hexadecimal|raw/i);
         expect(why('TLC39 10,50,0,"123456,SN1,00601"'), 'a composite pairing').toMatch(/Code 39|composite/i);
-        expect(why('BLOCK 10,10,100,60,"3",0,1,1,"text"'), 'a laid-out paragraph').toMatch(/paragraph/i);
+        // BLOCK is now DRAWN, so it no longer reaches this list at all.
+        expect(parseTSPL('CLS\nBLOCK 10,10,100,60,"3",0,1,1,"text"').elements).toHaveLength(1);
         // and the family each message names is right — TLC39 is its own code,
         // not the generic bitmap one.
         expect(parseTSPL('CLS\nTLC39 10,50,0,"x"').issues.map(i => i.code)).toContain('tspl-tlc39-unsupported');
@@ -1029,6 +1030,45 @@ describe('MicroPDF417 works in TSPL (2026-09-30)', () => {
         const none = parseTSPL('CLS\nREVERSE 20,20,0,30');
         expect(none.elements).toHaveLength(0);
         expect(none.issues.map(i => i.code)).toContain('tspl-reverse-empty');
+    });
+
+    it('BLOCK lays out a PARAGRAPH in its box; TEXT does not wrap', () => {
+        // Manual p. 80: "BLOCK x,y,width,height,"font",rotation,x-mul,y-mul,
+        // [space,][align,][fit,]"content"" — the text WRAPS at the box width.
+        // Reading it as TEXT would draw one long line running off the label,
+        // which is the difference these two elements are kept apart for.
+        const para = 'We stand behind our products with a comprehensive support program.';
+        const block = parseTSPL(`CLS\nBLOCK 15,15,200,140,"0",0,2,2,20,2,"${para}"`).elements[0] as any;
+        expect(block.kind).toBe('text');
+        expect(block.wrapDots, 'the box width is what wraps it').toBe(200);
+        expect(block.boxHeightDots).toBe(140);
+        expect(block.spaceDots, 'the leading between lines').toBe(20);
+        expect(block.align).toBe(2);
+        expect(block.hMag).toBe(2);
+
+        // A TEXT field of the same characters has NO box, so it must not wrap.
+        const text = parseTSPL(`CLS\nTEXT 15,15,"0",0,2,2,"${para}"`).elements[0] as any;
+        expect(text.wrapDots).toBeUndefined();
+        expect(text.align).toBeUndefined();
+
+        // The paragraph's measured size IS its box — measuring the unwrapped
+        // characters would report one line wider than the label.
+        const size = estimateElementSize(block, 203);
+        expect(size.lengthDots).toBe(200);
+        expect(size.crossDots).toBe(140);
+
+        // The manual's own second example is `...,8,8,20,2,` — space + align
+        // with no fit. The tail sits in FIXED SLOTS 9/10/11 and can only be
+        // omitted from the END, so a two-value tail is NOT "align + fit".
+        const two = parseTSPL(`CLS\nBLOCK 15,15,200,140,"0",0,1,1,20,2,"${para}"`).elements[0] as any;
+        expect(two.spaceDots, 'two values are space + align').toBe(20);
+        expect(two.align).toBe(2);
+        expect(two.fit).toBeUndefined();
+        // all three, including the fit flag
+        const three = parseTSPL(`CLS\nBLOCK 15,15,200,140,"0",0,1,1,20,2,1,"${para}"`).elements[0] as any;
+        expect(three.spaceDots).toBe(20);
+        expect(three.align).toBe(2);
+        expect(three.fit).toBe(true);
     });
 
     it('never tells the user a symbol TSPL defines is absent from the language', () => {
