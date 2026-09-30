@@ -233,6 +233,10 @@ const barcodeParams = (el: BarcodeElement): BarcodeParams => ({
     rssSepHeight: el.rssSepHeight,
     rssSegments: el.rssSegments,
     maxiMode: el.maxiMode,
+    dmVersion: el.dmVersion,
+    inverse: el.inverse,
+    dmCols: el.dmCols,
+    dmRows: el.dmRows,
 });
 
 /**
@@ -416,6 +420,12 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
             const barYPx = el.hri === 2 && data ? hriCellH + 2 * s : 0;
             ctx.save();
             ctx.translate(0, barYPx);
+            // An INVERSE symbol (EPL Data Matrix v1) is white-on-black: the
+            // printer lays a solid dark block and knocks the light modules out
+            // of it. This renderer paints dark modules onto a white sheet and
+            // cannot express that here, so the parser reports the difference
+            // (epl-dm-inverse) rather than drawing a symbol that is not the one
+            // the stream asked for.
             const drawn = drawBarcodeContent(ctx, el, data, s);
             if (!drawn) {
                 drawPlaceholderBox(ctx, Math.max(40, data.length * 7 * el.moduleDots * s), el.heightDots * s, 'BARCODE', data || undefined);

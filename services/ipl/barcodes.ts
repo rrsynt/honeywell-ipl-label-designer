@@ -249,6 +249,13 @@ export interface BarcodeParams {
     rssSegments?: string;
     /** c14,m1 — MaxiCode mode 2-6 (undefined = auto-discriminate). */
     maxiMode?: string;
+    /** c17,m1 — Data Matrix ECC version, '100' or '200' (PRM p.162). */
+    dmVersion?: string;
+    /** EPL b…D,v1 — an inverse Data Matrix, white on black. */
+    inverse?: boolean;
+    /** EPL b…D,c/r — the symbol's column and row count. */
+    dmCols?: string;
+    dmRows?: string;
 }
 
 /**
@@ -497,6 +504,29 @@ export const buildBwipSpec = (symbology: string, data: string, params: BarcodePa
         if (Number.isInteger(mode)) opts.mode = mode;
         return { main: { bcid: 'maxicode', text: data, opts } };
     }
+    if (symbology === '17') {
+        // Data Matrix. Two commands feed this: IPL c17[,m1][,m2] (PRM p.162)
+        // and EPL b…D,c/r/h/v (EPL manual p. 3-20). The encoder takes both a
+        // symbol size and an explicit rectangle.
+        //
+        //   IPL m1  ECC version 100/200 — different parity, not a preference
+        //   IPL m2  0 square, 1 rectangular
+        //   EPL c/r column and row count
+        //   EPL h   module size, handled by the renderer rather than here
+        //   EPL v   inverse (white on black)
+        const opts: Record<string, unknown> = {};
+        if (params.dmVersion === '100') opts.format = 'full';
+        // Rejecting the size is the encoder's own job — the manual's symbol
+        // geometries table is what decides which c/r pairs are real — so an
+        // out-of-range pair is passed through and the encoder refuses it,
+        // which buildBwipSpec already reports as a null spec.
+        const cols = parseInt(params.dmCols ?? '', 10);
+        const rows = parseInt(params.dmRows ?? '', 10);
+        if (Number.isInteger(cols) && cols > 0) opts.columns = cols;
+        if (Number.isInteger(rows) && rows > 0) opts.rows = rows;
+        return { main: { bcid: 'datamatrix', text: data, opts } };
+    }
+
     const bcid = IPL_SYMBOLOGY_TO_BCID[symbology];
     return bcid ? { main: { bcid, text: data, opts: {} } } : null;
 };
@@ -599,7 +629,8 @@ const paramsKey = (p: BarcodeParams): string =>
         p.pdfColumns ?? '', p.pdfEcLevel ?? '', p.pdfTruncate ?? '',
         p.compositeVersion ?? '', p.compositeColumns ?? '', p.compositeRowHeight ?? '',
         p.rssVersion ?? '', p.rssSepHeight ?? '', p.rssSegments ?? '',
-        p.maxiMode ?? ''].join('\x00');
+        p.maxiMode ?? '', p.dmVersion ?? '', p.inverse ? '1' : '',
+        p.dmCols ?? '', p.dmRows ?? ''].join('\x00');
 
 /**
  * True when the field is painted from bwip raw() module runs instead of the

@@ -152,6 +152,14 @@ export interface BarcodeElement extends ElementBase {
     rssSegments?: string;
     /** c14,m1 — MaxiCode mode 2-6 (default = auto-discriminate, PRM p.159). */
     maxiMode?: string;
+    /** c17,m1 — Data Matrix ECC version, '100' or '200' (PRM p.162). They are
+     *  different encodings with different parity, so this is not a preference. */
+    dmVersion?: string;
+    /** EPL b…D,v1 — an INVERSE Data Matrix, white on black (EPL manual p. 3-20). */
+    inverse?: boolean;
+    /** EPL b…D,c/r — the symbol's column and row count. */
+    dmCols?: string;
+    dmRows?: string;
 }
 
 export interface LineElement extends ElementBase {

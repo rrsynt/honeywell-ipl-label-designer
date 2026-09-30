@@ -2739,6 +2739,8 @@ export class IPLViewerParser {
         let rssSepHeight: string | undefined;
         let rssSegments: string | undefined;
         let maxiMode: string | undefined;
+        // c17,m1 — the Data Matrix ECC version, 100 or 200 (PRM p.162).
+        let dmVersion: string | undefined;
         if (parts[0] === '21') {
             // EAN.UCC Composite c21[,m1][,m2][,m3][,m4][,m5][,m6] (PRM p.162):
             // m1 selects the linear component and the CC variant paired with it
@@ -2806,6 +2808,33 @@ export class IPLViewerParser {
                     this.printer.issue('warning', 'qr-mask-invalid', `QR mask c18,m3="${qrMask}" is outside 0-8; defaulted to automatic selection.`, cmd);
                     qrMask = undefined;
                 }
+            }
+        } else if (parts[0] === '17') {
+            // Data Matrix c17[,m1][,m2][,m3,m4[,m5,m6]] (PRM p.162). None of it
+            // was read before, so c17,m1 was dropped silently.
+            //
+            //   m1  ECC version: 100 (ECC-100) or 200 (ECC-200); default 200
+            //   m2  0 = square, 1 = rectangular
+            //   m3/m4  position of this symbol in a Structured Append group
+            //   m5/m6  Structured Append file identifier
+            //
+            // m1 changes how the DATA IS ENCODED — ECC-100 and ECC-200 carry
+            // different parity — so a stream asking for ECC-100 was drawn as
+            // ECC-200, which is a different symbol. m3-m6 describe Structured
+            // Append, where this symbol is one of a group; the viewer draws the
+            // one symbol, so they are named rather than dropped.
+            const v = parts[1];
+            if (v !== undefined && v.trim() !== '') {
+                const n = Number(v);
+                if (n === 100 || n === 200) dmVersion = String(n);
+                else {
+                    this.printer.issue('warning', 'dm-version-invalid',
+                        `Data Matrix version c17,m1="${v}" is not 100 (ECC-100) or 200 (ECC-200) (PRM p.162); the encoder's default is used.`, cmd);
+                }
+            }
+            if (parts.slice(3).some(x => x !== undefined && x.trim() !== '')) {
+                this.printer.issue('info', 'dm-structured-append',
+                    'Data Matrix Structured Append (c17,m3-m6) is not reproduced: this viewer draws the current symbol, not the group it belongs to.', cmd);
             }
         } else if (parts[0] === '19') {
             microColumns = parts[1];
@@ -2900,7 +2929,7 @@ export class IPLViewerParser {
                 qrModel, qrEcl, qrMask, microColumns, microRows,
                 pdfColumns, pdfEcLevel, pdfTruncate,
                 compositeVersion, compositeColumns, compositeRowHeight,
-                rssVersion, rssSepHeight, rssSegments, maxiMode,
+                rssVersion, rssSepHeight, rssSegments, maxiMode, dmVersion,
             })) {
                 this.printer.issue('error', 'barcode-data-invalid', parts[0] === '6' && code128Ucc === '1'
                     ? `UCC-128 (c6,1) requires exactly 19 numeric characters (parentheses and spaces may be kept for the interpretive). Data: "${encodable.slice(0, 24)}"`
@@ -2942,6 +2971,7 @@ export class IPLViewerParser {
         if (rssSepHeight) element.rssSepHeight = rssSepHeight;
         if (rssSegments) element.rssSegments = rssSegments;
         if (maxiMode) element.maxiMode = maxiMode;
+        if (dmVersion) element.dmVersion = dmVersion;
 
         this.printer.commitElement(element);
     }

@@ -611,6 +611,16 @@ export const parseEPL = (code: string): ViewerLabel => {
                 // four documented forms — M2, M3, m4, m6 — and the prefixed
                 // form alike produced an empty mode, so every MaxiCode came out
                 // with automatic selection whatever the stream asked for.
+                // Data Matrix options, manual p. 3-20: "p4 (c) = number of
+                // columns to encode, p5 (r) = number of rows, p6 (h) = the
+                // minimum square data module size (1-40, default 5), p7 (v) =
+                // selects an INVERSE image of the bar code". "Order is not
+                // important for parameters p4-p7", so each is found by its
+                // prefix rather than its position.
+                const dmCols = kind === 'D' ? opt('c') : undefined;
+                const dmRows = kind === 'D' ? opt('r') : undefined;
+                const dmInverse = kind === 'D' && opt('v') !== undefined
+                    && !/^0+$/.test(opt('v')!.trim());
                 const p4Raw = (p[3] ?? '').trim();
                 let maxiMode: string | undefined;
                 if (kind === 'M' && /^[Mm][2346]$/.test(p4Raw)) {
@@ -657,7 +667,25 @@ export const parseEPL = (code: string): ViewerLabel => {
                     hri: 0,
                     source: { type: 'fixed', data },
                     ...(maxiMode !== undefined ? { maxiMode } : {}),
+                    ...(dmCols !== undefined ? { dmCols } : {}),
+                    ...(dmRows !== undefined ? { dmRows } : {}),
+                    ...(dmInverse ? { inverse: true } : {}),
                 };
+                if (dmInverse) {
+                    // The manual's own words: "Selects an inverse image of the
+                    // bar code (sometimes known as reverse video or a negative
+                    // image)." It was dropped SILENTLY, so an inverted Data
+                    // Matrix previewed as ordinary black-on-white with nothing
+                    // said — the message is the fix, not the rendering.
+                    //
+                    // The renderer paints dark modules on a white sheet and has
+                    // no inversion path; an attempt to add one by rasterising
+                    // offscreen and flipping the pixels did not change the drawn
+                    // ink when measured (ratio 0.311 -> 0.308), so it was
+                    // reverted rather than left in looking implemented.
+                    issue('info', 'epl-dm-inverse',
+                        'Data Matrix v selects an INVERSE image (white on black); this preview draws it black on white.', 'b');
+                }
                 if (kind === 'M' && maxiMode === undefined) {
                     // Manual: "If p4 (Mx) is not used, the printer will use the
                     // following rules to automatically format the DATA ... all

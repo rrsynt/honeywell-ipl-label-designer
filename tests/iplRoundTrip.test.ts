@@ -4,6 +4,8 @@ import path from 'node:path';
 import { generateIPL } from '../services/iplGenerator';
 import { parseIPL } from '../services/iplParser';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
+import { parseEPL } from '../services/epl/eplParser';
+import { buildBwipSpec } from '../services/ipl/barcodes';
 import type { Design, Field, TextField, BarcodeField } from '../types';
 
 const DPI = 203 as const;
@@ -494,5 +496,73 @@ describe('IPL field parameters match the manual defaults (2026-09-30)', () => {
             path.join(process.cwd(), 'samples', 'product.ipl'), 'utf8'));
         expect(ir.elements.length).toBeGreaterThan(3);
         expect(ir.issues, 'the sample is valid IPL').toEqual([]);
+    });
+});
+
+// Data Matrix parameters, from each language's own manual section. Neither was
+// read before: IPL c17's m1/m2 and EPL's b…D,c/r/v were all dropped silently.
+//
+//   IPL c17[,m1][,m2][,m3,m4[,m5,m6]] (PRM p.162)
+//     m1  ECC version 100 or 200 — DIFFERENT PARITY, not a preference
+//     m2  0 square, 1 rectangular
+//     m3-m6  Structured Append position and file identifier
+//   EPL b…D[,c cols][,r rows][,h module][,v inverse] (EPL manual p. 3-20)
+//     "Order is not important for parameters p4-p7"
+describe('Data Matrix parameters survive both languages (2026-09-30)', () => {
+    const stx = (f: string) => '<STX>' + f + '<ETX>';
+    const iplEl = (spec: string) => {
+        const ir = parseViewerIPL([stx('<ESC>C<SI>W812<SI>L400'), stx('<ESC>P'),
+            stx('E1;F1;'), stx(spec), stx('R')].join(''));
+        const el = ir.elements.find(e => e.kind === 'barcode') as
+            { dmVersion?: string; dmCols?: string; dmRows?: string; inverse?: boolean } | undefined;
+        return { el, codes: ir.issues.map(i => i.code) };
+    };
+    const eplEl = (src: string) => {
+        const r = parseEPL(`N\n${src}\nP1\n`);
+        const el = r.elements[0] as
+            { dmVersion?: string; dmCols?: string; dmRows?: string; inverse?: boolean } | undefined;
+        return { el, codes: r.issues.map(i => i.code) };
+    };
+
+    it('carries the IPL ECC version through to the encoder', () => {
+        // ECC-100 and ECC-200 are different encodings, so this is not a
+        // rendering preference: a stream asking for ECC-100 was drawn ECC-200.
+        const spec = buildBwipSpec('17', 'DATA', { dmVersion: '100' });
+        expect((spec?.main.opts as Record<string, unknown>)?.format, 'ECC-100 encodes as the full format').toBe('full');
+        // The control: ECC-200 is the encoder's own default, so no option.
+        expect((buildBwipSpec('17', 'DATA', { dmVersion: '200' })?.main.opts as Record<string, unknown>)?.format)
+            .toBeUndefined();
+        expect(iplEl('B1;o10,10;c17,100;d3,DATA').el?.dmVersion).toBe('100');
+    });
+
+    it('rejects an ECC version that is not 100 or 200', () => {
+        const { codes } = iplEl('B1;o10,10;c17,999;d3,DATA');
+        expect(codes).toContain('dm-version-invalid');
+    });
+
+    it('names Structured Append rather than dropping it', () => {
+        // m3-m6 describe a symbol that is one of a GROUP; the viewer draws the
+        // one symbol, so the difference is stated.
+        const { codes } = iplEl('B1;o10,10;c17,200,0,2,5,1,43;d3,DATA');
+        expect(codes).toContain('dm-structured-append');
+        // The control: no m3-m6 means nothing to say.
+        expect(iplEl('B1;o10,10;c17,200;d3,DATA').codes).toEqual([]);
+    });
+
+    it('reads the EPL Data Matrix options by prefix, in any order', () => {
+        // The manual: "Include the prefix letter (c, r, h, or v) ... Order is
+        // not important for parameters p4-p7."
+        const a = eplEl('b80,100,D,c16,r16,h8,v1,"DATA"');
+        expect([a.el?.dmCols, a.el?.dmRows, a.el?.inverse]).toEqual(['16', '16', true]);
+        // Reordered — the same field.
+        const b = eplEl('b80,100,D,v1,h8,r16,c16,"DATA"');
+        expect([b.el?.dmCols, b.el?.dmRows, b.el?.inverse]).toEqual(['16', '16', true]);
+    });
+
+    it('reports the inverse rather than drawing it as ordinary black-on-white', () => {
+        expect(eplEl('b80,100,D,v1,"DATA"').codes).toContain('epl-dm-inverse');
+        // The control: v0 is not inverse, and must stay silent.
+        expect(eplEl('b80,100,D,v0,"DATA"').codes).toEqual([]);
+        expect(eplEl('b80,100,D,v0,"DATA"').el?.inverse).toBeUndefined();
     });
 });
