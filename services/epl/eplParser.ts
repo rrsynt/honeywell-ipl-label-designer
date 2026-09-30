@@ -26,6 +26,7 @@ import type {
     BarcodeElement, BoxElement, LineElement, TextElement, ViewerElement, ViewerIssue, ViewerLabel,
 } from '../ipl/types';
 import { estimateElementSize } from '../ipl/renderer';
+import { buildMaxiCodeScm } from '../ipl/maxiCodeScm';
 
 /**
  * EPL's resident fonts, in dots. Manual p. 3-4 (the `A` command's p4 table):
@@ -678,6 +679,28 @@ export const parseEPL = (code: string): ViewerLabel => {
                 // box states the extent and a nominal module keeps the anchor
                 // sane, which is what this preview measures matrices from.
                 const moduleSize = Math.max(1, Math.trunc(num(opt('h'), 5)));
+                // MaxiCode modes 2 and 3 are Structured Carrier Messages: the
+                // manual (p. 3-26) spells the DATA as a comma list
+                // "cl,co,pc,lpm" — class, country, postal code, then the
+                // message. The encoder takes those three INSIDE the data,
+                // GS-separated and in the AIM order, and it REJECTS the comma
+                // form outright (maxicodeExpectedPostCode). A spec built from
+                // the comma form looks fine until the encoder is called, at
+                // which point the field fell back to a placeholder and the
+                // symbol disappeared with nothing said. Reassembled here.
+                let barcodeData = data;
+                if (kind === 'M' && (maxiMode === '2' || maxiMode === '3')) {
+                    const [cls, country, post, ...rest] = data.split(',');
+                    if (cls !== undefined && country !== undefined && post !== undefined && rest.length > 0) {
+                        barcodeData = buildMaxiCodeScm({
+                            postcode: post.trim(), country: country.trim(),
+                            serviceClass: cls.trim(), body: rest.join(','),
+                        });
+                    } else {
+                        issue('warning', 'epl-maxicode-scm',
+                            `MaxiCode mode ${maxiMode} data is "cl,co,pc,lpm" (manual p. 3-26) — class, country, postal code, then the message. Found ${data.split(',').length} field(s), so the symbol cannot be built.`, 'b');
+                    }
+                }
                 const el: BarcodeElement = {
                     kind: 'barcode', id: nextId++,
                     ox: num(p[0], 0) + refX, oy: num(p[1], 0) + refY, f: 0,
@@ -688,7 +711,7 @@ export const parseEPL = (code: string): ViewerLabel => {
                     moduleDots: moduleSize,
                     ratio: 1,
                     hri: 0,
-                    source: { type: 'fixed', data },
+                    source: { type: 'fixed', data: barcodeData },
                     ...(maxiMode !== undefined ? { maxiMode } : {}),
                     ...(dmCols !== undefined ? { dmCols } : {}),
                     ...(dmRows !== undefined ? { dmRows } : {}),

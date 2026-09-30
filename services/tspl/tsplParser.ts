@@ -35,6 +35,7 @@ import type {
     BarcodeElement, BoxElement, LineElement, TextElement, ViewerElement, ViewerIssue, ViewerLabel,
 } from '../ipl/types';
 import { estimateElementSize } from '../ipl/renderer';
+import { buildMaxiCodeScm } from '../ipl/maxiCodeScm';
 
 /**
  * TSPL's resident fonts, in dots (manual pp. 77-78).
@@ -849,6 +850,80 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 break;
             }
 
+            case 'MAXICODE': {
+                // MAXICODE x,y,mode,[class,country,post,Lm,]"content" (TSC
+                // manual p. 54). Modes 2 and 3 are Structured Carrier Messages:
+                // the class, country and postal code are SEPARATE PARAMETERS
+                // and the manual spells the postal code for mode 2 as
+                // "06810,7317" — a comma inside the field, which the parameter
+                // splitter therefore cuts into two. They are reassembled here
+                // into the AIM SCM the encoder needs, because a bare payload
+                // under those modes makes it throw and the symbol would vanish.
+                //
+                // The manual's own note: "Mode 6 is not supported in TSPL2
+                // printer firmware", even though the mode table lists it.
+                const mode = (p[2] ?? '').trim();
+                const content = p[p.length - 1] ?? '';
+                if (p.length < 4) {
+                    issue('warning', 'tspl-maxicode-params', `MAXICODE needs x,y,mode,"content". Found ${p.length}. Skipped.`, 'MAXICODE');
+                    break;
+                }
+                let data = content;
+                let maxiMode: string | undefined;
+                if (mode === '2' || mode === '3') {
+                    maxiMode = mode;
+                    // Parameters between the mode and the content. Mode 2's
+                    // postal code may be the two-part "99999,9999" the manual
+                    // writes, so anything past the third slot that is numeric
+                    // and short is the rest of it rather than Lm.
+                    const rest = p.slice(3, -1).map(s => s.trim());
+                    const [cls, country, ...tail] = rest;
+                    let post = tail.shift() ?? '';
+                    const numericTail = tail[0] ?? '';
+                    if (mode === '2' && /^\d{1,5}$/.test(post) && /^\d{1,4}$/.test(numericTail)) {
+                        post = `${post}${numericTail}`;   // "06810,7317" -> 068107317
+                        tail.shift();
+                    }
+                    if (cls === undefined || country === undefined || post === '') {
+                        issue('warning', 'tspl-maxicode-scm',
+                            `MAXICODE mode ${mode} needs class, country and postal code (TSC manual p. 54). Found ${rest.length} parameter(s); the symbol is drawn from the content alone.`, 'MAXICODE');
+                    } else {
+                        data = buildMaxiCodeScm({ postcode: post, country, serviceClass: cls, body: content });
+                    }
+                } else if (mode === '6') {
+                    maxiMode = mode;
+                    issue('info', 'tspl-maxicode-mode6',
+                        'MAXICODE mode 6 is listed in the TSC manual but its own note says TSPL2 firmware does not support it; the symbol is drawn as mode 6 regardless.', 'MAXICODE');
+                } else if (mode === '4' || mode === '5') {
+                    maxiMode = mode;
+                    // Lm (expression length) is the only other parameter these
+                    // modes take, and it is a length the printer uses to size
+                    // the symbol, not data.
+                } else {
+                    issue('info', 'tspl-maxicode-mode',
+                        `MAXICODE mode "${mode}" is not one of 2, 3, 4 or 5 (TSC manual p. 54); the encoder's automatic selection is used.`, 'MAXICODE');
+                }
+                if (content === '') {
+                    issue('warning', 'tspl-maxicode-empty', 'A MaxiCode with no data prints nothing.', 'MAXICODE');
+                    break;
+                }
+                // Fixed-size symbol: the manual gives it no width, height or
+                // module parameter at all, only the start point.
+                const el: BarcodeElement = {
+                    kind: 'barcode', id: nextId++,
+                    ox: num(p[0], 0), oy: num(p[1], 0), f: 0,
+                    symbology: '14',
+                    heightDots: 101,
+                    moduleDots: 1,
+                    ratio: 1,
+                    hri: 0,
+                    source: { type: 'fixed', data },
+                    ...(maxiMode !== undefined ? { maxiMode } : {}),
+                };
+                elements.push(place(el));
+                break;
+            }
+
             case 'DMATRIX': {
                 // DMATRIX x,y,width,height,[options,]"content" (TSC manual
                 // p. 51). The symbol is ECC-200, which is the encoder here, so
@@ -969,9 +1044,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
 
             default: {
                 if (PRINTER_SETTINGS.has(cmd.name)) break;
-                if (cmd.name === 'MAXICODE') {
-                    issue('info', 'tspl-maxicode-unsupported', 'TSPL MAXICODE is not part of this viewer yet.', 'MAXICODE');
-                } else if (cmd.name === 'AZTEC') {
+                if (cmd.name === 'AZTEC') {
                     issue('info', 'tspl-aztec-unsupported', 'TSPL AZTEC is not part of this viewer yet.', 'AZTEC');
                 } else if (cmd.name === 'PUTBMP' || cmd.name === 'PUTPCX') {
                     issue('info', 'tspl-bitmap-unsupported', `TSPL graphics (${cmd.name}) are not part of this viewer yet.`, cmd.name);

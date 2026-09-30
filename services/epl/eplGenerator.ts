@@ -18,6 +18,7 @@ import { DPI_MAP } from '../../constants';
 import { getObjectBoundingBox } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
+import { parseMaxiCodeScm } from '../ipl/maxiCodeScm';
 
 /**
  * Escape EPL print data (manual p. 3-5).
@@ -206,7 +207,22 @@ export const generateEPL = (design: Design): EplGenerateResult => {
                     const p4 = mode === 2 || mode === 3 ? `,M${mode}`
                         : mode === 4 || mode === 6 ? `,m${mode}`
                         : '';
-                    lines.push(`b${origin.x},${origin.y},M${p4},"${escapeEplData(data)}"`);
+                    // Modes 2 and 3 write the class, country and postal code as
+                    // the leading fields of the DATA, not as parameters (manual
+                    // p. 3-26: "cl,co,pc,lpm"). The design carries them inside
+                    // an AIM SCM, so they are taken apart again — emitting the
+                    // SCM as-is would put the whole message where the postal
+                    // code belongs.
+                    let out = data;
+                    if (mode === 2 || mode === 3) {
+                        const scm = parseMaxiCodeScm(data);
+                        if (!scm) {
+                            warnings.push(`"${field.name}" is a MaxiCode mode ${mode}, whose data EPL writes as "class,country,postal code,message" (manual p. 3-26). The data does not carry a structured carrier message, so the fields could not be written and the bar code was left off the label.`);
+                            continue;
+                        }
+                        out = `${scm.serviceClass},${scm.country},${scm.postcode},${scm.body}`;
+                    }
+                    lines.push(`b${origin.x},${origin.y},M${p4},"${escapeEplData(out)}"`);
                     continue;
                 }
                 lines.push(`b${origin.x},${origin.y},${letter},h${moduleSize},"${escapeEplData(data)}"`);

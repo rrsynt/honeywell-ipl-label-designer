@@ -22,6 +22,25 @@ const literalizeSeparators = (data: string): string =>
         ? data.replace(/\x1c/g, FS).replace(/\x1d/g, GS)
         : data;
 
+/**
+ * Symbologies whose DATA legitimately contains \x1d (GS) as a field separator
+ * rather than as an odometer delimiter.
+ *
+ * MaxiCode is the case: a Structured Carrier Message in modes 2 and 3 is
+ * postcode<GS>country<GS>class<GS>body — the same byte the IPL odometer uses to
+ * bracket a counter region. Running the odometer over such a field matched the
+ * separators, "advanced" the text between them, and then STRIPPED them, so the
+ * data reaching the encoder lost its field structure and the symbol was refused
+ * (drawn as a placeholder box with nothing said). The odometer is an IPL
+ * concept and these symbols are not IPL counters, so they are left alone.
+ */
+const GS_BEARING_SYMBOLOGIES = new Set(['14']);
+
+const carriesOdometerRegions = (el: ViewerElement): boolean => {
+    if (el.kind === 'barcode' && GS_BEARING_SYMBOLOGIES.has(el.symbology)) return false;
+    return true;
+};
+
 /** Numeric odometer: digits advance by n; 9→0 carries left. */
 const advanceNumeric = (digits: string, step: number, sign: 1 | -1): string => {
     const width = digits.length;
@@ -97,6 +116,7 @@ export const resolveLabelAtBatch = (
         // text — show only the region contents.
         const elements = label.elements.map(el => {
             if (el.kind !== 'text' && el.kind !== 'barcode') return el;
+            if (!carriesOdometerRegions(el)) return el;
             const src = el.source;
             if (src.type !== 'fixed' && src.type !== 'variable') return el;
             const data = literalizeSeparators(src.data);
@@ -107,6 +127,7 @@ export const resolveLabelAtBatch = (
     }
     const elements: ViewerElement[] = label.elements.map(el => {
         if (el.kind !== 'text' && el.kind !== 'barcode') return el;
+        if (!carriesOdometerRegions(el)) return el;
         const src = el.source;
         if (src.type !== 'fixed' && src.type !== 'variable') return el;
         const data = literalizeSeparators(src.data);

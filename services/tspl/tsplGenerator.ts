@@ -27,6 +27,7 @@ import { DPI_MAP } from '../../constants';
 import { getObjectBoundingBox } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
+import { parseMaxiCodeScm } from '../ipl/maxiCodeScm';
 
 /**
  * Escape TSPL print data (manual p. 77).
@@ -87,27 +88,7 @@ const TSPL_2D_COMMAND: Record<string, string> = {
     '18': 'QRCODE',
     '12': 'PDF417',
     '19': 'MPDF417',
-};
-
-/**
- * 2D symbols the design can hold that this subset does not emit, each with the
- * reason. The reason is per-symbol because it is not the same one.
- *
- * `reason` is 'language' when TSPL genuinely has no such command, and
- * 'viewer' when TSPL HAS the command but this app cannot encode the symbol.
- *
- * Two TSPL references are in the repo and they disagree on 2D coverage: the TSC
- * TSPL/TSPL2 manual (docs/manuals/TSPL_TSPL2_Programming_Manual_TSC_2014.pdf)
- * documents DMATRIX (p. 51) and MAXICODE (p. 54), while the Honeywell TSPL
- * guide's command list (docs/manuals/TSPL_Programming_Guide_P1139068-01EN) omits
- * both. This app draws QRCODE (p. 65) and PDF417 (p. 56) FROM the TSC manual,
- * so the TSC manual is the reference it follows — and against that reference
- * Data Matrix and MaxiCode are viewer gaps, not language gaps. Reporting them as
- * 'language' claimed TSPL has no DMATRIX, which the reference this app already
- * uses disproves.
- */
-const TSPL_2D_MISSING: Record<string, { name: string; reason: 'language' | 'viewer' }> = {
-    '14': { name: 'MaxiCode', reason: 'viewer' },    // MAXICODE, TSC manual p. 54
+    '14': 'MAXICODE',
 };
 
 /** EAN/UPC variants, by the DATA LENGTH — which is how TSPL's names map. */
@@ -225,6 +206,38 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                     const mod = Math.max(1, Math.round(field.w_mag ?? 3));
                     const rot = (field.rotation / 90) * 90 % 360;
                     lines.push(`DMATRIX ${x},${y},${w},${h},x${mod},r${rot},"${escapeTsplData(data)}"`);
+                } else if (cmd === 'MAXICODE') {
+                    // MAXICODE x,y,mode,[class,country,post,]\"content\" (TSC
+                    // manual p. 54). The symbol is FIXED SIZE — the command has
+                    // no width, height or module parameter at all, only the
+                    // start point — so the design's box does not appear here.
+                    //
+                    // Modes 2 and 3 carry the class, country and postal code as
+                    // PARAMETERS, while the design holds them inside the data
+                    // as the AIM SCM every encoder here expects. They have to be
+                    // taken back apart; emitting the SCM as the content would
+                    // put the whole message in the body field and print a
+                    // different symbol than the preview drew.
+                    const mode = field.maxiMode === undefined ? undefined : String(field.maxiMode);
+                    if (mode === '2' || mode === '3') {
+                        const scm = parseMaxiCodeScm(data);
+                        if (!scm) {
+                            warnings.push(`"${field.name}" is a MaxiCode mode ${mode}, whose class, country and postal code TSPL writes as separate parameters. The data does not carry a structured carrier message, so the fields could not be written and the bar code was left off the label.`);
+                            continue;
+                        }
+                        lines.push(`MAXICODE ${x},${y},${mode},${scm.serviceClass},${scm.country},${scm.postcode},"${escapeTsplData(scm.body)}"`);
+                    } else if (mode === '4' || mode === '5' || mode === '6') {
+                        lines.push(`MAXICODE ${x},${y},${mode},"${escapeTsplData(data)}"`);
+                    } else {
+                        // TSPL has no "automatic selection": the mode is a
+                        // required parameter, and unlike EPL it documents no
+                        // fallback. A design with no mode therefore cannot be
+                        // written as authored — mode 4 is the standard symbol
+                        // that carries a plain message, which is what such a
+                        // design's data is.
+                        warnings.push(`"${field.name}" is a MaxiCode with no mode set; TSPL has no automatic selection, so it prints as mode 4 (standard symbol).`);
+                        lines.push(`MAXICODE ${x},${y},4,"${escapeTsplData(data)}"`);
+                    }
                 } else {
                     const w = Math.max(1, dots(box.width));
                     const h = Math.max(1, dots(box.height));
@@ -232,14 +245,6 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                 }
                 continue;
             }
-            if (TSPL_2D_MISSING[sym]) {
-                const { name, reason } = TSPL_2D_MISSING[sym];
-                warnings.push(reason === 'language'
-                    ? `"${field.name}" is a ${name} symbol, which TSPL does not have. It was left off the label.`
-                    : `"${field.name}" is a ${name} symbol. TSPL has the command, but this TSPL output does not draw it yet, so it was left off the label.`);
-                continue;
-            }
-
             // The IPL id '7' is "EAN/UPC" and the printer infers the variant
             // from the data length; TSPL spells the variant out in its name.
             // Code 39's host-verified check digit is type '39C' (manual p. 13);

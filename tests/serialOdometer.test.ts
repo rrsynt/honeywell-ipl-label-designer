@@ -231,6 +231,52 @@ describe('designer importer rebuilds serial counters (round-trip)', () => {
     });
 });
 
+// \x1d (GS) means TWO different things, and conflating them broke MaxiCode.
+// The IPL odometer brackets a counter region with it, but it is also the field
+// separator inside a MaxiCode Structured Carrier Message. Resolving a batch ran
+// the odometer over such a field, "advanced" the text between the separators,
+// and then STRIPPED them — so the data reaching the encoder lost its field
+// structure, the encoder refused the symbol, and the preview drew a placeholder
+// box with nothing said. The same byte is a delimiter in one symbology and
+// content in another: only the odometer's own symbologies may be rewritten.
+describe('GS is not always an odometer delimiter (MaxiCode SCM)', () => {
+    const GS = '\u001d';
+    const scm = `068107317${GS}840${GS}300${GS}DEMO 2`;
+    const maxiLabel = {
+        elements: [{
+            kind: 'barcode', id: 1, ox: 0, oy: 0, f: 0, symbology: '14',
+            heightDots: 101, moduleDots: 1, ratio: 1, hri: 0, maxiMode: '2',
+            source: { type: 'fixed', data: scm },
+        }],
+        issues: [], settings: {},
+    };
+
+    it('leaves a structured carrier message intact in EVERY batch', () => {
+        for (const batch of [0, 1, 3]) {
+            const out = resolveLabelAtBatch(maxiLabel as never, batch, 203);
+            expect((out.elements[0] as { source: { data: string } }).source.data,
+                `batch ${batch}`).toBe(scm);
+        }
+    });
+
+    it('still advances an ordinary alphanumeric region (the positive control)', () => {
+        // Without this, the guard above could be "fixed" by disabling the
+        // odometer altogether and nothing would notice.
+        const text = {
+            elements: [{
+                kind: 'text', id: 2, ox: 0, oy: 0, f: 0, font: '0',
+                fontSize: 12, h_mag: 1, w_mag: 1,
+                source: { type: 'fixed', data: '<GS>A<GS>' },
+            }],
+            issues: [], settings: {},
+        };
+        const at = (b: number) =>
+            (resolveLabelAtBatch(text as never, b, 203).elements[0] as { source: { data: string } }).source.data;
+        expect(at(0)).toBe('A');
+        expect(at(3)).toBe('D');
+    });
+});
+
 describe('lot template is a working serial job', () => {
     it('quantity run prints 0001, 0002, 0003 through the viewer pipeline', async () => {
         const { getTemplate } = await import('../services/templates');

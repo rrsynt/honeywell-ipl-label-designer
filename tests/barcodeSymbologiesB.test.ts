@@ -90,6 +90,28 @@ describe('buildBwipSpec — c14 MaxiCode', () => {
         expect(measureBarcode('14', '0123456789012345', { maxiMode: '6' })).not.toBeNull();
         expect(measureBarcode('14', '0'.repeat(200), { maxiMode: '5' })).toBeNull();
     });
+
+    it('modes 2 and 3 REQUIRE the structured carrier message in the DATA', () => {
+        // The encoder does not merely prefer the SCM for those modes — it
+        // rejects the payload without one (`maxicodeExpectedPostCode`), and a
+        // spec that carries the mode looks perfectly fine until the encoder is
+        // actually called. That is exactly how modes 2/3 came to be drawn as a
+        // placeholder box while `buildBwipSpec` returned a healthy-looking
+        // spec: "the option reached the encoder" is not "the encoder accepted
+        // it". Call the encoder.
+        expect(measureBarcode('14', 'DEMO 2 FOR USA', { maxiMode: '2' }), 'bare payload').toBeNull();
+        expect(measureBarcode('14', 'DEMO 3', { maxiMode: '3' }), 'bare payload').toBeNull();
+
+        const GS = '\u001d';
+        const scm = `068107317${GS}840${GS}300${GS}DEMO 2`;
+        expect(measureBarcode('14', scm, { maxiMode: '2' })).not.toBeNull();
+        expect(measureBarcode('14', `107317${GS}863${GS}300${GS}DEMO 3`, { maxiMode: '3' })).not.toBeNull();
+
+        // The field ORDER is AIM's (postcode, country, class), not the order
+        // either printer writes its parameters in. Reversing it is rejected.
+        const wrong = `300${GS}840${GS}068107317${GS}DEMO 2`;
+        expect(measureBarcode('14', wrong, { maxiMode: '2' }), 'class-first is not the SCM order').toBeNull();
+    });
 });
 
 describe('parseBarcodeField — c20/c14 plumbing', () => {

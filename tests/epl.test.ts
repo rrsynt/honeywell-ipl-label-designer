@@ -996,7 +996,43 @@ describe('EPL MaxiCode mode is positional (2026-09-30)', () => {
         // readable but not the manual's form; saying so beats drawing the
         // wrong symbol quietly.
         expect(codes('b80,100,M,h5,m2,"DATA"')).toContain('epl-maxicode-mode-position');
-        // The control: the correct positional form says nothing.
-        expect(codes('b80,100,M,M2,"DATA"')).toEqual([]);
+        // The control: the correct positional form, with the data that modes 2
+        // and 3 require. Those modes carry "cl,co,pc,lpm" (manual p. 3-26);
+        // the bare "DATA" this test used to pass is not a structured carrier
+        // message, and the encoder rejects it — the field used to fall back to
+        // a placeholder box with nothing said. It is now named.
+        expect(codes('b80,100,M,M2,"300,840,068107317,DATA"')).toEqual([]);
+        expect(codes('b80,100,M,M2,"DATA"')).toContain('epl-maxicode-scm');
+    });
+
+    it('reassembles the "cl,co,pc,lpm" data into the SCM the encoder needs', () => {
+        // Manual p. 3-26: modes 2 and 3 carry the class, country and postal
+        // code as the leading fields of the DATA, comma-separated. The encoder
+        // takes them INSIDE the data, GS-separated in AIM's order, and it
+        // REJECTS the comma form — so before this, every EPL mode 2/3 MaxiCode
+        // drew as a placeholder box, with `buildBwipSpec` reporting no problem
+        // the whole time. The data is converted at parse, and this asserts the
+        // encoded form rather than the message.
+        const GS = '\u001d';
+        const data = (src: string) => (parseEPL(`N\n${src}\nP1\n`).elements[0] as any)?.source?.data;
+
+        expect(data('b80,100,M,M2,"300,840,068107317,DATA"')).toBe(`068107317${GS}840${GS}300${GS}DATA`);
+        expect(data('b80,100,M,M3,"300,863,107317,DATA"')).toBe(`107317${GS}863${GS}300${GS}DATA`);
+        // Modes 4 and 6 have no structured fields and pass through untouched.
+        expect(data('b80,100,M,m4,"DATA"')).toBe('DATA');
+        expect(data('b80,100,M,m6,"DATA"')).toBe('DATA');
+    });
+
+    it('ROUND TRIP: the generator writes the comma form back', () => {
+        const parsed = parseEPL('N\nb80,100,M,M2,"300,840,068107317,DATA"\nP1\n');
+        const el = parsed.elements[0] as any;
+        const out = generateEPL(withFields([barcodeField({
+            symbology: '14', maxiMode: 2, dataSource: { type: 'fixed', data: el.source.data },
+        })]));
+        // Back to class,country,post,message — the manual's own spelling.
+        expect(out.epl).toContain('"300,840,068107317,DATA"');
+        // and it re-parses to the same SCM.
+        const back = parseEPL(`N\n${out.epl.split('\n').find(l => l.startsWith('b'))}\nP1\n`);
+        expect((back.elements[0] as any).source.data).toBe(el.source.data);
     });
 });

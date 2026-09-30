@@ -261,7 +261,7 @@ describe('TSPL parser', () => {
         expect(label.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(true);
     });
 
-    it('draws QRCODE and PDF417, and reports the 2D it still cannot', () => {
+    it('draws the manual\'s 2D commands and reports the ones it still cannot', () => {
         const qr = parseTSPL('CLS\nQRCODE 10,10,L,4,A,0,"x"');
         expect(qr.elements).toHaveLength(1);
         expect((qr.elements[0] as any).symbology).toBe('18');
@@ -270,10 +270,12 @@ describe('TSPL parser', () => {
         const pdf = parseTSPL('CLS\nPDF417 10,10,200,100,0,"x"');
         expect((pdf.elements[0] as any).symbology).toBe('12');
 
-        // MAXICODE and AZTEC are in the language but not in this viewer yet,
-        // and a bitmap is still a bitmap.
-        const rest = parseTSPL('CLS\nMAXICODE 110,100,2,300,840,06810,7317,"x"\nAZTEC 10,10,3,"x"\nPUTBMP 10,10,"a.bmp"');
-        expect(rest.issues.some(i => i.code === 'tspl-maxicode-unsupported')).toBe(true);
+        const mx = parseTSPL('CLS\nMAXICODE 110,100,2,300,840,06810,7317,"x"');
+        expect((mx.elements[0] as any).symbology).toBe('14');
+        expect((mx.elements[0] as any).maxiMode).toBe('2');
+
+        // AZTEC is in the language and a bitmap is still a bitmap.
+        const rest = parseTSPL('CLS\nAZTEC 10,10,3,"x"\nPUTBMP 10,10,"a.bmp"');
         expect(rest.issues.some(i => i.code === 'tspl-aztec-unsupported')).toBe(true);
         expect(rest.issues.some(i => i.code === 'tspl-bitmap-unsupported')).toBe(true);
     });
@@ -470,18 +472,51 @@ describe('TSPL generator', () => {
         expect(pdf).toContain('"12345"');
     });
 
-    it('draws Data Matrix with DMATRIX, and names MaxiCode without claiming the language lacks it', () => {
+    it('draws Data Matrix with DMATRIX and MaxiCode with MAXICODE', () => {
         // The TSC TSPL manual documents DMATRIX (p. 51) and MAXICODE (p. 54),
         // and this app draws other TSPL 2D commands (QRCODE p. 65, PDF417
-        // p. 56) from that same manual. Data Matrix is now drawn; MaxiCode is
-        // still a viewer gap and must say so — never "the language lacks it".
+        // p. 56) from that same manual. Both commands the manual defines are
+        // now emitted; neither is a viewer gap any more.
         const dm = generateTSPL(design([barcodeField({ symbology: '17', name: 'DM' })]));
         expect(dm.tspl).toContain('DMATRIX');
         expect(dm.warnings).toEqual([]);
-        const mx = generateTSPL(design([barcodeField({ symbology: '14', name: 'MX' })]));
-        expect(mx.tspl).not.toContain('MAXICODE');
-        expect(mx.warnings.some(w => /does not have/.test(w))).toBe(false);
-        expect(mx.warnings.some(w => /TSPL has the command/.test(w))).toBe(true);
+        const mx = generateTSPL(design([barcodeField({ symbology: '14', name: 'MX', maxiMode: 4 })]));
+        expect(mx.tspl).toContain('MAXICODE');
+        expect(mx.warnings).toEqual([]);
+    });
+
+    it('MAXICODE round-trips: the generator decomposes the SCM back into parameters', () => {
+        // TSPL has no slot for the structured carrier message — the class,
+        // country and postal code are separate parameters (manual p. 54). The
+        // design holds them inside the data as the AIM SCM, so the generator
+        // has to take them back apart; writing the SCM as the content would
+        // put the whole message where the body belongs.
+        const GS = '\u001d';
+        const parsed = parseTSPL('CLS\nMAXICODE 110,100,2,300,840,06810,7317,"DEMO 2"');
+        const el = parsed.elements[0] as any;
+        const out = generateTSPL(design([barcodeField({
+            symbology: '14', maxiMode: Number(el.maxiMode),
+            dataSource: { type: 'fixed', data: el.source.data },
+        })]));
+        const line = lines([barcodeField({
+            symbology: '14', maxiMode: 2,
+            dataSource: { type: 'fixed', data: el.source.data },
+        })]).find(l => l.startsWith('MAXICODE'))!;
+        // class, country, postal code — the manual's order, postal code rejoined.
+        expect(line).toContain(',2,300,840,068107317,"DEMO 2"');
+        expect(out.warnings).toEqual([]);
+        // and reading it back gives the same structured data.
+        const back = parseTSPL(out.tspl).elements[0] as any;
+        expect(back.source.data).toBe(`068107317${GS}840${GS}300${GS}DEMO 2`);
+    });
+
+    it('MAXICODE with no mode says so rather than dropping the symbol', () => {
+        // TSPL has no "automatic selection": the mode is a required parameter
+        // and the manual documents no fallback. A design without one cannot be
+        // written as authored, so it is named instead of guessed at silently.
+        const out = generateTSPL(design([barcodeField({ symbology: '14', name: 'MX' })]));
+        expect(out.tspl).toContain('MAXICODE');
+        expect(out.warnings.join(' ')).toMatch(/no automatic selection/);
     });
 
     it('escapes a quote and a backslash the TSPL way, and the parser undoes it', () => {
@@ -690,24 +725,52 @@ describe('MicroPDF417 works in TSPL (2026-09-30)', () => {
         }
     });
 
-    it('does not tell the user MaxiCode is absent while listing it as present', () => {
+    it('MAXICODE: TSPL writes the SCM fields as PARAMETERS, so they are reassembled', () => {
+        // TSC manual p. 54:
+        //   MAXICODE x,y,mode,class,country,post,"content"
+        // and for mode 2 the postal code is written "06810,7317" — a comma
+        // INSIDE the field, which the parameter splitter cuts in two.
+        //
+        // The encoder needs those three INSIDE the data, GS-separated in the
+        // AIM order (post<GS>country<GS>class<GS>body), and it REJECTS a bare
+        // payload for modes 2 and 3. A spec built without them looks fine
+        // until measureBarcode is actually called, so this asserts the
+        // assembled data rather than the command text alone.
+        const GS = '\u001d';
+        const mx = parseTSPL('CLS\nMAXICODE 110,100,2,300,840,06810,7317,"DEMO 2"');
+        const el = mx.elements[0] as any;
+        expect(el.symbology).toBe('14');
+        expect(el.maxiMode).toBe('2');
+        expect(el.source.data).toBe(`068107317${GS}840${GS}300${GS}DEMO 2`);
+        // The two-part postal code must not survive as a body field.
+        expect(el.source.data).not.toContain('7317,DEMO');
+
+        // Mode 3's postal code is alphanumeric and stays one field.
+        const m3 = parseTSPL('CLS\nMAXICODE 110,100,3,300,863,"107317","DEMO 3"');
+        expect((m3.elements[0] as any).source.data).toBe(`107317${GS}863${GS}300${GS}DEMO 3`);
+
+        // Modes 4/5 carry no SCM, so the content is the data.
+        const m4 = parseTSPL('CLS\nMAXICODE 110,100,4,"DEMO 4"');
+        expect((m4.elements[0] as any).source.data).toBe('DEMO 4');
+        expect((m4.elements[0] as any).maxiMode).toBe('4');
+    });
+
+    it('never tells the user a symbol TSPL defines is absent from the language', () => {
         // The old message said "...the language defines QRCODE, PDF417,
         // MAXICODE and AZTEC, and this one is not among them", and it fired
-        // for MAXICODE. MaxiCode IS in TSPL — so the list was right and the
-        // "not among them" was the lie. The fix is that the one symbol the
-        // message handles, MaxiCode, must never reach this warning at all:
-        // TSPL has it, so it belongs with the drawable ones or with an
-        // explicit "not drawn yet", never with "the language does not have it".
-        const warn = generateTSPL(design('14')).warnings[0];
-        expect(warn, 'MaxiCode must not be reported as absent from TSPL')
-            .not.toMatch(/does not have/);
-        expect(warn, 'MaxiCode must say the command exists').toMatch(/TSPL has the command/);
-        // Data Matrix was the same case — the TSC manual documents DMATRIX
-        // (p. 51), so "TSPL has no DataMatrix" was false; that premise is now
-        // gone entirely: Data Matrix is DRAWN, so there is no message at all.
+        // for MAXICODE. MaxiCode IS in TSPL, so the list was right and "not
+        // among them" was the lie against the manual this app draws from.
+        //
+        // Both symbols that message handled are now DRAWN from the TSC manual
+        // — Data Matrix with DMATRIX (p. 51) and MaxiCode with MAXICODE
+        // (p. 54) — so neither produces any warning at all.
         const dm = generateTSPL(design('17'));
-        expect(dm.tspl, 'Data Matrix is now drawn with DMATRIX').toContain('DMATRIX');
+        expect(dm.tspl, 'Data Matrix is drawn with DMATRIX').toContain('DMATRIX');
         expect(dm.warnings, 'and needs no warning').toEqual([]);
+        const mx = generateTSPL(design('14'));
+        expect(mx.tspl, 'MaxiCode is drawn with MAXICODE').toContain('MAXICODE');
+        expect(mx.warnings.join(' '), 'and is never called absent from TSPL')
+            .not.toMatch(/does not have/);
     });
 });
 
