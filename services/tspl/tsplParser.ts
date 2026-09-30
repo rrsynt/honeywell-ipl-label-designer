@@ -715,6 +715,109 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 break;
             }
 
+            case 'AZTEC': {
+                // AZTEC x,y,rotate,[size,]ecp,]flg,]menu,]multi,]rev,] "content"
+                // (TSC manual p. 59). Every parameter after the rotation is
+                // OPTIONAL and its meaning is POSITIONAL — the manual's own
+                // example is `AZTEC 10,10,0,"ABCD…"` with none of them.
+                //
+                // `ecp` is not a preference: it selects the symbol FORMAT
+                // (compact / full-range / rune) as well as the correction
+                // level, so reading it as only a percentage would draw a
+                // full-range symbol where a compact one was asked for. The
+                // three forms are three different bwip encoders.
+                if (p.length < 3) {
+                    issue('warning', 'tspl-aztec-params', `AZTEC needs x,y,rotate. Found ${p.length}. Skipped.`, 'AZTEC');
+                    break;
+                }
+                const azContent = p[p.length - 1] ?? '';
+                if (azContent === '') {
+                    issue('warning', 'tspl-aztec-empty', 'An Aztec symbol with no data prints nothing.', 'AZTEC');
+                    break;
+                }
+                const azOpts = p.slice(3, -1).map(s => s.trim());
+                const azSize = Math.max(1, Math.min(20, Math.trunc(num(azOpts[0], 6) || 6)));
+                const ecpRaw = azOpts[1];
+                const ecp = ecpRaw === undefined || ecpRaw === '' ? undefined : String(Math.trunc(num(ecpRaw, 0)));
+                elements.push(place({
+                    kind: 'barcode', id: nextId++,
+                    ox: num(p[0], 0), oy: num(p[1], 0),
+                    f: quadrantFromClockwise(p[2]),
+                    symbology: '23',
+                    // Aztec is a matrix: `size` is the module size and the grid
+                    // is the encoder's own business, so a nominal multiple keeps
+                    // the anchor sane without pretending to know the layer count.
+                    heightDots: azSize * 21,
+                    moduleDots: azSize,
+                    ratio: 1,
+                    hri: 0,
+                    source: { type: 'fixed', data: azContent },
+                    ...(ecp !== undefined ? { aztecEcp: ecp } : {}),
+                } as BarcodeElement));
+                if (azOpts[2] !== undefined && azOpts[2] !== '' && azOpts[2] !== '0') {
+                    // "1: input uses <Esc>n for FLG(n), <Esc><Esc> for <Esc>" —
+                    // it changes how the DATA is unescaped, not the symbol.
+                    issue('info', 'tspl-aztec-flg',
+                        'AZTEC flg=1 makes the printer read "<Esc>n" sequences in the data (FLG(n) / literal <Esc>); this preview decodes the content as written.', 'AZTEC');
+                }
+                if (azOpts[3] !== undefined && azOpts[3] !== '' && azOpts[3] !== '0') {
+                    issue('info', 'tspl-aztec-menu', 'AZTEC menu=1 makes the symbol indicate that a menu accompanies it; this preview draws the symbol itself.', 'AZTEC');
+                }
+                if (azOpts[4] !== undefined && azOpts[4] !== '' && azOpts[4] !== '0') {
+                    issue('info', 'tspl-aztec-multi', `AZTEC multi=${azOpts[4]} splits long data across several symbols; this preview draws a single symbol.`, 'AZTEC');
+                }
+                if (azOpts[5] !== undefined && azOpts[5] !== '' && azOpts[5] !== '0') {
+                    // The same limitation as EPL's Data Matrix inverse: the
+                    // renderer paints dark modules onto a white sheet, and the
+                    // offscreen-flip attempt measured as a no-op, so this is
+                    // REPORTED rather than left looking implemented.
+                    issue('info', 'tspl-aztec-rev', 'AZTEC rev=1 asks for a reversed (white on black) symbol; this preview draws it black on white.', 'AZTEC');
+                }
+                if (ecp !== undefined) {
+                    const n = Number(ecp);
+                    const known = n === 0 || (n >= 1 && n <= 99) || (n >= 101 && n <= 104)
+                        || (n >= 201 && n <= 232) || n === 300;
+                    if (!known) {
+                        issue('info', 'tspl-aztec-ecp', `AZTEC ecp=${ecp} is not one of the documented values (0; 1-99 a correction percentage; 101-104 compact layers; 201-232 full-range layers; 300 a Rune); the encoder's default is used.`, 'AZTEC');
+                    }
+                }
+                break;
+            }
+
+            case 'CODABLOCK': {
+                // CODABLOCK x,y,rotation,[row height,]module width,]"content"
+                // (TSC manual p. 50). Row height defaults to 8 and module width
+                // to 2, and the printed row height is their PRODUCT — so the
+                // two are not interchangeable and both are kept.
+                if (p.length < 4) {
+                    issue('warning', 'tspl-codablock-params', `CODABLOCK needs x,y,rotation,"content". Found ${p.length}. Skipped.`, 'CODABLOCK');
+                    break;
+                }
+                const cbContent = p[p.length - 1] ?? '';
+                if (cbContent === '') {
+                    issue('warning', 'tspl-codablock-empty', 'A Codablock F symbol with no data prints nothing.', 'CODABLOCK');
+                    break;
+                }
+                const cbOpts = p.slice(3, -1).map(s => s.trim());
+                const rowH = cbOpts[0] === undefined || cbOpts[0] === '' ? '8' : String(Math.trunc(num(cbOpts[0], 8) || 8));
+                const modW = cbOpts[1] === undefined || cbOpts[1] === '' ? '2' : String(Math.trunc(num(cbOpts[1], 2) || 2));
+                const modNum = Math.max(1, Math.trunc(num(modW, 2)));
+                elements.push(place({
+                    kind: 'barcode', id: nextId++,
+                    ox: num(p[0], 0), oy: num(p[1], 0),
+                    f: quadrantFromClockwise(p[2]),
+                    symbology: '24',
+                    heightDots: Math.max(1, Math.trunc(num(rowH, 8))) * modNum,
+                    moduleDots: modNum,
+                    ratio: 1,
+                    hri: 0,
+                    source: { type: 'fixed', data: cbContent },
+                    codablockRowHeight: rowH,
+                    codablockModuleWidth: modW,
+                } as BarcodeElement));
+                break;
+            }
+
             case 'RSS': {
                 // RSS x,y,"sym",rotate,pixMult,sepHt[,"content"] (TSC manual
                 // p. 71). It is NOT a BARCODE type: GS1 DataBar has its own
@@ -1150,9 +1253,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
 
             default: {
                 if (PRINTER_SETTINGS.has(cmd.name)) break;
-                if (cmd.name === 'AZTEC') {
-                    issue('info', 'tspl-aztec-unsupported', 'TSPL AZTEC is not part of this viewer yet.', 'AZTEC');
-                } else if (cmd.name === 'PUTBMP' || cmd.name === 'PUTPCX') {
+                if (cmd.name === 'PUTBMP' || cmd.name === 'PUTPCX') {
                     issue('info', 'tspl-bitmap-unsupported', `TSPL graphics (${cmd.name}) are not part of this viewer yet.`, cmd.name);
                 } else if (cmd.name === 'BLOCK') {
                     issue('info', 'tspl-block-unsupported', 'TSPL BLOCK (multi-line text) is not part of this viewer yet.', 'BLOCK');

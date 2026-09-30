@@ -39,7 +39,13 @@ const MATRIX_BCIDS = new Set(['pdf417', 'datamatrix', 'qrcode', 'micropdf417', '
     'gs1-128composite', 'ean13composite', 'ean8composite', 'upcacomposite', 'upcecomposite',
     'databaromnicomposite', 'databartruncatedcomposite', 'databarstackedcomposite',
     'databarstackedomnicomposite', 'databarlimitedcomposite', 'databarexpandedcomposite',
-    'databarexpandedstackedcomposite']);
+    'databarexpandedstackedcomposite',
+    // 2D symbols whose raster is a module GRID: the symbol decides its own row
+    // count, so the height must come from the raster rather than from the
+    // field's declared height. Leaving Aztec out made the layout measure it
+    // from a nominal 21-row guess, and leaving Codablock out squashed it to the
+    // field height — the same defect class ZPL's bitmap fonts had.
+    'azteccode', 'azteccodecompact', 'aztecrune', 'codablockf']);
 
 // QR Code model/EC/mask and MicroPDF417 size modifiers (PRM pp.158-159).
 const QR_EC_LEVELS = new Set(['L', 'M', 'Q', 'H']);
@@ -259,6 +265,23 @@ export interface BarcodeParams {
     /** EPL b…D,c/r — the symbol's column and row count. */
     dmCols?: string;
     dmRows?: string;
+    /**
+     * TSPL AZTEC `ecp` — error control AND symbol FORMAT in one parameter
+     * (TSC manual p. 59). These are different symbols, not preferences:
+     *
+     *   0            encoder default
+     *   1..99        minimum error-correction percentage
+     *   101..104     1..4-layer COMPACT symbol
+     *   201..232     1..32-layer FULL-RANGE symbol
+     *   300          a simple Aztec "Rune"
+     */
+    aztecEcp?: string;
+    /** TSPL AZTEC `size` — element module size in dots (1-20, default 6). */
+    aztecSize?: string;
+    /** TSPL CODABLOCK row height (default 8) and module width (default 2,
+     *  manual p. 50). The printed row height is rowHeight × moduleWidth. */
+    codablockRowHeight?: string;
+    codablockModuleWidth?: string;
 }
 
 /**
@@ -534,6 +557,56 @@ export const buildBwipSpec = (symbology: string, data: string, params: BarcodePa
         return { main: { bcid: 'datamatrix', text: data, opts } };
     }
 
+    if (symbology === '23') {
+        // Aztec (TSPL `AZTEC`, TSC manual p. 59). bwip exposes it as three
+        // SEPARATE bcid names — azteccode (full-range), azteccodecompact and
+        // aztecrune — while TSPL expresses all three through the single `ecp`
+        // parameter. They are different SYMBOLS, so the choice is made here
+        // rather than left to the encoder's default.
+        //
+        //   ecp 0            encoder default
+        //   ecp 1..99        minimum error-correction percentage
+        //   ecp 101..104     n-layer COMPACT
+        //   ecp 201..232     n-layer FULL-RANGE
+        //   ecp 300          Rune
+        const ecp = parseInt(params.aztecEcp ?? '', 10);
+        const opts: Record<string, unknown> = {};
+        let bcid = 'azteccode';
+        if (Number.isInteger(ecp)) {
+            if (ecp === 300) {
+                bcid = 'aztecrune';
+            } else if (ecp >= 101 && ecp <= 104) {
+                bcid = 'azteccodecompact';
+                // The low two digits are the layer count for both compact and
+                // full-range forms; the encoder validates the range itself.
+                opts.layers = ecp - 100;
+            } else if (ecp >= 201 && ecp <= 232) {
+                opts.layers = ecp - 200;
+            } else if (ecp >= 1 && ecp <= 99) {
+                // A percentage. bwip's eclevel has the same meaning and the
+                // same 5-95 bound; a value the encoder refuses is reported
+                // through the usual null-spec path rather than clamped, so a
+                // stream asking for something impossible is not silently
+                // turned into a different symbol.
+                opts.eclevel = ecp;
+            }
+        }
+        return { main: { bcid, text: data, opts } };
+    }
+
+    if (symbology === '24') {
+        // Codablock F (TSPL `CODABLOCK`, TSC manual p. 50). The row height is
+        // "row height x module width", which is what bwip's `rowheight` counts
+        // in modules, so the product is passed as that module multiple.
+        const opts: Record<string, unknown> = {};
+        const rowH = parseInt(params.codablockRowHeight ?? '', 10);
+        const modW = parseInt(params.codablockModuleWidth ?? '', 10);
+        if (Number.isInteger(rowH) && rowH > 0) {
+            opts.rowheight = Number.isInteger(modW) && modW > 0 ? rowH * modW : rowH;
+        }
+        return { main: { bcid: 'codablockf', text: data, opts } };
+    }
+
     const bcid = IPL_SYMBOLOGY_TO_BCID[symbology];
     return bcid ? { main: { bcid, text: data, opts: {} } } : null;
 };
@@ -640,7 +713,9 @@ const paramsKey = (p: BarcodeParams): string =>
         p.compositeVersion ?? '', p.compositeColumns ?? '', p.compositeRowHeight ?? '',
         p.rssVersion ?? '', p.rssSepHeight ?? '', p.rssSegments ?? '',
         p.maxiMode ?? '', p.dmVersion ?? '', p.inverse ? '1' : '',
-        p.dmCols ?? '', p.dmRows ?? '', p.dmShape ?? ''].join('\x00');
+        p.dmCols ?? '', p.dmRows ?? '', p.dmShape ?? '',
+        p.aztecEcp ?? '', p.aztecSize ?? '',
+        p.codablockRowHeight ?? '', p.codablockModuleWidth ?? ''].join('\x00');
 
 /**
  * True when the field is painted from bwip raw() module runs instead of the

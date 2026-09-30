@@ -163,6 +163,22 @@ export interface BarcodeElement extends ElementBase {
     /** EPL b…D,c/r — the symbol's column and row count. */
     dmCols?: string;
     dmRows?: string;
+    /**
+     * TSPL AZTEC `ecp` — the error-control parameter. It selects BOTH the
+     * correction level and the symbol FORMAT, and those are different symbols
+     * rather than a preference:
+     *
+     *   0            encoder default
+     *   1..99        minimum error-correction percentage
+     *   101..104     1..4-layer COMPACT symbol
+     *   201..232     1..32-layer FULL-RANGE symbol
+     *   300          a simple Aztec "Rune"
+     */
+    aztecEcp?: string;
+    /** TSPL CODABLOCK row height and module width (manual p. 50). The printed
+     *  row height is `rowHeight × moduleWidth`. */
+    codablockRowHeight?: string;
+    codablockModuleWidth?: string;
 }
 
 export interface LineElement extends ElementBase {

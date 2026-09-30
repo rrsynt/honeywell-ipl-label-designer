@@ -106,6 +106,8 @@ const TSPL_2D_COMMAND: Record<string, string> = {
     '12': 'PDF417',
     '19': 'MPDF417',
     '14': 'MAXICODE',
+    '23': 'AZTEC',
+    '24': 'CODABLOCK',
 };
 
 /** EAN/UPC variants, by the DATA LENGTH — which is how TSPL's names map. */
@@ -223,6 +225,24 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                     const mod = Math.max(1, Math.round(field.w_mag ?? 3));
                     const rot = (field.rotation / 90) * 90 % 360;
                     lines.push(`DMATRIX ${x},${y},${w},${h},x${mod},r${rot},"${escapeTsplData(data)}"`);
+                } else if (cmd === 'AZTEC') {
+                    // AZTEC x,y,rotate,[size,]ecp,]flg,]menu,]multi,]rev,]"content"
+                    // (TSC manual p. 59). The parameters after the rotation are
+                    // POSITIONAL and optional, so an unset `size` still has to
+                    // be written if `ecp` is present — a gap in a positional
+                    // list shifts every later value.
+                    const size = Math.max(1, Math.min(20, Math.round(field.w_mag ?? 6) || 6));
+                    const ecp = (field as { aztecEcp?: string }).aztecEcp;
+                    const head = ecp === undefined || ecp === '' ? '' : `${size},${ecp},`;
+                    lines.push(`AZTEC ${x},${y},${rotation},${head}"${escapeTsplData(data)}"`);
+                } else if (cmd === 'CODABLOCK') {
+                    // CODABLOCK x,y,rotation,[row height,]module width,]"content"
+                    // (TSC manual p. 50). Row height is written only when a
+                    // module width follows it, because the two are positional.
+                    const modW = Math.max(1, Math.round(field.w_mag ?? 2) || 2);
+                    const rowH = (field as { codablockRowHeight?: string }).codablockRowHeight;
+                    const head = rowH === undefined || rowH === '' ? '' : `${rowH},`;
+                    lines.push(`CODABLOCK ${x},${y},${rotation},${head}${modW},"${escapeTsplData(data)}"`);
                 } else if (cmd === 'MAXICODE') {
                     // MAXICODE x,y,mode,[class,country,post,]\"content\" (TSC
                     // manual p. 54). The symbol is FIXED SIZE — the command has

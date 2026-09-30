@@ -238,6 +238,9 @@ const barcodeParams = (el: BarcodeElement): BarcodeParams => ({
     inverse: el.inverse,
     dmCols: el.dmCols,
     dmRows: el.dmRows,
+    aztecEcp: el.aztecEcp,
+    codablockRowHeight: el.codablockRowHeight,
+    codablockModuleWidth: el.codablockModuleWidth,
 });
 
 /**

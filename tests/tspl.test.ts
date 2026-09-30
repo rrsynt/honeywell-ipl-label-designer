@@ -17,11 +17,14 @@
 //
 // There is NO independent oracle for TSPL — see tools/tspl-crosscheck.mjs.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
+import './golden/setup'; // real canvas + bwip shims for the encoder assertions
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseTSPL, tokenizeTspl, unescapeTspl, TSPL_FONT_SIZES } from '../services/tspl/tsplParser';
 import { generateTSPL, escapeTsplData } from '../services/tspl/tsplGenerator';
+import { buildBwipSpec, measureBarcode, ensureBarcodesReady } from '../services/ipl/barcodes';
+import { estimateElementSize } from '../services/ipl/renderer';
 import { jobSendabilityError, renderJobChunk, type PrintJob } from '../services/printQueue';
 import { validateTarget } from '../services/printTargets';
 import type { Design } from '../types';
@@ -30,6 +33,10 @@ import type { Design } from '../types';
  *  the escape tests got the runtime string wrong, so they are built explicitly. */
 const BS = String.fromCharCode(92);
 type Rotation = 0 | 90 | 180 | 270;
+
+// The bwip encoder loads asynchronously; the AZTEC assertions call it directly
+// (that is the point — a healthy spec is not proof the encoder accepts it).
+beforeAll(async () => { await ensureBarcodesReady(); });
 
 // --- tokenizer --------------------------------------------------------------------
 
@@ -274,9 +281,15 @@ describe('TSPL parser', () => {
         expect((mx.elements[0] as any).symbology).toBe('14');
         expect((mx.elements[0] as any).maxiMode).toBe('2');
 
-        // AZTEC is in the language and a bitmap is still a bitmap.
-        const rest = parseTSPL('CLS\nAZTEC 10,10,3,"x"\nPUTBMP 10,10,"a.bmp"');
-        expect(rest.issues.some(i => i.code === 'tspl-aztec-unsupported')).toBe(true);
+        const az = parseTSPL('CLS\nAZTEC 10,10,3,"x"');
+        expect((az.elements[0] as any).symbology).toBe('23');
+
+        const cb = parseTSPL('CLS\nCODABLOCK 10,10,3,"x"');
+        expect((cb.elements[0] as any).symbology).toBe('24');
+
+        // A bitmap is still a bitmap: PUTBMP names a FILE the printer reads,
+        // which is not something a stream can carry.
+        const rest = parseTSPL('CLS\nPUTBMP 10,10,"a.bmp"');
         expect(rest.issues.some(i => i.code === 'tspl-bitmap-unsupported')).toBe(true);
     });
 
@@ -829,6 +842,107 @@ describe('MicroPDF417 works in TSPL (2026-09-30)', () => {
         const m4 = parseTSPL('CLS\nMAXICODE 110,100,4,"DEMO 4"');
         expect((m4.elements[0] as any).source.data).toBe('DEMO 4');
         expect((m4.elements[0] as any).maxiMode).toBe('4');
+    });
+
+    it('AZTEC: ecp chooses the FORMAT, not just a correction level', () => {
+        // TSC manual p. 59. `ecp` is the one parameter that decides both the
+        // correction level and the symbol FORMAT, and those are different
+        // symbols rather than a preference — the three forms are three
+        // separate bwip encoders (azteccode / azteccodecompact / aztecrune).
+        // Reading it as only a percentage would draw a full-range symbol
+        // where a compact one was asked for.
+        const specOf = (ecp: string) =>
+            buildBwipSpec('23', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', { aztecEcp: ecp })!.main;
+        expect(specOf('0').bcid).toBe('azteccode');
+        expect(specOf('50').bcid).toBe('azteccode');
+        expect(specOf('50').opts.eclevel, '1-99 is a percentage').toBe(50);
+        expect(specOf('104').bcid, '101-104 is COMPACT').toBe('azteccodecompact');
+        expect(specOf('104').opts.layers).toBe(4);
+        expect(specOf('208').bcid, '201-232 is FULL-RANGE').toBe('azteccode');
+        expect(specOf('208').opts.layers).toBe(8);
+        expect(specOf('300').bcid, '300 is a Rune').toBe('aztecrune');
+
+        // and the distinction reaches the ENCODER, not just the spec: a
+        // different ecp must produce a different symbol.
+        const size = (ecp: string) => {
+            const m = measureBarcode('23', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', { aztecEcp: ecp })!;
+            return `${m.widthModules}x${m.heightPx}`;
+        };
+        expect(size('30')).not.toBe(size('70'));
+        expect(size('0')).not.toBe(size('208'));
+        // Rendering is what proves the mapping is accepted rather than merely
+        // well-formed — the lesson MaxiCode taught.
+        expect(measureBarcode('23', 'AB', { aztecEcp: '101' }), 'compact 1 layer').not.toBeNull();
+        expect(measureBarcode('23', 'AB', { aztecEcp: '201' }), 'full 1 layer').not.toBeNull();
+        expect(measureBarcode('23', '123', { aztecEcp: '300' }), 'a Rune').not.toBeNull();
+    });
+
+    it('AZTEC: a Rune is numeric-only, and the parser says so by rendering', () => {
+        // The encoder refuses a non-numeric Rune ("Aztec runes must be
+        // numeric"), which is the documented behaviour rather than a gap in
+        // this mapping — the field is left off with the encoder's own reason
+        // through the usual deep-validation path.
+        expect(measureBarcode('23', 'AB', { aztecEcp: '300' })).toBeNull();
+        expect(measureBarcode('23', '42', { aztecEcp: '300' })).not.toBeNull();
+    });
+
+    it('AZTEC parses the manual\'s optional tail positionally', () => {
+        // "AZTEC x,y,rotate,[size,]ecp,]flg,]menu,]multi,]rev,] "content"" —
+        // the manual's own example carries none of the optionals, so the
+        // bare form must work and the positions must not shift.
+        const bare = parseTSPL('CLS\nAZTEC 10,10,0,"AB"').elements[0] as any;
+        expect(bare.symbology).toBe('23');
+        expect(bare.aztecEcp).toBeUndefined();
+        expect(bare.moduleDots, 'size defaults to 6').toBe(6);
+
+        const full = parseTSPL('CLS\nAZTEC 10,10,90,4,208,0,0,0,0,"AB"').elements[0] as any;
+        expect(full.moduleDots).toBe(4);
+        expect(full.aztecEcp).toBe('208');
+        expect(full.f, 'rotation is clockwise, negated like every TSPL command').toBe(3);
+
+        // A named parameter that changes the IMAGE is reported, not silently
+        // drawn differently: rev reverses the symbol, which this preview cannot.
+        const rev = parseTSPL('CLS\nAZTEC 10,10,0,6,0,0,0,0,1,"AB"');
+        expect(rev.issues.map(i => i.code)).toContain('tspl-aztec-rev');
+        // and an undocumented ecp is named rather than passed on.
+        const bad = parseTSPL('CLS\nAZTEC 10,10,0,6,150,"AB"');
+        expect(bad.issues.map(i => i.code)).toContain('tspl-aztec-ecp');
+    });
+
+    it('CODABLOCK F: row height and module width are both kept, and multiply', () => {
+        // Manual p. 50: "the height of individual row equals to row height x
+        // module width". Treating the sixth parameter as a height on its own
+        // would under-print every Codablock by the module factor.
+        const bare = parseTSPL('CLS\nCODABLOCK 10,50,0,"DATA"').elements[0] as any;
+        expect(bare.symbology).toBe('24');
+        expect(bare.codablockRowHeight, 'row height defaults to 8').toBe('8');
+        expect(bare.codablockModuleWidth, 'module width defaults to 2').toBe('2');
+        expect(bare.heightDots, '8 x 2').toBe(16);
+        expect(bare.moduleDots).toBe(2);
+
+        const explicit = parseTSPL('CLS\nCODABLOCK 10,50,0,16,1,"DATA"').elements[0] as any;
+        expect(explicit.heightDots, '16 x 1').toBe(16);
+        expect(explicit.moduleDots).toBe(1);
+
+        // The symbol's own row count decides its height, not the field's
+        // declared one: a module-grid symbol measured from `heightDots` alone
+        // was squashed to 16 dots where the raster is 69 — the same defect
+        // class as ZPL's bitmap-font sizing.
+        const size = estimateElementSize(parseTSPL('CLS\nCODABLOCK 10,50,0,16,1,"We stand behind our products."').elements[0], 203);
+        const raster = measureBarcode('24', 'We stand behind our products.', { codablockRowHeight: '16', codablockModuleWidth: '1' })!;
+        expect(size.crossDots, 'height comes from the raster').toBe(raster.heightPx * 1);
+
+        // Round trip: what the generator writes, the parser reads back.
+        const line = lines([barcodeField({
+            symbology: '24', w_mag: 1,
+            dataSource: { type: 'fixed', data: 'DATA' },
+            codablockRowHeight: '16',
+        } as never)]).find(l => l.startsWith('CODABLOCK'))!;
+        expect(line).toContain('CODABLOCK ');
+        expect(line).toContain(',16,1,');
+        const back = parseTSPL(`CLS\n${line}`).elements[0] as any;
+        expect(back.codablockRowHeight).toBe('16');
+        expect(back.codablockModuleWidth).toBe('1');
     });
 
     it('never tells the user a symbol TSPL defines is absent from the language', () => {

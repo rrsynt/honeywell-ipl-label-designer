@@ -418,4 +418,9 @@ export const BARCODE_MAP: { [key: string]: string } = {
     '0': 'Code 39', '1': 'Code 93', '2': 'Interleaved 2 of 5', '3': 'Code 2 of 5', '4': 'Codabar', '5': 'Code 11', '6': 'Code 128 / GS1-128', '7': 'EAN/UPC',
     '8': 'HIBC Code 39', '9': 'Code 16K', '10': 'Code 49', '11': 'POSTNET',
     '12': 'PDF417', '14': 'MaxiCode', '16': 'HIBC Code 128', '17': 'DataMatrix', '18': 'QR Code', '19': 'MicroPDF417', '20': 'RSS / GS1 DataBar', '22': 'Planet',
+    // 23/24 are NOT IPL bar code types — the PRM's c list stops at c22. They are
+    // the IR's own ids for the two 2D commands TSPL defines and IPL does not, so
+    // a TSPL stream carrying them can round-trip through the designer instead of
+    // having the symbol dropped as "not a symbology".
+    '23': 'Aztec', '24': 'Codablock F',
 };
