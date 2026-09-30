@@ -133,7 +133,25 @@ const PRINTER_SETTINGS = new Set([
     'I', 'oR', 'oB', 'oE', 'oH', 'oM', 'oW', 'O',   // code page, options
     'M', 'U', 'UA', 'UB', 'UE', 'UF', 'UG', 'UI', 'UM', 'UN', 'UP', 'UQ', 'US', 'U$', 'U%',
     'V', 'C', 'TD', 'TT', 'TS', 'r', 'JB', 'JF', 'FE', 'FS', 'FK', 'FR', 'EK',
-    'LD', 'GG', 'GM', 'GI', 'H', 'W', 'K', 'e',
+    'GM', 'GI', 'W',
+    // 'LD', 'H', 'K' and 'e' used to be here, and NONE of them is a command in
+    // the EPL2 Programmer's Manual. Checked against the manual's own command
+    // list: 'LD' appears nowhere at all, and 'H' and 'K' are only ever the
+    // tails of 'oH' (Macro PDF Offset) and 'EK' (Delete Soft Font) — a
+    // search for a definition finds those, not these. 'e' is not a command
+    // either; 'eR' is (User Defined Error/Status Character, p. 3-42).
+    //
+    // EPL is CASE-SENSITIVE and the tokenizer takes names verbatim, so 'e' is
+    // not 'eR' and never was — the same mistake the lowercase 'a' entry made,
+    // in this same list. All four silenced an unrecognized command instead of
+    // naming it; they now report like anything else.
+    //
+    // 'GG' used to be here. It is Print Graphics (manual p. 3-57) — it DRAWS a
+    // PCX image, by name, from the printer's own memory — so it is not a
+    // printer setting and silence was never right for it. The graphic is not in
+    // the stream, so it still cannot be drawn; it is now named in the default
+    // branch instead of vanishing.
+    //
     // 'LE' used to be here. It is Line Draw Exclusive OR (manual p. 3-68) — a
     // DRAWING command that inverts every dot it crosses — so it belongs with
     // LO/LW/LS, not with the sensor and job settings this list exists for. In
@@ -643,6 +661,19 @@ export const parseEPL = (code: string): ViewerLabel => {
                     issue('info', 'epl-ls-unsupported', 'Diagonal lines (LS) are not part of this viewer yet.', 'LS');
                 } else if (cmd.name === 'GW') {
                     issue('info', 'epl-gw-unsupported', 'Binary graphics (GW) are not part of this viewer yet.', 'GW');
+                } else if (cmd.name === 'GG') {
+                    // GG is Print Graphics (manual p. 3-57): it prints a PCX
+                    // image by NAME from the printer's own memory. It draws, so
+                    // it must not be silent — but it cannot be drawn here either,
+                    // because the graphic lives in the printer and the stream
+                    // carries only the name. Named at 'info' rather than
+                    // 'warning': nothing the user typed is wrong, the image is
+                    // simply elsewhere, and the message says where it looks.
+                    const stored = /"([^"]*)"/.exec(cmd.raw);
+                    issue('info', 'epl-gg-stored-graphic',
+                        stored
+                            ? `GG prints the stored graphic "${stored[1]}", which lives in the printer's memory and is not part of this stream, so nothing is drawn for it.`
+                            : `GG prints a graphic stored in the printer, which is not part of this stream, so nothing is drawn for it.`, 'GG');
                 } else {
                     issue('info', 'epl-unsupported', `${cmd.name} is not part of the supported EPL subset, so it has no effect here.`, cmd.name);
                 }

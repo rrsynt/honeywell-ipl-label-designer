@@ -280,6 +280,48 @@ b10,20,${letter},"DATA"`).elements[0] as any)?.symbology;
         expect(le.issues.some(i => i.code === 'epl-le-params')).toBe(true);
     });
 
+    it('names every silence-list entry the manual does not define', () => {
+        // The silence list exists so ordinary printer settings do not drown the
+        // issues panel. An entry that is NOT a command at all therefore does the
+        // opposite of its job: it turns an unrecognized line into no message,
+        // which is the one outcome this parser is built to avoid.
+        //
+        // Checked against the manual's own definitions rather than from memory:
+        // docs/manuals/EPL2_Programmers_Manual_980352-001.txt records one
+        // "NAME  Comm and -  Title" heading per documented command.
+        //
+        // A positive control runs FIRST. Without it, a heading pattern that
+        // matched nothing would "prove" that no silenced entry is a command —
+        // the vacuous pass this project keeps meeting.
+        const manual = fs.readFileSync(
+            path.join(process.cwd(), 'docs', 'manuals', 'EPL2_Programmers_Manual_980352-001.txt'), 'utf8');
+        const defined = new Set(
+            [...manual.matchAll(/([A-Za-z^;?@%$][A-Za-z0-9^;?@%$]{0,5})\s+Comm\s*and\s*-\s*([^.\n]{2,60})/g)]
+                .map(m => m[1]));
+        // Control: commands we KNOW the manual documents must be in that set.
+        for (const known of ['A', 'LO', 'LW', 'LE', 'eR', 'oH', 'q', 'Q', 'FS']) {
+            expect(defined, `the heading scan must find ${known}`).toContain(known);
+        }
+
+        const src = fs.readFileSync(
+            path.join(process.cwd(), 'services', 'epl', 'eplParser.ts'), 'utf8');
+        const i = src.indexOf('const PRINTER_SETTINGS = new Set([');
+        const body = src.slice(i, src.indexOf(']);', i)).replace(/\/\/[^\n]*/g, '');
+        const listed = [...body.matchAll(/'([^']+)'/g)].map(m => m[1]);
+        expect(listed.length, 'the silence list must have been read').toBeGreaterThan(40);
+
+        const notCommands = listed.filter(c => !defined.has(c));
+        expect(notCommands, 'these silence an unrecognized command instead of naming it')
+            .toEqual([]);
+
+        // Being a documented command is not enough on its own — GG is one, and
+        // it DRAWS a graphic by name from the printer's memory. Silence is only
+        // defensible for a setting that cannot change the image, so the one
+        // drawn-but-undrawable command is checked to report rather than to
+        // vanish.
+        expect(parseEPL('N\nGG50,50,"LOGO"').issues.map(i => i.code)).toContain('epl-gg-stored-graphic');
+    });
+
     it('says nothing about ordinary printer settings', () => {
         expect(parseEPL('N\nQ203,25\nq400\nS4\nD8\nP1\nV01').issues).toHaveLength(0);
     });
