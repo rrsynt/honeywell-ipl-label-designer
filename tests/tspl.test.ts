@@ -226,6 +226,20 @@ describe('TSPL parser', () => {
         expect((parseTSPL('CLS\nBARCODE 10,50,"39C",100,1,0,2,2,"12345"').elements[0] as any).code39Mode).toBe('2');
     });
 
+    it('names the mod-10 check digit 25C cannot draw', () => {
+        // Manual p. 13: '25C' is "Interleaved 2 of 5 with check digit" — the
+        // PRINTER appends it, and this encoder cannot, so the field drew as
+        // plain I2of5 in silence. Same substitution IPL c2,m1 and EPL 2C name.
+        const codes = (type: string) =>
+            parseTSPL(`CLS\nBARCODE 10,50,"${type}",100,1,0,2,2,"12345678"`).issues.map(i => i.code);
+        expect(codes('25C')).toContain('tspl-i2of5-check-digit');
+        // The control: plain '25' has no printer check digit, so nothing to say.
+        expect(codes('25')).not.toContain('tspl-i2of5-check-digit');
+        // '39C' is Code 39's HOST-supplied digit, a different mechanism, already
+        // carried — it must not pick up the I2of5 message either.
+        expect(codes('39C')).not.toContain('tspl-i2of5-check-digit');
+    });
+
     it('reads the human-readable flag as below-or-nothing', () => {
         // TSPL: 0 none, 1 left, 2 center, 3 right — all BELOW the bar.
         const hriOf = (v: number) => (parseTSPL(`CLS\nBARCODE 10,50,"128",100,${v},0,2,2,"12345"`).elements[0] as any).hri;

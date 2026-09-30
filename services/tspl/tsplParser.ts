@@ -73,6 +73,10 @@ interface TsplBarcode {
     eanUpcVersion?: number;
     /** For '0' (Code 39), the c0 mode: 2 = check a digit the host supplied. */
     code39Mode?: string;
+    /** True for '25C', whose mod-10 check digit the PRINTER appends (manual
+     *  p. 13). The viewer has no encoder option for it, so it is named rather
+     *  than drawn — a plausible-looking wrong check digit is worse than none. */
+    checkDigitUndrawn?: boolean;
 }
 
 const TSPL_BARCODE_TYPES: Record<string, TsplBarcode> = {
@@ -81,9 +85,11 @@ const TSPL_BARCODE_TYPES: Record<string, TsplBarcode> = {
     '128M': { symbology: '6' },
     EAN128: { symbology: '6' },
     EAN128M: { symbology: '6' },
-    // 2 of 5 family: bare = interleaved, S = standard, I = industrial.
+    // 2 of 5 family: bare = interleaved, C = +check digit, S = standard,
+    // I = industrial. '25C' has the PRINTER append a mod-10 check digit
+    // (manual p. 13), which this encoder cannot do.
     '25': { symbology: '2' },
-    '25C': { symbology: '2' },
+    '25C': { symbology: '2', checkDigitUndrawn: true },
     '25S': { symbology: '3' },
     '25I': { symbology: '3' },
     // Code 39, with and without the host check digit.
@@ -504,6 +510,13 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 if (type.includes('+')) {
                     issue('info', 'tspl-addon-ignored',
                         `"${type}" carries a printed add-on, which this viewer draws as the main symbol only.`, 'BARCODE');
+                }
+                if (mapped.checkDigitUndrawn) {
+                    // '25C' makes the printer append a mod-10 check digit; this
+                    // viewer draws the field's data without it. Named, not
+                    // silently dropped — the same call IPL c2,m1 and EPL 2C make.
+                    issue('info', 'tspl-i2of5-check-digit',
+                        `Barcode type "${type}" is Interleaved 2 of 5 with a mod-10 check digit the printer appends (TSPL manual p. 13); this preview draws the field's data without it.`, 'BARCODE');
                 }
                 {
                     // p4 is 0 none / 1 left / 2 center / 3 right. The IR carries
