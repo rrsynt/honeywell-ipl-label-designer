@@ -617,3 +617,45 @@ describe('EAN.UCC Composite options are reported, not dropped (2026-09-30)', () 
         expect([el.compositeVersion, el.compositeColumns, el.compositeRowHeight]).toEqual(['2', '10', '3']);
     });
 });
+
+// RSS / GS1 DataBar c20[,m1][,m2][,m3] (PRM p.166). The parser reads all three
+// and validates each — m1 0-6, m3 an even 2-22 — but took m2 and m3
+// positionally without checking the manual's applicability, which is scoped:
+//
+//   m2  height of the separator pattern row   "m1 = 2, 3, and 6 only"
+//   m3  number of segments per row            "m1 = 6 only"
+//
+// A stream stating one for another version asks for something the printer
+// ignores. The encoder here drops it too, so the two agreed by both doing
+// nothing, and no message distinguished that from agreement on what to draw.
+describe('c20 options are scoped to the version that accepts them (2026-09-30)', () => {
+    const stx = (f: string) => '<STX>' + f + '<ETX>';
+    const DATA = '1234567890123';
+    const codes = (opts: string) => parseViewerIPL(
+        [stx('<ESC>C<SI>W812<SI>L400'), stx('<ESC>P'), stx('E1;F1;'),
+            stx(`B1;o10,10;c20${opts};d3,${DATA}`), stx('R')].join(''),
+    ).issues.map(i => i.code);
+
+    it('names an option stated for a version that does not take it', () => {
+        // m2 belongs to 2/3/6, m3 to 6 alone, so neither is meaningful on 0.
+        expect(codes(',0,3'), 'm2 on version 0').toContain('rss-option-not-applicable');
+        expect(codes(',0,1,8'), 'm3 on version 0').toContain('rss-option-not-applicable');
+    });
+
+    it('stays silent when the version does take them', () => {
+        // The control, both ways: m2 is legal on 2 and on 3, and both are legal
+        // on 6. A rule that fired on the legal cases too could not tell
+        // "reported correctly" from "reports everything".
+        expect(codes(',2,3'), 'm2 on version 2').not.toContain('rss-option-not-applicable');
+        expect(codes(',3,3'), 'm2 on version 3').not.toContain('rss-option-not-applicable');
+        expect(codes(',6,1,8'), 'both on version 6').not.toContain('rss-option-not-applicable');
+        // And a bare c20 states neither.
+        expect(codes(''), 'no options stated').not.toContain('rss-option-not-applicable');
+    });
+
+    it('leaves the existing validation alone', () => {
+        // m1 out of 0-6 and an odd segment count are separate, earlier checks.
+        expect(codes(',7')).toContain('rss-version-invalid');
+        expect(codes(',6,1,7')).toContain('rss-segments-invalid');
+    });
+});

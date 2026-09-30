@@ -2896,6 +2896,24 @@ export class IPLViewerParser {
                     rssSegments = undefined;
                 }
             }
+            // m2 and m3 are not general: the manual's own table scopes them —
+            // "m2 ... ,m1 = 2, 3, and 6 only" and "m3 ... ,m1 = 6 only". A
+            // stream stating one for another version asks for something the
+            // printer ignores; the encoder here drops it too, so nothing drew
+            // the difference and nothing said so.
+            {
+                const stray: string[] = [];
+                if (rssSepHeight && rssVersion !== '2' && rssVersion !== '3' && rssVersion !== '6') {
+                    stray.push(`separator height m2=${rssSepHeight} (only m1 = 2, 3, 6)`);
+                }
+                if (rssSegments && rssVersion !== '6') {
+                    stray.push(`segments per row m3=${rssSegments} (only m1 = 6)`);
+                }
+                if (stray.length > 0) {
+                    this.printer.issue('info', 'rss-option-not-applicable',
+                        `RSS c20 option${stray.length > 1 ? 's' : ''} not applicable to version m1=${rssVersion ?? 'invalid'}: ${stray.join(', ')}. The printer ignores it, and so does this preview.`, cmd);
+                }
+            }
             // No h sent: the printer derives height from w per version
             // (PRM p.166: 33*w for m1=0/3/5, 13*w for m1=1, 7*w for m1=2,
             // 10*w for m1=4, 34*w for m1=6). Override the generic h50 default.
