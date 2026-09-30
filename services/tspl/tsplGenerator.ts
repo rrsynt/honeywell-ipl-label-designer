@@ -75,18 +75,34 @@ const TSPL_BARCODE_FOR: Record<string, string> = {
 
 /**
  * Design symbology -> the TSPL 2D command that draws it (manual pp. 56, 65).
- * Only these two exist in the language.
+ *
+ * MPDF417 is in the guide's own command list (TSPL Programming Guide,
+ * P1139068-01EN Rev A), and services/ipl/barcodes.ts has encoded '19' as
+ * micropdf417 for every other language all along — so omitting it here dropped
+ * a symbol this app can draw, under a warning that named its IPL id instead of
+ * the symbology.
  */
 const TSPL_2D_COMMAND: Record<string, string> = {
     '18': 'QRCODE',
     '12': 'PDF417',
+    '19': 'MPDF417',
 };
 
-/** 2D symbols the design can hold but TSPL has no command for. Named so the
- *  warning says WHICH symbol is missing. */
-const TSPL_2D_MISSING: Record<string, string> = {
-    '17': 'Data Matrix',
-    '14': 'MaxiCode',
+/**
+ * 2D symbols the design can hold that this subset does not emit, each with the
+ * reason. The reason is per-symbol because it is not the same one.
+ *
+ * `reason` is 'language' when TSPL genuinely has no such command, and
+ * 'viewer' when TSPL HAS the command but this app cannot encode the symbol.
+ * Reporting the second as the first is a claim the guide disproves:
+ * docs/manuals/TSPL_Programming_Guide_P1139068-01EN_outline.txt lists MAXICODE
+ * among the supported commands (and its encoder exists in
+ * services/ipl/barcodes.ts as '14'), so "TSPL does not have it" was never true
+ * of MaxiCode — only "this viewer cannot draw it yet" was.
+ */
+const TSPL_2D_MISSING: Record<string, { name: string; reason: 'language' | 'viewer' }> = {
+    '17': { name: 'Data Matrix', reason: 'language' },
+    '14': { name: 'MaxiCode', reason: 'viewer' },
 };
 
 /** EAN/UPC variants, by the DATA LENGTH — which is how TSPL's names map. */
@@ -173,15 +189,21 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
             const data = fieldData(field, design);
 
             // The 2D symbols have their own commands, not the BARCODE type
-            // table (manual pp. 56, 65). TSPL carries QR and PDF417; DataMatrix
-            // and MaxiCode are NOT in the language, so those warn rather than
-            // emitting something a TSC printer would ignore.
+            // table (manual pp. 56, 65). DataMatrix and MaxiCode are NOT in the
+            // language, so those warn rather than emitting something a TSC
+            // printer would ignore.
             if (TSPL_2D_COMMAND[sym]) {
                 const cmd = TSPL_2D_COMMAND[sym];
                 const cell = Math.max(1, Math.round(field.w_mag ?? 3));
                 if (cmd === 'QRCODE') {
                     const ecc = field.qrEcl ?? 'M';
                     lines.push(`QRCODE ${x},${y},${ecc},${cell},A,${rotation},"${escapeTsplData(data)}"`);
+                } else if (cmd === 'MPDF417') {
+                    // MPDF417 takes the same box as PDF417: x,y,width,height,
+                    // rotation, then the mode block and the data.
+                    const w = Math.max(1, dots(box.width));
+                    const h = Math.max(1, dots(box.height));
+                    lines.push(`MPDF417 ${x},${y},${w},${h},${rotation},"${escapeTsplData(data)}"`);
                 } else {
                     const w = Math.max(1, dots(box.width));
                     const h = Math.max(1, dots(box.height));
@@ -190,7 +212,10 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                 continue;
             }
             if (TSPL_2D_MISSING[sym]) {
-                warnings.push(`"${field.name}" is a ${TSPL_2D_MISSING[sym]} symbol, which TSPL does not have: the language defines QRCODE, PDF417, MAXICODE and AZTEC, and this one is not among them. It was left off the label.`);
+                const { name, reason } = TSPL_2D_MISSING[sym];
+                warnings.push(reason === 'language'
+                    ? `"${field.name}" is a ${name} symbol, which TSPL does not have. It was left off the label.`
+                    : `"${field.name}" is a ${name} symbol. TSPL has the command, but this TSPL output does not draw it yet, so it was left off the label.`);
                 continue;
             }
 

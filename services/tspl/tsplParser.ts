@@ -604,24 +604,32 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 break;
             }
 
-            case 'PDF417': {
+            case 'PDF417':
+            case 'MPDF417': {
                 // PDF417 x,y,width,height,rotate,[option], "content"
                 // (manual p. 56). The option block carries letter-prefixed
                 // settings (P/E/M/U/W/H/R/C/T/Lm) which this subset reads past.
+                //
+                // MPDF417 shares the box layout. It was not a case here while
+                // services/ipl/barcodes.ts has encoded the IR's '19' as
+                // micropdf417 for every other language all along, so a TSPL
+                // MicroPDF417 drew nothing and reported only "MPDF417 is not
+                // part of the supported TSPL subset".
+                const which = cmd.name;
                 if (p.length < 5) {
-                    issue('warning', 'tspl-pdf417-params', `PDF417 needs x,y,width,height,rotate. Found ${p.length}. Skipped.`, 'PDF417');
+                    issue('warning', 'tspl-pdf417-params', `${which} needs x,y,width,height,rotate. Found ${p.length}. Skipped.`, which);
                     break;
                 }
                 const content = p[p.length - 1] ?? '';
                 if (content === '') {
-                    issue('warning', 'tspl-pdf417-empty', 'A PDF417 with no data prints nothing.', 'PDF417');
+                    issue('warning', 'tspl-pdf417-empty', `A ${which} with no data prints nothing.`, which);
                     break;
                 }
                 const f = quadrantFromClockwise(p[4]);
                 const el: BarcodeElement = {
                     kind: 'barcode', id: nextId++,
                     ox: num(p[0], 0), oy: num(p[1], 0), f,
-                    symbology: '12',   // the IR's PDF417 id
+                    symbology: which === 'MPDF417' ? '19' : '12',
                     heightDots: Math.max(1, Math.trunc(num(p[3], 10))),
                     moduleDots: Math.max(1, Math.trunc(num(p[2], 2) / 10) || 2),
                     ratio: 1,

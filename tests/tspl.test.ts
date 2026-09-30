@@ -520,3 +520,64 @@ describe('every PRINTER_SETTINGS entry is reachable (2026-09-29)', () => {
         expect(tokenizeTspl(' 5\n')[0].name).toBe('');
     });
 });
+
+// TSPL's 2D commands, checked against the guide's OWN command list.
+//
+// The manual is now in the repo as docs/manuals/TSPL_Programming_Guide_
+// P1139068-01EN_outline.txt (the PDF's document outline, extracted because the
+// page text is subset-font encoded). It names MPDF417 among the supported
+// commands, which matters because this app has encoded the IR's '19' as
+// micropdf417 for every other language all along — so the symbol was drawable
+// and TSPL simply refused it, under a warning that named its IPL id.
+describe('MicroPDF417 works in TSPL (2026-09-30)', () => {
+    const design = (sym: string): Design => ({
+        name: 'T',
+        labelSettings: { width: 80, height: 50, columns: 1, rows: 1, unit: 'mm', orientation: 'portrait' },
+        printerSettings: { model: 'PD43', dpi: 203, quantity: 1, mediaType: 'thermal-transfer', mediaSenseMode: 'gap', printSpeed: 6, darkness: 10 },
+        fields: [{
+            id: 1, type: 'barcode', name: 'BC', x: 10, y: 10, rotation: 0,
+            dataSource: { type: 'fixed', data: '12345' }, symbology: sym,
+            humanReadable: 'none', h_mag: 60, w_mag: 3,
+        }],
+        dataSources: [], nextId: 2, guides: { horizontal: [], vertical: [] },
+    } as unknown as Design);
+
+    it('names MPDF417 in the guide, so the parser must read it', () => {
+        const guide = readFileSync(join(
+            process.cwd(), 'docs', 'manuals',
+            'TSPL_Programming_Guide_P1139068-01EN_outline.txt'), 'utf8');
+        expect(guide, 'the guide the parser is checked against').toContain('MPDF417');
+
+        const el = parseTSPL('CLS\nMPDF417 10,10,100,50,0,"DATA"').elements[0] as { symbology: string };
+        expect(el?.symbology, "the IR's MicroPDF417 id").toBe('19');
+    });
+
+    it('generates MPDF417 and reads its own stream back', () => {
+        const out = generateTSPL(design('19'));
+        expect(out.warnings, 'it is drawable now, so nothing to warn about').toEqual([]);
+        expect(out.tspl).toContain('MPDF417 ');
+        // The round trip is the real claim: what we write, we can read.
+        const back = parseTSPL(out.tspl);
+        expect(back.issues.map(i => i.code), 'no unsupported-command noise').not.toContain('tspl-unsupported');
+        expect((back.elements[0] as { symbology: string }).symbology).toBe('19');
+    });
+
+    it('does not tell the user MaxiCode is absent while listing it as present', () => {
+        // The old message said "...the language defines QRCODE, PDF417,
+        // MAXICODE and AZTEC, and this one is not among them", and it fired
+        // for MAXICODE. MaxiCode IS in TSPL — so the list was right and the
+        // "not among them" was the lie. The fix is that the one symbol the
+        // message handles, MaxiCode, must never reach this warning at all:
+        // TSPL has it, so it belongs with the drawable ones or with an
+        // explicit "not drawn yet", never with "the language does not have it".
+        const warn = generateTSPL(design('14')).warnings[0];
+        expect(warn, 'MaxiCode must not be reported as absent from TSPL')
+            .not.toMatch(/does not have/);
+        // The control, so this cannot pass by the warning simply disappearing:
+        // a symbol TSPL really lacks still gets the absent wording.
+        const dm = generateTSPL(design('17')).warnings[0];
+        expect(dm, 'Data Matrix IS absent from TSPL').toMatch(/TSPL does not have/);
+        // And MaxiCode says the OTHER reason, so the two cannot be confused.
+        expect(warn, 'and MaxiCode must say the command exists').toMatch(/TSPL has the command/);
+    });
+});
