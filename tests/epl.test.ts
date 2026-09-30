@@ -116,6 +116,22 @@ describe('EPL parser', () => {
         expect((parseEPL('N\nB10,10,0,3C,2,2,60,B,"12345"').elements[0] as any).code39Mode).toBe('2');
     });
 
+    it('names the mod 10 check digit 2C and 2D cannot draw', () => {
+        // EPL Table 2-1 (p. 3-12): '2C' is "Interleaved 2 of 5 with mod 10
+        // check digit" and '2D' is "... with human readable check digit". In
+        // both the PRINTER appends the digit; this encoder cannot, so the field
+        // drew as plain I2of5 in silence. Same substitution IPL c2,m1 names.
+        const codes = (type: string) =>
+            parseEPL(`N\nB10,10,0,${type},2,2,60,B,"12345678"`).issues.map(i => i.code);
+        expect(codes('2C')).toContain('epl-i2of5-check-digit');
+        expect(codes('2D')).toContain('epl-i2of5-check-digit');
+        // The control: plain '2' has no printer check digit, so nothing to say.
+        expect(codes('2')).not.toContain('epl-i2of5-check-digit');
+        // And '3C' is Code 39's host-supplied digit — a different mechanism,
+        // already carried, so it must not pick up the I2of5 message.
+        expect(codes('3C')).not.toContain('epl-i2of5-check-digit');
+    });
+
     it('names a known-but-unencodable type instead of saying "unknown"', () => {
         const named = (type: string) => parseEPL(`N\nB10,10,0,${type},2,2,60,B,"12345"`).issues.find(i => i.code === 'epl-barcode-unencoded')?.message;
         expect(named('9')).toMatch(/Code 93/);

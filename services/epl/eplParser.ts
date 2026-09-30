@@ -70,6 +70,11 @@ interface EplBarcode {
     eanUpcVersion?: number;
     /** For '0' (Code 39), the c0 mode: 2 = check a digit the host supplied. */
     code39Mode?: string;
+    /** True for the 2-of-5 types whose mod 10 check digit the PRINTER appends
+     *  ('2C' and '2D'). The viewer has no encoder option for it, so it is named
+     *  rather than drawn — a plausible-looking wrong check digit is worse than
+     *  none. */
+    checkDigitUndrawn?: boolean;
 }
 
 const EPL_BARCODE_TYPES: Record<string, EplBarcode> = {
@@ -84,10 +89,12 @@ const EPL_BARCODE_TYPES: Record<string, EplBarcode> = {
     '1B': { symbology: '6' },
     '1C': { symbology: '6' },
     '1E': { symbology: '6' },
-    // 2 of 5. '2C' is +mod10, '2D' is +human-readable check.
+    // 2 of 5 (manual Table 2-1, p. 3-12). '2C' is "Interleaved 2 of 5 with mod
+    // 10 check digit" and '2D' is "... with human readable check digit" — both
+    // have the PRINTER append a mod 10 digit, which this encoder cannot do.
     '2': { symbology: '2' },
-    '2C': { symbology: '2' },
-    '2D': { symbology: '2' },
+    '2C': { symbology: '2', checkDigitUndrawn: true },
+    '2D': { symbology: '2', checkDigitUndrawn: true },
     // EAN/UPC, by the version the renderer already understands.
     'E30': { symbology: '7', eanUpcVersion: 2 },
     'E80': { symbology: '7', eanUpcVersion: 1 },
@@ -484,6 +491,16 @@ export const parseEPL = (code: string): ViewerLabel => {
                 if (content.text === '' && cmd.tokens.length === 0) {
                     issue('warning', 'epl-barcode-empty', 'A barcode with no data prints nothing.', 'B');
                     break;
+                }
+                if (mapped.checkDigitUndrawn) {
+                    // '2C'/'2D' make the printer append a mod 10 check digit to
+                    // the symbol. This viewer draws the field's data without it —
+                    // a different symbol, and one the printer would also verify
+                    // differently — so it is named rather than dropped silently.
+                    // The same substitution IPL c2,m1 is reported for.
+                    issue('info', 'epl-i2of5-check-digit',
+                        `Barcode type "${type}" is Interleaved 2 of 5 with a mod 10 check digit the printer appends (EPL manual Table 2-1, p. 3-12); this preview draws the field's data without it.`,
+                        'B');
                 }
                 // EPL gives wide:narrow as module counts; the IR wants a code.
                 const ratio = wide / narrow <= 2.2 ? 2 : wide / narrow < 2.8 ? 0 : 1;
