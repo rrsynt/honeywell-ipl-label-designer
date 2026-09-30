@@ -65,6 +65,19 @@ describe('buildBwipSpec — c20 RSS / GS1 DataBar', () => {
         expect(measureBarcode('20', '123456', { rssVersion: '0' })).toBeNull();
         expect(measureBarcode('20', GTIN13, { rssVersion: '0' })).not.toBeNull();
     });
+
+    it('every TSPL RSS name renders — the versions a bare stream reaches', () => {
+        // The TSPL `RSS` command resolves each of its names to one of these
+        // versions, so a name that maps to a version the encoder rejects would
+        // leave the symbol off the label with nothing said. This calls the
+        // encoder rather than inspecting the spec: for MaxiCode the spec looked
+        // healthy while `measureBarcode` returned null.
+        for (const [name, version] of [['RSS14', '0'], ['RSS14T', '1'], ['RSS14S', '2'],
+                                       ['RSS14SO', '3'], ['RSSLIM', '4'], ['RSSEXP', '6']] as const) {
+            const m = measureBarcode('20', GTIN14, { rssVersion: version });
+            expect(m, `TSPL ${name} (m1=${version}) must render`).not.toBeNull();
+        }
+    });
 });
 
 describe('buildBwipSpec — c14 MaxiCode', () => {

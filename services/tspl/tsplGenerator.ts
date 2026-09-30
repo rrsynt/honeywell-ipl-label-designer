@@ -83,6 +83,23 @@ const TSPL_BARCODE_FOR: Record<string, string> = {
  * a symbol this app can draw, under a warning that named its IPL id instead of
  * the symbology.
  */
+/**
+ * The IR's c20,m1 GS1 DataBar version onto the `RSS` command's symbology name
+ * (TSC manual p. 71), and the bar height the printer computes for each.
+ *
+ * m1=5 (plain expanded) has no TSPL name of its own: the manual's RSSEXP is the
+ * one that takes a segment width, which is the expanded-STACKED parameter.
+ * Emitting 'RSSEXP' for m1=5 therefore prints a stacked symbol where an
+ * expanded one was asked for, so that case is named rather than silently
+ * turned into a different shape.
+ */
+const TSPL_RSS_NAME: Record<string, string> = {
+    '0': 'RSS14', '1': 'RSS14T', '2': 'RSS14S', '3': 'RSS14SO', '4': 'RSSLIM', '6': 'RSSEXP',
+};
+const RSS_HEIGHT_FOR: Record<string, number> = {
+    RSS14: 33, RSS14T: 13, RSS14S: 13, RSS14SO: 33, RSSLIM: 13, RSSEXP: 33,
+};
+
 const TSPL_2D_COMMAND: Record<string, string> = {
     '17': 'DMATRIX',
     '18': 'QRCODE',
@@ -243,6 +260,35 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                     const h = Math.max(1, dots(box.height));
                     lines.push(`PDF417 ${x},${y},${w},${h},${rotation},"${escapeTsplData(data)}"`);
                 }
+                continue;
+            }
+            if (sym === '20') {
+                // GS1 DataBar has its OWN command in TSPL (RSS, manual p. 71),
+                // not a BARCODE type — and this generator used to leave it off
+                // the label under "type 20, which this TSPL subset cannot
+                // draw", a claim the manual's own section disproves. The
+                // encoder has produced it for IPL and EPL all along.
+                const name = TSPL_RSS_NAME[String(field.rssVersion ?? '2')];
+                if (!name) {
+                    warnings.push(`"${field.name}" is a GS1 DataBar variant (${field.rssVersion}) with no TSPL name. It was left off the label.`);
+                    continue;
+                }
+                const pixMult = Math.max(1, Math.min(10, Math.round(field.w_mag ?? 2) || 2));
+                // The printer computes the bar height from the type and pixMult,
+                // so the design's own height is not something this command can
+                // state. Name the difference rather than drop it in silence.
+                const expected = (RSS_HEIGHT_FOR[name] ?? 33) * pixMult;
+                if (Math.abs((field.h_mag ?? expected) - expected) > 1) {
+                    warnings.push(`"${field.name}" is a GS1 DataBar ${name}, whose bar height TSPL computes from the module width (${RSS_HEIGHT_FOR[name] ?? 33} × ${pixMult} = ${expected} dots). The design asks for ${field.h_mag}; the printer's figure is used.`);
+                }
+                const sepHt = name === 'RSS14S' || name === 'RSS14SO' ? Math.max(1, Math.min(2, Number(field.rssSepHeight ?? 1) || 1)) : undefined;
+                const seg = name === 'RSSEXP' ? Number(field.rssSegments ?? 0) : NaN;
+                const extras = [
+                    sepHt !== undefined ? String(sepHt) : null,
+                    Number.isInteger(seg) && seg >= 2 && seg <= 22 ? String(seg) : null,
+                ].filter((v): v is string => v !== null);
+                const mid = [String(pixMult), ...extras].join(',');
+                lines.push(`RSS ${x},${y},"${name}",${rotation},${mid},"${escapeTsplData(data)}"`);
                 continue;
             }
             // The IPL id '7' is "EAN/UPC" and the printer infers the variant

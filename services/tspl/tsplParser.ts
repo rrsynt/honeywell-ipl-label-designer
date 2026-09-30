@@ -137,6 +137,25 @@ const TSPL_KNOWN_UNENCODED: Record<string, string> = {
 const TSPL_QR_ECL: Record<string, string> = { L: 'L', M: 'M', Q: 'Q', H: 'H' };
 
 /**
+ * The `RSS` command's symbology names onto the IR's c20,m1 version numbers
+ * (TSC manual p. 71). The IR's '20' is the GS1 DataBar family the encoder
+ * already produces for IPL and EPL; only the TSPL names were missing.
+ *
+ * RSSEXP maps to the EXPANDED-STACKED variant (m1=6). The manual gives it a
+ * segment width, and that is exactly the parameter m1=6 takes — the plain
+ * expanded form (m1=5) has no segment control at all, so resolving to 5 would
+ * make the sixth parameter unwritable.
+ */
+const TSPL_RSS_VERSION: Record<string, string> = {
+    RSS14: '0',     // omnidirectional
+    RSS14T: '1',    // truncated
+    RSS14S: '2',    // stacked
+    RSS14SO: '3',   // stacked omnidirectional
+    RSSLIM: '4',    // limited
+    RSSEXP: '6',    // expanded, stacked (takes the segment width)
+};
+
+/**
  * Commands that are printer settings or jobs, not geometry.
  *
  * Expected in a real TSPL program, and they put nothing on the label — so
@@ -693,6 +712,93 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     issue('info', 'tspl-qr-ecc', `QR error-correction level "${ecc}" is not L/M/Q/H. The encoder's default is used.`, 'QRCODE');
                 }
                 elements.push(place(el));
+                break;
+            }
+
+            case 'RSS': {
+                // RSS x,y,"sym",rotate,pixMult,sepHt[,"content"] (TSC manual
+                // p. 71). It is NOT a BARCODE type: GS1 DataBar has its own
+                // command, and the type is a NAME inside quotes.
+                //
+                // This command was reported as "not part of the supported TSPL
+                // subset" even though services/ipl/barcodes.ts has encoded the
+                // IR's '20' as databar for every other language all along — the
+                // same shape as DMATRIX and MAXICODE. What was missing was only
+                // the name table, so the symbol was left off the label under a
+                // message implying the language could not draw it.
+                //
+                // The manual's family is wider than the IR's: UCC128CCA/CCC are
+                // composite (linear + CC-A/B/C) and EAN8/EAN13/UPCA/UPCE are the
+                // EAN/UPC symbology under another name. Those are resolved to
+                // their own IR ids rather than being forced into '20'.
+                if (p.length < 4) {
+                    issue('warning', 'tspl-rss-params', `RSS needs x,y,"sym",rotate,pixMult. Found ${p.length}. Skipped.`, 'RSS');
+                    break;
+                }
+                const sym = (p[2] ?? '').trim().toUpperCase();
+                const content = p[p.length - 1] ?? '';
+                const pixMult = Math.max(1, Math.min(10, Math.trunc(num(p[4], 2) || 2)));
+                const sepHt = Math.max(1, Math.min(2, Math.trunc(num(p[5], 1) || 1)));
+                // The 6th slot means a different thing per variant (manual p. 71):
+                // segment width for RSSEXP, linear height for the composites,
+                // absent otherwise. Content is always the LAST parameter, so the
+                // slot only exists when more than one parameter follows sepHt.
+                const sixth = p.length > 7 ? p[6] : undefined;
+                const f = quadrantFromClockwise(p[3]);
+                const base = {
+                    kind: 'barcode' as const, id: nextId++,
+                    ox: num(p[0], 0), oy: num(p[1], 0), f,
+                    ratio: 1, hri: 0 as const, moduleDots: pixMult,
+                    source: { type: 'fixed' as const, data: content },
+                };
+                // The manual gives a printer-computed bar height per type
+                // ("RSS14 33 x pixMult", "RSSLIM 13 x pixMult", …), stored in
+                // dots so the preview draws the documented size.
+                const heights: Record<string, number> = {
+                    RSS14: 33, RSS14T: 13, RSS14S: 13, RSS14SO: 33, RSSLIM: 13, RSSEXP: 33,
+                    EAN8: 60, EAN13: 74, UPCA: 74, UPCE: 74,
+                };
+                const irVersion = TSPL_RSS_VERSION[sym];
+                if (irVersion !== undefined) {
+                    const seg = sixth === undefined ? NaN : Math.trunc(num(sixth, 0));
+                    elements.push(place({
+                        ...base,
+                        symbology: '20',
+                        heightDots: (heights[sym] ?? 33) * pixMult,
+                        rssVersion: irVersion,
+                        // sepHt is the separator row of the STACKED variants;
+                        // the encoder takes it only for those (see barcodes.ts).
+                        ...(sym === 'RSS14S' || sym === 'RSS14SO' ? { rssSepHeight: String(sepHt) } : {}),
+                        // RSSEXP's sixth parameter is the segment width, and the
+                        // encoder takes it only for the expanded-stacked variant
+                        // (m1=6), which is the one this preview draws.
+                        ...(sym === 'RSSEXP' && irVersion === '6'
+                            && Number.isInteger(seg) && seg >= 2 && seg <= 22
+                            ? { rssSegments: String(seg) } : {}),
+                    } as BarcodeElement));
+                } else if (sym === 'EAN8' || sym === 'EAN13' || sym === 'UPCA' || sym === 'UPCE') {
+                    // The same symbol under the EAN/UPC command's name; the IR
+                    // resolves the variant from the data length.
+                    elements.push(place({
+                        ...base,
+                        symbology: '7',
+                        heightDots: (heights[sym] ?? 74) * pixMult,
+                    } as BarcodeElement));
+                } else if (sym === 'UCC128CCA' || sym === 'UCC128CCC') {
+                    // EAN/UCC-128 with a CC-A/B or CC-C composite component.
+                    // The manual's sixth parameter is the LINEAR height; the CC
+                    // half is its own encoder input this subset does not carry.
+                    issue('info', 'tspl-rss-composite',
+                        `RSS "${sym}" is a composite (EAN/UCC-128 plus CC-${sym.endsWith('A') ? 'A/B' : 'C'}); this preview draws the linear component only.`, 'RSS');
+                    elements.push(place({
+                        ...base,
+                        symbology: '6',
+                        heightDots: Math.max(1, Math.trunc(num(sixth, 100))) * Math.max(1, pixMult),
+                    } as BarcodeElement));
+                } else {
+                    issue('info', 'tspl-rss-type', `RSS symbology "${sym}" is not one of the types on TSC manual p. 71 (RSS14, RSS14T, RSS14S, RSS14SO, RSSLIM, RSSEXP, UPCA, UPCE, EAN13, EAN8, UCC128CCA, UCC128CCC); nothing is drawn for it.`, 'RSS');
+                    break;
+                }
                 break;
             }
 

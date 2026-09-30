@@ -485,6 +485,82 @@ describe('TSPL generator', () => {
         expect(mx.warnings).toEqual([]);
     });
 
+    it('RSS draws GS1 DataBar — its own command, not a BARCODE type', () => {
+        // TSC manual p. 71: "RSS x,y,"sym",rotate,pixMult,sepHt,"content"".
+        // The symbology is a NAME inside quotes (like BARCODE's types and
+        // unlike IPL's numbers), and GS1 DataBar has a command of its own.
+        //
+        // This was reported as "not part of the supported TSPL subset" while
+        // services/ipl/barcodes.ts had encoded the IR's '20' as databar for
+        // every other language all along — the same shape as DMATRIX and
+        // MAXICODE, and the third time a "viewer gap" turned out to be a
+        // missing name table. The generator said "type 20, which this TSPL
+        // subset cannot draw", a claim the manual's own section disproves.
+        const parsed = parseTSPL('CLS\nRSS 10,10,"RSS14",0,3,1,"12345678901231"');
+        const el = parsed.elements[0] as any;
+        expect(el.symbology).toBe('20');
+        expect(el.rssVersion).toBe('0');
+        expect(el.moduleDots, 'pixMult is the module width').toBe(3);
+        // The bar height is the printer's own figure: 33 x pixMult for RSS14.
+        expect(el.heightDots).toBe(99);
+
+        // Every type on the manual's list is read, not just the first.
+        const versionOf = (sym: string) =>
+            (parseTSPL(`CLS\nRSS 10,10,"${sym}",0,2,1,"12345678901231"`).elements[0] as any)?.rssVersion;
+        expect(versionOf('RSS14')).toBe('0');
+        expect(versionOf('RSS14T')).toBe('1');
+        expect(versionOf('RSS14S')).toBe('2');
+        expect(versionOf('RSS14SO')).toBe('3');
+        expect(versionOf('RSSLIM')).toBe('4');
+        // RSSEXP is the variant that takes a segment width, and that parameter
+        // belongs to the EXPANDED-STACKED version — resolving it to the plain
+        // expanded form (5) would make the sixth parameter unwritable.
+        expect(versionOf('RSSEXP')).toBe('6');
+    });
+
+    it('RSS names the EAN/UPC family by length, and says what it cannot draw', () => {
+        // The manual's "sym" list also carries EAN8/EAN13/UPCA/UPCE — the same
+        // symbology under the EAN/UPC command's name, resolved by data length.
+        for (const [sym, data] of [['UPCA', '123456789012'], ['UPCE', '1234567'],
+                                   ['EAN13', '1234567890123'], ['EAN8', '12345678']] as const) {
+            const el = parseTSPL(`CLS\nRSS 10,10,"${sym}",0,2,1,"${data}"`).elements[0] as any;
+            expect(el.symbology, sym).toBe('7');
+        }
+        // UCC128CCA/CCC are composites; the linear half is drawn and the CC
+        // half is named rather than silently missing.
+        const comp = parseTSPL('CLS\nRSS 10,10,"UCC128CCA",0,2,100,"12345678901231"');
+        expect((comp.elements[0] as any).symbology).toBe('6');
+        expect(comp.issues.map(i => i.code)).toContain('tspl-rss-composite');
+        // And an unknown type is named, not drawn as something else.
+        const bad = parseTSPL('CLS\nRSS 10,10,"NOPE",0,2,1,"x"');
+        expect(bad.elements).toHaveLength(0);
+        expect(bad.issues.map(i => i.code)).toContain('tspl-rss-type');
+    });
+
+    it('RSS round-trips, and the version the design cannot name is reported', () => {
+        const names = ['RSS14', 'RSS14T', 'RSS14S', 'RSS14SO', 'RSSLIM', 'RSSEXP'];
+        for (const name of names) {
+            const parsed = parseTSPL(`CLS\nRSS 10,10,"${name}",0,3,1,"12345678901231"`);
+            const el = parsed.elements[0] as any;
+            const out = lines([barcodeField({
+                symbology: el.symbology, w_mag: el.moduleDots, h_mag: el.heightDots,
+                rssVersion: Number(el.rssVersion),
+                dataSource: { type: 'fixed', data: el.source.data },
+            })]).find(l => l.startsWith('RSS'))!;
+            expect(out, name).toContain(`"${name}"`);
+            // and reading it back gives the same version.
+            const back = parseTSPL(`CLS\n${out}`).elements[0] as any;
+            expect(back.rssVersion, `${name} round-trip`).toBe(el.rssVersion);
+        }
+        // m1=5 (plain expanded) has NO TSPL name of its own — the manual's
+        // RSSEXP is the one that takes a segment width. Emitting RSSEXP for it
+        // would print a stacked symbol where an expanded one was asked for, so
+        // it is named instead.
+        const v5 = generateTSPL(design([barcodeField({ symbology: '20', rssVersion: 5, name: 'DB' })]));
+        expect(v5.tspl).not.toContain('RSS ');
+        expect(v5.warnings.join(' ')).toMatch(/no TSPL name/);
+    });
+
     it('MAXICODE round-trips: the generator decomposes the SCM back into parameters', () => {
         // TSPL has no slot for the structured carrier message — the class,
         // country and postal code are separate parameters (manual p. 54). The
