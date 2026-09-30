@@ -134,10 +134,17 @@ const TSPL_QR_ECL: Record<string, string> = { L: 'L', M: 'M', Q: 'Q', H: 'H' };
  *
  * Expected in a real TSPL program, and they put nothing on the label — so
  * reporting them would drown the issues panel on every ordinary stream.
+ *
+ * A command belongs here only if it cannot change WHERE the ink lands.
+ * REFERENCE, SHIFT, OFFSET and MIRROR used to sit in this list, and that put
+ * them in the one hole this parser has no other way out of: a line that is
+ * neither drawn nor named. A stream that used them previewed a label the
+ * printer would not produce, under no message at all. They are cases now,
+ * each saying what it does to the image.
  */
 const PRINTER_SETTINGS = new Set([
-    'GAP', 'GAPDETECT', 'BLINDDETECT', 'OFFSET', 'SPEED', 'DENSITY', 'DIRECTION',
-    'MIRROR', 'REFERENCE', 'SHIFT', 'CODEPAGE', 'FEED', 'BACKFEED', 'BACKUP',
+    'GAP', 'GAPDETECT', 'BLINDDETECT', 'SPEED', 'DENSITY', 'DIRECTION',
+    'CODEPAGE', 'FEED', 'BACKFEED', 'BACKUP',
     'HOME', 'SOUND', 'CUT', 'LIMITFEED', 'EOJ', 'DELAY', 'FORMFEED', 'FORMFEED',
     'SET', 'SETPEEL', 'SETTEAR', 'SETCUTTER', 'SETAUTODUMP', 'SETCOUNTER',
     'SETRIBBON', 'SETPARTIAL_CUTTER', 'SETBACK', 'AUTOBAUD', 'KILL', 'DOWNLOAD',
@@ -583,6 +590,43 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 // PRINT copies[,sets] (manual p. 24) — a job concern, but the
                 // viewer reads it so a preview can say how many labels.
                 settings.quantity = Math.max(1, Math.trunc(num(p[0], 1)));
+                break;
+            }
+
+            case 'SHIFT':
+            case 'REFERENCE':
+            case 'OFFSET':
+            case 'MIRROR': {
+                // Named, not silenced. Their neighbours in the settings list are
+                // sensor and job settings; these four sit in the same family as
+                // DIRECTION, which this parser already warns about for exactly
+                // this reason — a command that changes WHERE the image lands.
+                // Leaving them silent while warning about DIRECTION was an
+                // inconsistency in this file, not a judgement about them.
+                //
+                // Drawing the fields at their own coordinates and saying
+                // nothing showed a label the printer would not produce, under a
+                // message set that implied everything was fine. ZPL's
+                // ^LH/^LT/^LS had the identical defect and the identical answer.
+                //
+                // NOT PROVEN against a manual: the TSPL manual cited elsewhere
+                // in this file is not in the repo, so the precise mechanic of
+                // each command is stated as the reason to look, not as a
+                // measured result. What IS verified is that this preview does
+                // not apply them — so if they move the image, the preview is
+                // wrong, and this line is the only thing that says so.
+                //
+                // Keyed on the values, not the command: a stream of many labels
+                // that all shift by the same amount says it once, while a
+                // genuinely different value still gets its own line.
+                const values = cmd.params.trim();
+                const moved = cmd.name === 'MIRROR' || cmd.name === 'OFFSET'
+                    ? num(p[0], 0) !== 0
+                    : num(p[0], 0) !== 0 || num(p[1], 0) !== 0;
+                if (!moved) break;   // where the image already is: nothing to say
+                once(`shift-${cmd.name}-${values}`, 'warning', 'tspl-image-shifted',
+                    `${cmd.name}${values === '' ? '' : ` (${values})`} changes where the image lands; this preview draws every field at its own coordinates and does not apply it.`,
+                    cmd.name);
                 break;
             }
 

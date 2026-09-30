@@ -81,6 +81,38 @@ describe('the EPL and TSPL surfaces do not silence anything that draws', () => {
         }
     });
 
+    it('warns when a TSPL command moves or reflects the whole image', () => {
+        // SHIFT, REFERENCE, OFFSET and MIRROR were in the silence list, so a
+        // stream using them drew its fields at their own coordinates under no
+        // message at all — a label the printer would not produce, shown as if
+        // nothing were wrong. ZPL's ^LH/^LT/^LS had the identical defect and
+        // the identical answer; this is the same contract for TSPL.
+        //
+        // The drawing assertion is the control: a probe that cannot see the
+        // field cannot tell "reported correctly" from "not looked at".
+        for (const [src, command] of [
+            ['SHIFT 20,20', 'SHIFT'],
+            ['REFERENCE 100,100', 'REFERENCE'],
+            ['OFFSET 30', 'OFFSET'],
+            ['MIRROR 1', 'MIRROR'],
+        ] as Array<[string, string]>) {
+            const label = parseTSPL(`SIZE 40 mm,30 mm\n${src}\nTEXT 10,10,"2",0,1,1,"A"\nPRINT 1,1\n`);
+            // The field still DRAWS — the warning is about where, not whether.
+            expect(label.elements, command).toHaveLength(1);
+            const hit = label.issues.find(i => i.code === 'tspl-image-shifted' && i.command === command);
+            expect(hit, `${command} moved the image and said nothing`).toBeDefined();
+            expect(hit!.level, command).toBe('warning');
+        }
+    });
+
+    it('stays silent when a TSPL shift is at its no-op value', () => {
+        // SHIFT 0,0 is where the image already is, and MIRROR 0 is not mirrored.
+        for (const src of ['SHIFT 0,0', 'REFERENCE 0,0', 'OFFSET 0', 'MIRROR 0']) {
+            const label = parseTSPL(`SIZE 40 mm,30 mm\n${src}\nTEXT 10,10,"2",0,1,1,"A"\nPRINT 1,1\n`);
+            expect(label.issues.map(i => i.code), src).not.toContain('tspl-image-shifted');
+        }
+    });
+
     it('draws the TSPL commands it does support', () => {
         expect(parseTSPL('SIZE 100 mm,50 mm\nCLS\nTEXT 10,10,"1",0,1,1,"HI"\nPRINT 1,1\n').elements).toHaveLength(1);
         expect(parseTSPL('SIZE 100 mm,50 mm\nCLS\nBARCODE 10,50,"128",50,1,0,2,2,"123"\nPRINT 1,1\n').elements).toHaveLength(1);
