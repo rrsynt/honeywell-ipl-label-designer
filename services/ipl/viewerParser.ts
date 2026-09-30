@@ -2745,8 +2745,19 @@ export class IPLViewerParser {
             // EAN.UCC Composite c21[,m1][,m2][,m3][,m4][,m5][,m6] (PRM p.162):
             // m1 selects the linear component and the CC variant paired with it
             // (0-12), m3 the 2D columns or segments per row, m5 the row height.
-            // m2 (separator row), m4 (display spacing) and m6 (linear HRI) are
-            // presentation details this viewer does not model.
+            //
+            //   m2  separator-row height, 1x-2x the bar magnification
+            //   m4  0 = "(" ")" and spaces shown only in the interpretive;
+            //       1 = bar and interpretive carry exactly the same data
+            //   m6  0 = the linear component's interpretive is NOT printed;
+            //       1 = it is
+            //
+            // m6 is not a presentation detail: it decides whether a line of
+            // text appears on the label at all, and this viewer prints the
+            // interpretive for a barcode with an HRI flag whatever the stream
+            // said. m2 and m4 are reported for the same reason — a stream that
+            // set them asked for something this preview does not do, and
+            // silence about that is what this sweep exists to remove.
             compositeVersion = parts[1];
             compositeColumns = parts[3];
             compositeRowHeight = parts[5];
@@ -2755,6 +2766,20 @@ export class IPLViewerParser {
                 if (!Number.isInteger(v) || v < 0 || v > 12) {
                     this.printer.issue('warning', 'composite-version-invalid', `EAN.UCC Composite version c21,m1="${compositeVersion}" is outside 0-12 (PRM p.162); defaulted to 0 (UCC/EAN-128 with CC-C).`, cmd);
                     compositeVersion = undefined;
+                }
+            }
+            {
+                const m2 = (parts[2] ?? '').trim();
+                const m4 = (parts[4] ?? '').trim();
+                const m6 = (parts[6] ?? '').trim();
+                const stated = [
+                    m2 !== '' ? `separator-row height m2=${m2}` : '',
+                    m4 !== '' ? `display of "(" ")" and spaces m4=${m4}` : '',
+                    m6 !== '' ? `linear interpretive m6=${m6}` : '',
+                ].filter(Boolean);
+                if (stated.length > 0) {
+                    this.printer.issue('info', 'composite-options-not-reproduced',
+                        `EAN.UCC Composite c21 option${stated.length > 1 ? 's' : ''} not reproduced here: ${stated.join(', ')}.`, cmd);
                 }
             }
             const compositeData = params.find(p2 => p2.key === 'd')?.value ?? '';

@@ -566,3 +566,54 @@ describe('Data Matrix parameters survive both languages (2026-09-30)', () => {
         expect(eplEl('b80,100,D,v0,"DATA"').el?.inverse).toBeUndefined();
     });
 });
+
+// EAN.UCC Composite c21[,m1][,m2][,m3][,m4][,m5][,m6] (PRM p.162). m1, m3 and
+// m5 were read; m2, m4 and m6 were dropped silently, and one of them is not a
+// presentation detail:
+//
+//   m2  separator-row height, 1x-2x the bar magnification
+//   m4  0 = "(" ")" and spaces appear only in the interpretive; 1 = both carry
+//       exactly the same data
+//   m6  0 = the linear component's interpretive is NOT printed; 1 = it is
+//
+// m6 decides whether a line of text is on the label at all, so a stream asking
+// for 0 was previewed with the human-readable row the printer would omit.
+describe('EAN.UCC Composite options are reported, not dropped (2026-09-30)', () => {
+    const stx = (f: string) => '<STX>' + f + '<ETX>';
+    const HT = String.fromCharCode(9);
+    // The linear and 2D components are separated by <HT> (PRM p.160).
+    const DATA = `112233445566${HT}aabbccddeeff`;
+    const codes = (spec: string) => parseViewerIPL(
+        [stx('<ESC>C<SI>W812<SI>L400'), stx('<ESC>P'), stx('E1;F1;'), stx(spec), stx('R')].join(''),
+    ).issues.map(i => i.code);
+
+    it('says which options it does not reproduce', () => {
+        // m2 and m6 stated.
+        const hit = codes(`B1;o10,10;c21,0,4,10,1,3,0;d3,${DATA}`).includes('composite-options-not-reproduced');
+        expect(hit, 'a stated option must be named').toBe(true);
+        // And the message must say WHICH, not just that something differs.
+        const msg = parseViewerIPL(
+            [stx('<ESC>C<SI>W812<SI>L400'), stx('<ESC>P'), stx('E1;F1;'),
+                stx(`B1;o10,10;c21,0,4,10,1,3,0;d3,${DATA}`), stx('R')].join(''),
+        ).issues.find(i => i.code === 'composite-options-not-reproduced')!.message;
+        expect(msg, 'the separator row').toMatch(/m2=4/);
+        expect(msg, 'the linear interpretive').toMatch(/m6=0/);
+    });
+
+    it('stays silent when the stream states none of them', () => {
+        // The control: a bare c21, or one that gives only the positions the
+        // parser models, must not raise this.
+        expect(codes(`B1;o10,10;c21;d3,${DATA}`)).not.toContain('composite-options-not-reproduced');
+        expect(codes(`B1;o10,10;c21,2;d3,${DATA}`)).not.toContain('composite-options-not-reproduced');
+    });
+
+    it('still reads the three it models', () => {
+        // The batch must not have disturbed m1/m3/m5 on its way past.
+        const el = parseViewerIPL(
+            [stx('<ESC>C<SI>W812<SI>L400'), stx('<ESC>P'), stx('E1;F1;'),
+                stx(`B1;o10,10;c21,2,4,10,1,3,0;d3,${DATA}`), stx('R')].join(''),
+        ).elements.find(e => e.kind === 'barcode') as
+            { compositeVersion?: string; compositeColumns?: string; compositeRowHeight?: string };
+        expect([el.compositeVersion, el.compositeColumns, el.compositeRowHeight]).toEqual(['2', '10', '3']);
+    });
+});
