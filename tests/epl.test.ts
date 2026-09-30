@@ -259,45 +259,52 @@ b10,20,${letter},"DATA"`).elements[0] as any)?.symbology;
     });
 
     it('reports the commands outside the subset by name', () => {
-        const label = parseEPL('N\nGW10,10,20,5\nb10,10,Q,"x"\nLS50,200,20,400');
+        const label = parseEPL('N\nGW10,10,20,5\nb10,10,Q,"x"');
         expect(label.issues.some(i => i.code === 'epl-gw-unsupported')).toBe(true);
         expect(label.issues.some(i => i.code === 'epl-2d-unsupported')).toBe(true);
-        expect(label.issues.some(i => i.code === 'epl-ls-unsupported')).toBe(true);
     });
 
-    it('reports LE, the line that inverts, instead of swallowing it', () => {
+    it('LE draws an INVERSION, the same operation TSPL calls REVERSE', () => {
         // LE is Line Draw Exclusive OR (manual p. 3-68): "Any area, line, image
         // or field that this line intersects or overlays will have the image
         // reversed or inverted ... all black will be reversed to white and all
         // white will be reversed to black within the line's area."
         //
-        // It is a DRAWING command, and it sat in PRINTER_SETTINGS — the list for
-        // sensor and job settings — so it produced no element and no issue. That
-        // is the one outcome this parser exists to prevent: even LS and GW,
-        // which it cannot draw either, name themselves.
+        // That is exactly what TSPL's REVERSE does, so it is the same element —
+        // and NOT a white fill, which would leave black ink underneath and
+        // still look like it had erased it.
         //
-        // The control is LO, its black counterpart: both are p1,p2,p3,p4 lines,
-        // so a probe that cannot see LO cannot tell "reported" from "not
-        // looked at".
+        // The control is LO, its black counterpart, so a probe that cannot see
+        // LO cannot tell "drawn" from "not looked at".
         const lo = parseEPL('N\nLO50,200,400,20\nP1\n');
         expect(lo.elements, 'LO must draw — without this the probe is blind').toHaveLength(1);
 
         const le = parseEPL('N\nLE50,200,400,20\nP1\n');
-        const hit = le.issues.find(i => i.code === 'epl-le-invert');
-        expect(hit, 'LE changes the printed image and must say so').toBeDefined();
-        expect(hit!.level).toBe('warning');
-        // It says WHERE and HOW BIG, so the user can find the line.
-        expect(hit!.message).toContain('50,200');
-        expect(hit!.message).toContain('400x20');
-        // It draws nothing — the inversion cannot be expressed — and says that
-        // too, rather than leaving the element count to imply it.
-        expect(le.elements).toHaveLength(0);
-        expect(hit!.message).toMatch(/nothing is drawn/i);
+        const el = le.elements[0] as any;
+        expect(el.kind, 'an inversion is its own element, not a line').toBe('reverse');
+        expect([el.ox, el.oy, el.widthDots, el.heightDots]).toEqual([50, 200, 400, 20]);
+        // A region of the image buffer is not a rotated field.
+        expect(el.f).toBe(0);
+        expect(le.issues.map(i => i.code), 'and it needs no complaint').toEqual([]);
     });
 
     it('still reports LE with bad parameters rather than ignoring the line', () => {
         const le = parseEPL('N\nLE50,200\nP1\n');
         expect(le.issues.some(i => i.code === 'epl-le-params')).toBe(true);
+    });
+
+    it('LS reads EPL\'s parameter order: thickness is THIRD, not last', () => {
+        // LS p1,p2,p3,p4,p5 — manual p. 3-70: x, y, THICKNESS, end x, end y.
+        // Every other line command here ends with its lengths (LO/LW take
+        // x,y,h-length,v-length) and TSPL's DIAGONAL puts thickness LAST, so
+        // reading LS as "x,y,x2,y2,thickness" is the natural mistake — it
+        // would take the END X for a thickness and draw the wrong line.
+        const el = parseEPL('N\nLS10,10,20,200,200\nP1\n').elements[0] as any;
+        expect(el.kind).toBe('diagonal');
+        expect(el.thicknessDots, 'the THIRD value is the thickness').toBe(20);
+        expect(el.ex, 'and the fourth is the end x').toBe(200);
+        expect(el.ey, 'the fifth the end y').toBe(200);
+        expect([el.ox, el.oy]).toEqual([10, 10]);
     });
 
     it('names every silence-list entry the manual does not define', () => {

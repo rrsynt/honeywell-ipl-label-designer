@@ -857,8 +857,46 @@ export const parseEPL = (code: string): ViewerLabel => {
                 }
                 const w = Math.max(0, Math.trunc(num(p[2], 0)));
                 const h = Math.max(0, Math.trunc(num(p[3], 0)));
-                issue('warning', 'epl-le-invert',
-                    `LE inverts every dot it crosses — black to white and white to black — over a ${w}x${h} dot area at ${num(p[0], 0)},${num(p[1], 0)}. This preview has no way to invert what is already drawn, so nothing is drawn for it.`, 'LE');
+                if (w === 0 || h === 0) {
+                    issue('info', 'epl-le-empty', 'An LE region with no width or height changes nothing.', 'LE');
+                    break;
+                }
+                // "Any area, line, image or field that this line intersects or
+                // overlays will have the image reversed or inverted ... all
+                // black will be reversed to white and all white will be
+                // reversed to black within the line's area (width and length)."
+                // — manual p. 3-68. The SAME operation as TSPL's REVERSE, so it
+                // lands in the same element rather than being approximated by a
+                // white fill, which would leave black ink under it.
+                //
+                // This was previously reported as impossible for the preview;
+                // that was true when written and is not any more.
+                elements.push({
+                    kind: 'reverse', id: nextId++,
+                    ox: num(p[0], 0) + refX, oy: num(p[1], 0) + refY, f: 0,
+                    widthDots: w, heightDots: h,
+                } as ViewerElement);
+                break;
+            }
+
+            case 'LS': {
+                // LS p1,p2,p3,p4,p5 — manual p. 3-70: x, y, THICKNESS, end x,
+                // end y. Note the order: the thickness sits THIRD and the end
+                // point fourth and fifth, which is NOT the order every other
+                // line command here uses (LO/LW end with the lengths, and
+                // TSPL's DIAGONAL puts thickness last). Reading it as
+                // "x,y,x2,y2,thickness" would take the end x for a thickness.
+                if (p.length < 5) {
+                    issue('warning', 'epl-ls-params', `LS needs x,y,thickness,endx,endy. Found ${p.length}. Skipped.`, 'LS');
+                    break;
+                }
+                const thickness = Math.max(1, Math.trunc(num(p[2], 1) || 1));
+                elements.push({
+                    kind: 'diagonal', id: nextId++,
+                    ox: num(p[0], 0) + refX, oy: num(p[1], 0) + refY, f: 0,
+                    ex: num(p[3], 0) + refX, ey: num(p[4], 0) + refY,
+                    thicknessDots: thickness,
+                } as ViewerElement);
                 break;
             }
 
@@ -867,9 +905,7 @@ export const parseEPL = (code: string): ViewerLabel => {
                 // Everything else is a real EPL command this subset does not
                 // draw. Naming it is the difference between "not supported" and
                 // a field silently missing from the label.
-                if (cmd.name === 'LS') {
-                    issue('info', 'epl-ls-unsupported', 'Diagonal lines (LS) are not part of this viewer yet.', 'LS');
-                } else if (cmd.name === 'GW') {
+                if (cmd.name === 'GW') {
                     issue('info', 'epl-gw-unsupported', 'Binary graphics (GW) are not part of this viewer yet.', 'GW');
                 } else if (cmd.name === 'GG') {
                     // GG is Print Graphics (manual p. 3-57): it prints a PCX
