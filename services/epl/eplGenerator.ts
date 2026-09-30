@@ -141,9 +141,14 @@ export const generateEPL = (design: Design): EplGenerateResult => {
                 warnings.push(`"${field.name}" uses a font with no EPL equivalent. It prints with resident font 1, which is a different size and shape.`);
             }
             const data = escapeEplData(fieldData(field, design));
-            // p7 is the reverse flag. The designer has no reverse-text control,
-            // so it is always 'N' — EPL prints black on white.
-            lines.push(`A${origin.x},${origin.y},${rot},${eplFont ?? 1},${Math.max(1, Math.round(field.h_mag ?? 1))},${Math.max(1, Math.round(field.w_mag ?? 1))},N,"${data}"`);
+            // p5 is the HORIZONTAL multiplier and p6 the VERTICAL one (manual
+            // p. 3-4). Emitting h_mag into p5 applied the height to the width,
+            // so a "wide" text printed tall and a "tall" one printed wide —
+            // the same swap the parser already documents fixing on its side.
+            // The parser reads p5 -> w_mag and p6 -> h_mag, so this is the
+            // symmetric write. p7 is the reverse flag, always 'N' (the designer
+            // has no reverse-text control; EPL prints black on white).
+            lines.push(`A${origin.x},${origin.y},${rot},${eplFont ?? 1},${Math.max(1, Math.round(field.w_mag ?? 1))},${Math.max(1, Math.round(field.h_mag ?? 1))},N,"${data}"`);
             continue;
         }
 

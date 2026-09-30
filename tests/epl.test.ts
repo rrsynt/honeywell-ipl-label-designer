@@ -449,6 +449,22 @@ describe('EPL generator', () => {
         expect(a.split(',')[3]).toBe('1');
     });
 
+    it('puts the WIDTH multiplier in p5 and the HEIGHT in p6', () => {
+        // Manual p. 3-4: p5 is the horizontal multiplier, p6 the vertical. The
+        // generator wrote h_mag into p5, so a wide text printed tall and vice
+        // versa — the swap the parser's own comment records fixing on its side.
+        const axisOf = (h: number, w: number) => {
+            const parts = eplLines([textField({ h_mag: h, w_mag: w })]).find(l => l.startsWith('A'))!.split(',');
+            return [parts[4], parts[5]]; // [p5 horizontal, p6 vertical]
+        };
+        expect(axisOf(1, 4)).toEqual(['4', '1']); // h_mag 1, w_mag 4 -> wide
+        expect(axisOf(4, 1)).toEqual(['1', '4']); // h_mag 4, w_mag 1 -> tall
+        // And the round trip reads the same axes back.
+        const { epl } = generateEPL(withFields([textField({ h_mag: 1, w_mag: 4 })]));
+        const el = parseEPL(epl).elements[0] as { hMag: number; wMag: number };
+        expect([el.hMag, el.wMag]).toEqual([1, 4]);
+    });
+
     it('emits B with type 3 for Code 39 — the inverse of the parser table', () => {
         expect(eplLines([barcodeField()]).find(l => l.startsWith('B'))!.split(',')[3]).toBe('3');
     });
