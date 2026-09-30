@@ -806,3 +806,43 @@ describe('TSPL QRCODE reads its option tail (2026-09-30)', () => {
         expect(codes(',M2,S3')).not.toContain('tspl-qr-placement');
     });
 });
+
+// MPDF417's option block is Wn/Hn/Cn — the module width, module height and
+// COLUMN COUNT. Cn was the last of the three still unread: measured, C2 and C4
+// produced an auto-sized symbol identical to the bare command, so a stream that
+// fixed the column count got whatever the printer chose.
+//
+// Cn's domain is the same as IPL's c19,m1 — 0-4, with 0 meaning automatic
+// ("0: Automode. 1: Column is 1... 4: Column is 4").
+describe('TSPL MPDF417 reads Cn, the column count (2026-09-30)', () => {
+    const el = (opts: string) => parseTSPL(
+        `SIZE 80 mm,50 mm\nCLS\nMPDF417 10,10,0${opts},"DATA"\nPRINT 1,1\n`,
+    ).elements[0] as { microColumns?: string };
+    const codes = (opts: string) => parseTSPL(
+        `SIZE 80 mm,50 mm\nCLS\nMPDF417 10,10,0${opts},"DATA"\nPRINT 1,1\n`,
+    ).issues.map(i => i.code);
+
+    it('carries the column count to the encoder', () => {
+        expect(el(',C2').microColumns).toBe('2');
+        expect(el(',C4').microColumns).toBe('4');
+        // The control: no Cn means the printer chooses, which is what Cn=0
+        // says too — so neither may report anything.
+        expect(el('').microColumns).toBeUndefined();
+        expect(codes('')).toEqual([]);
+    });
+
+    it('names a column count outside 0-4 instead of passing it on', () => {
+        expect(codes(',C5')).toContain('tspl-mpdf417-columns');
+        expect(el(',C5').microColumns, 'an out-of-domain value is not a column count').toBeUndefined();
+    });
+
+    it('reads all three options together', () => {
+        // W/H were wired earlier; this is the case that proves the third did
+        // not get lost between them.
+        const e = parseTSPL('SIZE 80 mm,50 mm\nCLS\nMPDF417 10,10,0,W3,H12,C2,"DATA"\nPRINT 1,1\n')
+            .elements[0] as { microColumns?: string; moduleDots: number; heightDots: number };
+        expect(e.microColumns).toBe('2');
+        expect(e.moduleDots, 'W3').toBe(3);
+        expect(e.heightDots, 'H12').toBe(12);
+    });
+});

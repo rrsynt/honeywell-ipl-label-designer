@@ -710,6 +710,18 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     const v = hit ? Math.trunc(num(hit.slice(1), fallback)) : fallback;
                     return Math.max(1, v);
                 };
+                // Cn, the column count, is the third optional member. Its
+                // domain is 0-4 with 0 meaning automatic, so a value outside
+                // that is not a column count and is named rather than passed
+                // to an encoder that would refuse the symbol.
+                const rawCols = mid.find(s => s.startsWith('C'));
+                const colsNum = rawCols !== undefined ? Math.trunc(num(rawCols.slice(1), 0)) : undefined;
+                const microCols = colsNum !== undefined && colsNum >= 0 && colsNum <= 4
+                    ? String(colsNum) : undefined;
+                if (rawCols !== undefined && microCols === undefined) {
+                    issue('info', 'tspl-mpdf417-columns',
+                        `MPDF417 columns "C${rawCols.slice(1)}" is outside 0-4 (TSC guide p. 60); the printer chooses the column count.`, 'MPDF417');
+                }
                 const f = quadrantFromClockwise(p[2]);
                 const el: BarcodeElement = {
                     kind: 'barcode', id: nextId++,
@@ -723,6 +735,12 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     ratio: 1,
                     hri: 0,
                     source: { type: 'fixed', data: content },
+                    // Cn is "number of columns ... 0: Automode, 1-4 the column
+                    // count", the same 0-4 domain as IPL's c19,m1 — and the IR
+                    // already carries it for that command. Cn was the one
+                    // member of this command's option block still unread, so a
+                    // stream fixing the column count got an auto-sized symbol.
+                    ...(microCols !== undefined ? { microColumns: microCols } : {}),
                 };
                 elements.push(place(el));
                 break;
