@@ -182,15 +182,21 @@ export const generateEPL = (design: Design): EplGenerateResult => {
                     continue;
                 }
                 if (letter === 'M') {
-                    // MaxiCode's mode is the positional p4, and the manual's own
+                    // MaxiCode's positional p4 is the mode, and the manual's
                     // spellings are mixed case: M2, M3 (structured carrier) and
                     // m4, m6 (standard / reader programming). No p4 at all is
                     // the documented default — automatic selection.
+                    //
+                    // MaxiCode has NO module-size parameter. Its p5 is "x,y",
+                    // the associated-symbol numbering (manual p. 3-25), so the
+                    // `,h<size>` copied from the Data Matrix form was a
+                    // malformed parameter the printer does not define there —
+                    // a MaxiCode is a fixed-size symbol. Dropped.
                     const mode = field.maxiMode;
                     const p4 = mode === 2 || mode === 3 ? `,M${mode}`
                         : mode === 4 || mode === 6 ? `,m${mode}`
                         : '';
-                    lines.push(`b${origin.x},${origin.y},M${p4},h${moduleSize},"${escapeEplData(data)}"`);
+                    lines.push(`b${origin.x},${origin.y},M${p4},"${escapeEplData(data)}"`);
                     continue;
                 }
                 lines.push(`b${origin.x},${origin.y},${letter},h${moduleSize},"${escapeEplData(data)}"`);

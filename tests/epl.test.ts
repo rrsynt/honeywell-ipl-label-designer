@@ -560,6 +560,23 @@ describe('EPL generator', () => {
         expect(twoD('17')).toContain('"DATA"');
     });
 
+    it('writes no module-size parameter for MaxiCode, which has none', () => {
+        // MaxiCode's p5 is "x,y" associated-symbol numbering (manual p. 3-25),
+        // not a module size — the symbol is fixed-size. The `,h<size>` copied
+        // from the Data Matrix form (where h IS the module size) was a
+        // parameter the printer does not define for MaxiCode.
+        const maxi = generateEPL(withFields([
+            barcodeField({ symbology: '14', name: 'C', dataSource: { type: 'fixed', data: 'DATA' } }),
+        ])).epl.split('\n').find(l => l.startsWith('b'))!;
+        expect(maxi).not.toMatch(/,h\d/);
+        expect(maxi).toMatch(/^b\d+,\d+,M,"DATA"$/);
+        // The control: Data Matrix KEEPS its module size, which is real there.
+        const dm = generateEPL(withFields([
+            barcodeField({ symbology: '17', name: 'C', dataSource: { type: 'fixed', data: 'DATA' } }),
+        ])).epl.split('\n').find(l => l.startsWith('b'))!;
+        expect(dm).toMatch(/,h\d/);
+    });
+
     it('refuses a QR code BY NAME, because EPL2 has none', () => {
         const { epl, warnings } = generateEPL(withFields([barcodeField({ symbology: '18', name: 'QR' })]));
         expect(epl.split('\n').some(l => l.startsWith('b'))).toBe(false);
