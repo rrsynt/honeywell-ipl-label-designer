@@ -37,10 +37,26 @@ export interface ZplGenerateResult {
     warnings: string[];
 }
 
-/** Barcode symbologies this subset can emit, keyed by the design's symbology id. */
+/**
+ * Barcode symbologies this subset can emit, keyed by the design's symbology id.
+ *
+ * The 1D commands do NOT share a parameter order. ^BC and ^B2 are o,h,f,g —
+ * orientation, HRI, height — while ^B3 is o,e,h,f,g: its second slot is the
+ * CHECK DIGIT and its THIRD is the HRI. Measured against Labelary, which is the
+ * only ZPL oracle this repo has: for ^B3, moving slot 3 from 60 to 200 takes
+ * the rendered height from 30px to 220px and slot 2 changes nothing; for ^BC
+ * and ^B2 the same test moves slot 2.
+ *
+ * The old table wrote `^B3N,${hri},N,N` and `^B2N,${hri},N,N`, which put the
+ * HRI flag where ^B3's check digit and ^B2's height belong — so a Code 39 came
+ * out with its check-digit mode set from a human-readable flag, and an
+ * Interleaved 2 of 5 lost its height to that same slot.
+ */
 const ZPL_BARCODE: Record<string, (hri: 'Y' | 'N', height: number) => string> = {
-    '0': (hri) => `^B3N,${hri},N,N`,          // Code 39
-    '2': (hri) => `^B2N,${hri},N,N`,          // Interleaved 2 of 5
+    // ^B3 o,e,h,f,g — check digit N, then the HRI flag in the HRI slot.
+    '0': (hri) => `^B3N,N,${hri},N,N`,        // Code 39
+    // ^B2 o,h,f,g — HRI first, like ^BC.
+    '2': (hri) => `^B2N,${hri},N,N,N`,        // Interleaved 2 of 5
     '6': (hri) => `^BCN,${hri},Y,N,N`,        // Code 128
     '17': (_hri, height) => `^BXN,${Math.max(1, Math.round(height / 10))},200`, // DataMatrix
     '18': (_hri, height) => `^BQN,2,${Math.max(1, Math.round(height / 25))}`,   // QR

@@ -94,6 +94,12 @@ const num = (s: string | undefined, fallback: number): number => {
 const BARCODE_SYMBOLOGY: Record<string, string> = {
     BC: 'code128',
     B3: 'code39',
+    // ^B2 is Interleaved 2 of 5, and the generator has written it for the IR's
+    // '2' since it was written — while this table had no entry, so a stream
+    // produced by this app for an I2of5 design fell to the generic
+    // "barcode this viewer does not draw yet" and the field was lost. Labelary
+    // confirms the command exists and takes o,h,f,g like ^BC.
+    B2: 'interleaved2of5',
     BQ: 'qrcode',
     BX: 'datamatrix',
 };
@@ -257,7 +263,7 @@ export const parseZPL = (code: string): ViewerLabel => {
                 font = { h: num(p[1], 15), w: num(p[2], 15) };
                 issue('info', 'zpl-font-name', '^A@ names a downloaded font, which is not available here. Drawn with the scalable font at the requested size.', '^A@');
                 break;
-            case 'BC': case 'B3': case 'BQ': case 'BX': {
+            case 'BC': case 'B3': case 'B2': case 'BQ': case 'BX': {
                 const r = ROT[(p[0] ?? '').trim().toUpperCase()];
                 fieldRotation = r === undefined ? null : r;
                 // A 1D barcode's p[1] is its human-readable flag and p[2] is its
@@ -276,10 +282,34 @@ export const parseZPL = (code: string): ViewerLabel => {
                 // the only place a DataMatrix's size is stated, so it was
                 // ignored outright.
                 const matrixMag = Math.max(1, Math.trunc(num(p[1], 2)));
-                const hri: 0 | 1 = (p[1] ?? 'Y').trim().toUpperCase() === 'N' ? 0 : 1;
+                // The 1D commands do NOT share a parameter order. ^BC and ^B2
+                // are ^B<cmd>o,h,f,g — height SECOND. ^B3 is ^B3o,e,h,f,g —
+                // check digit second, height THIRD, HRI fourth.
+                //
+                // Measured against Labelary, the only ZPL oracle here (no ZPL
+                // manual in this repo). Putting a large value in one slot and
+                // reading the rendered symbol:
+                //
+                //   ^B3 slot 2 -> nothing      (index 1, the check digit)
+                //   ^B3 slot 3 -> height grows (index 2)
+                //   ^B3 slot 4 -> HRI row only (index 3)
+                //   ^BC slot 2 -> height grows (index 1)
+                //   ^BC slot 3 -> HRI row only (index 2)
+                //   ^B2 slot 2 -> height grows (index 1)
+                //   ^B2 slot 3 -> HRI row only (index 2)
+                //
+                // The previous code read height from index 2 and the HRI flag
+                // from index 1 for all three. That happened to be right about
+                // ^B3's height and wrong about everything else: it took ^BC's
+                // and ^B2's HEIGHT for a human-readable flag, and it took ^B3's
+                // check digit for one.
+                const isB3 = cmd.name === 'B3';
+                const heightIdx = isB3 ? 2 : 1;
+                const hriIdx = isB3 ? 3 : 2;
+                const hri: 0 | 1 = (p[hriIdx] ?? 'Y').trim().toUpperCase() === 'N' ? 0 : 1;
                 const height = cmd.name === 'BQ' ? matrixMag * 25
                     : cmd.name === 'BX' ? matrixMag * 10
-                    : num(p[2], byHeight);
+                    : num(p[heightIdx], byHeight);
                 const module = cmd.name === 'BQ' || cmd.name === 'BX' ? matrixMag : byModule;
                 pendingBarcode = {
                     symbology: BARCODE_SYMBOLOGY[cmd.name],

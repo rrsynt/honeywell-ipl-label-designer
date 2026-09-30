@@ -213,3 +213,50 @@ describe('parseZPL', () => {
         expect(estimateElementSize(a, DPI)).toEqual(estimateElementSize(b, DPI));
     });
 });
+
+
+
+// The 1D barcode commands do NOT share a parameter order. There is no ZPL
+// manual in docs/manuals, so these were settled against LABELARY — the only
+// independent ZPL renderer available here — by putting a large value in one
+// position at a time and measuring the rendered symbol. Positions below are
+// p[] INDICES (p[0] is the orientation):
+//
+//   ^B2 [1] -> height grows  ([2] only moves the HRI row)
+//   ^BC [1] -> height grows  ([2] only moves the HRI row)
+//   ^B3 [1] -> nothing at all (it is the CHECK DIGIT)
+//   ^B3 [2] -> height grows
+//
+// ^BC and ^B2 are therefore o,h,f,g while ^B3 is o,e,h,f,g. Reading all three
+// alike took ^BC's and ^B2's HEIGHT for a human-readable flag.
+describe('1D barcode slots differ per command, measured (2026-09-30)', () => {
+    const el = (b: string) => parseZPL(`^XA^FO10,10^${b}^FD12345678^FS^XZ`).elements[0] as {
+        heightDots: number; hri: number;
+    };
+
+    it('reads ^B2 and ^BC height from p[1]', () => {
+        for (const cmd of ['B2', 'BC']) {
+            expect(el(`${cmd}N,150,N,N,N`).heightDots, `${cmd} p[1] IS the height`).toBe(150);
+            // The control: p[2] is not, it only grows the HRI row.
+            expect(el(`${cmd}N,N,150,N,N`).heightDots, `${cmd} p[2] is not`).toBe(10);
+        }
+    });
+
+    it('reads ^B3 height from p[2], and its p[1] as the check digit', () => {
+        expect(el('B3N,N,150,N,N').heightDots, 'p[2] IS the height').toBe(150);
+        expect(el('B3N,150,N,N,N').heightDots, 'p[1] is the check digit').toBe(10);
+        // The HRI flag is p[3] for ^B3, so p[1] must not be read as one.
+        expect(el('B3N,150,N,N,N').hri, 'the check digit is not an HRI flag').toBe(0);
+    });
+
+    it('reads ^B2 at all, which it did not before', () => {
+        // The generator has written ^B2 for the IR's '2' since it was written,
+        // while this parser had no entry for it — so an Interleaved 2 of 5
+        // design that went out as ZPL and came back lost its field, with only
+        // "a barcode this viewer does not draw yet" to say so.
+        const label = parseZPL('^XA^FO10,10^B2N,Y,N,N,N^FD12345678^FS^XZ');
+        expect(label.elements, '^B2 must draw').toHaveLength(1);
+        expect((label.elements[0] as { symbology: string }).symbology).toBe('interleaved2of5');
+        expect(label.issues.map(i => i.code)).not.toContain('zpl-barcode-unsupported');
+    });
+});
