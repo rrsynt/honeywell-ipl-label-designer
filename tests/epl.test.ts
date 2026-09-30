@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import './golden/setup';
 import { newRealCanvas } from './golden/setup';
-import { renderLabel, computeLabelExtent } from '../services/ipl/renderer';
+import { renderLabel, computeLabelExtent, estimateElementSize } from '../services/ipl/renderer';
 import { totalLabelCount } from '../services/ipl/odometer';
 import { parseEPL, tokenizeEpl, unescapeEpl, EPL_FONT_SIZES } from '../services/epl/eplParser';
 import { generateEPL, escapeEplData } from '../services/epl/eplGenerator';
@@ -195,8 +195,12 @@ describe('EPL parser', () => {
     });
 
     it('carries the font multipliers into IR magnification', () => {
+        // A p5,p6 = 3,2 — p5 is HORIZONTAL and p6 VERTICAL (manual p. 3-4), so
+        // the width magnification is 3 and the height magnification is 2.
+        // This test asserted [hMag, wMag] = [3, 2] before the axes were
+        // checked against the manual, which locked the swap in place.
         const t = parseEPL('N\nA10,10,0,2,3,2,N,"BIG"').elements[0] as any;
-        expect([t.hMag, t.wMag]).toEqual([3, 2]);
+        expect([t.wMag, t.hMag]).toEqual([3, 2]);
     });
 
     it('reports reverse printing instead of carrying a flag nothing reads', () => {
@@ -746,5 +750,60 @@ describe('oW changes the printed bar widths and must say so (2026-09-30)', () =>
         for (const cmd of ['oR', 'oB']) {
             expect(parseEPL(`N\n${cmd}\nP1\n`).issues, cmd).toHaveLength(0);
         }
+    });
+});
+
+// A p1,p2,p3,p4,p5,p6,p7,"DATA" — p5 is the HORIZONTAL multiplier and p6 the
+// VERTICAL one (manual p. 3-4), and the documented value sets differ: horizontal
+// allows 1,2,3,4,5,6,8 while vertical also allows 7 and 9. The parser had them
+// the other way round, so a horizontal stretch was applied to the height.
+describe('A applies p5 horizontally and p6 vertically (2026-09-30)', () => {
+    type Mags = { hMag: number; wMag: number; pointSize?: number };
+    const el = (line: string) => parseEPL(`N\n${line}\nP1\n`).elements[0] as Mags;
+    // The element's own size, which is what the layout and the anchor use.
+    // estimateElementSize takes the whole element, not just its magnifications.
+    const size = (line: string) =>
+        estimateElementSize(parseEPL(`N\n${line}\nP1\n`).elements[0], 203);
+
+    it('reads p5 as the width magnification', () => {
+        const base = el('A10,10,0,1,1,1,N,"MMMM"');
+        expect([base.wMag, base.hMag]).toEqual([1, 1]);
+
+        const wide = el('A10,10,0,1,4,1,N,"MMMM"');
+        expect(wide.wMag, 'p5=4 stretches the TEXT horizontally').toBe(4);
+        expect(wide.hMag, 'p6=1 means no vertical change').toBe(1);
+
+        const tall = el('A10,10,0,1,1,4,N,"MMMM"');
+        expect(tall.wMag, 'p5=1 means no horizontal change').toBe(1);
+        expect(tall.hMag, 'p6=4 stretches the LINE HEIGHT').toBe(4);
+    });
+
+    it('stretches the right axis, measured', () => {
+        // The point of the fix, in the units that matter: a wider field is
+        // longer, a taller field is CROSSER — and neither touches the other.
+        const base = size('A10,10,0,1,1,1,N,"MMMM"');
+        const wide = size('A10,10,0,1,4,1,N,"MMMM"');
+        const tall = size('A10,10,0,1,1,4,N,"MMMM"');
+
+        expect(wide.lengthDots, 'p5=4 makes the run four times as long')
+            .toBeGreaterThan(base.lengthDots * 3);
+        expect(wide.crossDots, 'and does not change the line height')
+            .toBe(base.crossDots);
+
+        expect(tall.lengthDots, 'p6=4 leaves the run alone').toBe(base.lengthDots);
+        expect(tall.crossDots, 'while growing the line height')
+            .toBeGreaterThan(base.crossDots * 2);
+    });
+
+    it('still reports an out-of-range multiplier, now on the right axis', () => {
+        // 7 and 9 are legal VERTICALLY but not horizontally, so the check has
+        // to be made against the horizontal set — otherwise the message would
+        // fire on a value the manual allows.
+        const warnOf = (line: string) =>
+            parseEPL(`N\n${line}\nP1\n`).issues.map(i => i.code);
+        expect(warnOf('A10,10,0,1,7,1,N,"X"'), 'p5=7 is not a documented horizontal value')
+            .toContain('epl-h-multiplier');
+        expect(warnOf('A10,10,0,1,1,7,N,"X"'), 'p6=7 IS a documented vertical value')
+            .not.toContain('epl-h-multiplier');
     });
 });

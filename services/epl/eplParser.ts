@@ -404,11 +404,16 @@ export const parseEPL = (code: string): ViewerLabel => {
                 }
                 const size = EPL_FONT_SIZES[fontNum] ?? FALLBACK_FONT;
 
-                const hMul = Math.max(1, Math.trunc(num(p[4], 1)));
-                const wMul = Math.max(1, Math.trunc(num(p[5], 1)));
-                if (!H_MULTIPLIERS.has(hMul)) {
+                // p5 is the HORIZONTAL multiplier and p6 the VERTICAL one
+                // (manual p. 3-4). Reading them the other way round applied a
+                // horizontal stretch to the height: measured, A10,10,0,1,4,1,N
+                // ("wide") came out 51x24 dots — taller, not wider — while
+                // A10,10,0,1,1,4 ("tall") did not change the width at all.
+                const wMul = Math.max(1, Math.trunc(num(p[4], 1)));
+                const hMul = Math.max(1, Math.trunc(num(p[5], 1)));
+                if (!H_MULTIPLIERS.has(wMul)) {
                     once('h-mult', 'info', 'epl-h-multiplier',
-                        `Horizontal multiplier ${hMul} is outside the documented values (1,2,3,4,5,6,8). It is used as given.`, 'A');
+                        `Horizontal multiplier ${wMul} is outside the documented values (1,2,3,4,5,6,8). It is used as given.`, 'A');
                 }
                 const f = rotation(p[2]);
                 // The IR font is chosen so the RENDERER measures the same cell
