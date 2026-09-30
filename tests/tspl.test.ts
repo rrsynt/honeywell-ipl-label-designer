@@ -552,6 +552,35 @@ describe('MicroPDF417 works in TSPL (2026-09-30)', () => {
         expect(el?.symbology, "the IR's MicroPDF417 id").toBe('19');
     });
 
+    it('reads MPDF417 by the manual syntax, not the PDF417 box', () => {
+        // TSC manual: MPDF417 x,y,rotate,[Wn,][Hn,][Cn,]content. There is no
+        // positional width or height — W and H are the module's dimensions,
+        // letter-prefixed and optional (defaults 1 and 10).
+        //
+        // Reading it as PDF417 put the width where the rotation belongs:
+        // MPDF417 10,10,100,50,0,DATA came out rotated 100 quadrants. The
+        // round trip did not catch it because the generator wrote the same
+        // wrong shape back, so both sides agreed on a reading the manual does
+        // not support. The control is PDF417, which really does take the box.
+        const read = (line: string) => parseTSPL(
+            'SIZE 40 mm,30 mm' + '\n' + 'CLS' + '\n' + line + '\n' + 'PRINT 1,1' + '\n',
+        ).elements[0] as { f: number; moduleDots: number; heightDots: number };
+
+        const bare = read('MPDF417 10,10,0,"DATA"');
+        expect(bare.f, 'the third parameter IS the rotation').toBe(0);
+        expect(bare.moduleDots, 'Wn default').toBe(1);
+        expect(bare.heightDots, 'Hn default').toBe(10);
+
+        const dims = read('MPDF417 10,10,90,W3,H12,"DATA"');
+        expect(dims.f, '90 degrees clockwise -> quadrant 3').toBe(3);
+        expect(dims.moduleDots).toBe(3);
+        expect(dims.heightDots).toBe(12);
+
+        const pdf = read('PDF417 10,10,100,50,0,"DATA"');
+        expect(pdf.f, 'PDF417 keeps its own shape: x,y,w,h,rotate').toBe(0);
+        expect(pdf.heightDots).toBe(50);
+    });
+
     it('generates MPDF417 and reads its own stream back', () => {
         const out = generateTSPL(design('19'));
         expect(out.warnings, 'it is drawable now, so nothing to warn about').toEqual([]);
@@ -560,6 +589,26 @@ describe('MicroPDF417 works in TSPL (2026-09-30)', () => {
         const back = parseTSPL(out.tspl);
         expect(back.issues.map(i => i.code), 'no unsupported-command noise').not.toContain('tspl-unsupported');
         expect((back.elements[0] as { symbology: string }).symbology).toBe('19');
+
+        // And the SHAPE it writes is the manual's, not PDF417's. Without this
+        // the round trip passes on a generator writing the wrong shape, because
+        // only one side is being checked for it — which is exactly how the
+        // wrong shape survived the first time.
+        const line = out.tspl.split('\n').find(l => l.startsWith('MPDF417 '))!;
+        const params = line.slice('MPDF417 '.length, line.indexOf(',"'));
+        expect(params.split(',').length,
+            `MPDF417 x,y,rotate,[Wn,][Hn,] — got "${params}"`).toBeLessThanOrEqual(5);
+        // The third parameter is the rotation, so it must be one of the four
+        // quadrants and never a dot width.
+        const third = Number(params.split(',')[2]);
+        expect([0, 90, 180, 270], `third parameter must be a rotation, got ${third}`)
+            .toContain(third);
+        // Any module words present must be letter-prefixed, as the manual writes
+        // them (Wn / Hn / Cn), not positional numbers.
+        for (const w of params.split(',').slice(3)) {
+            expect(w, `"${w}" must be a W/H/C parameter, not a positional size`)
+                .toMatch(/^[WHC]\d+$/);
+        }
     });
 
     it('does not tell the user MaxiCode is absent while listing it as present', () => {

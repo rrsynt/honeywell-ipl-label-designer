@@ -199,11 +199,16 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                     const ecc = field.qrEcl ?? 'M';
                     lines.push(`QRCODE ${x},${y},${ecc},${cell},A,${rotation},"${escapeTsplData(data)}"`);
                 } else if (cmd === 'MPDF417') {
-                    // MPDF417 takes the same box as PDF417: x,y,width,height,
-                    // rotation, then the mode block and the data.
-                    const w = Math.max(1, dots(box.width));
-                    const h = Math.max(1, dots(box.height));
-                    lines.push(`MPDF417 ${x},${y},${w},${h},${rotation},"${escapeTsplData(data)}"`);
+                    // NOT the same shape as PDF417. The TSC manual gives
+                    //   MPDF417 x,y,rotate,[Wn,][Hn,][Cn,]"content"
+                    // — there is no positional width or height. Wn and Hn are
+                    // the module's width and height (defaults 1 and 10), and
+                    // Cn is the column count. Writing the PDF417 box here put
+                    // the width where the rotation belongs, so a printer would
+                    // have rotated the symbol by 150 degrees.
+                    const w = Math.max(1, Math.round(field.w_mag ?? 1));
+                    const h = Math.max(1, Math.round(field.h_mag ?? 10));
+                    lines.push(`MPDF417 ${x},${y},${rotation},W${w},H${h},"${escapeTsplData(data)}"`);
                 } else {
                     const w = Math.max(1, dots(box.width));
                     const h = Math.max(1, dots(box.height));

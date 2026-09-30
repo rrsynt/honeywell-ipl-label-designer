@@ -637,17 +637,56 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 break;
             }
 
-            case 'PDF417':
             case 'MPDF417': {
+                // MPDF417 x,y,rotate,[Wn,][Hn,][Cn,]"content" — the TSC
+                // manual's own syntax. It is NOT the PDF417 box: there is no
+                // positional width or height, and W/H are letter-prefixed
+                // module dimensions (defaults 1 and 10).
+                //
+                // Reading it as PDF417 put the WIDTH where the rotation
+                // belongs, so MPDF417 10,10,100,50,0,"DATA" came out rotated
+                // 100 quadrants. The round trip did not catch it because the
+                // generator wrote the same wrong shape back — two sides agreeing
+                // on a reading the manual does not support.
+                if (p.length < 3) {
+                    issue('warning', 'tspl-mpdf417-params', `MPDF417 needs x,y,rotate. Found ${p.length}. Skipped.`, 'MPDF417');
+                    break;
+                }
+                const content = p[p.length - 1] ?? '';
+                if (content === '') {
+                    issue('warning', 'tspl-mpdf417-empty', 'A MPDF417 with no data prints nothing.', 'MPDF417');
+                    break;
+                }
+                // The optional module dimensions are letter-prefixed and sit
+                // between the rotation and the content.
+                const mid = p.slice(3, -1).map(s => s.trim().toUpperCase());
+                const dim = (letter: string, fallback: number) => {
+                    const hit = mid.find(s => s.startsWith(letter));
+                    const v = hit ? Math.trunc(num(hit.slice(1), fallback)) : fallback;
+                    return Math.max(1, v);
+                };
+                const f = quadrantFromClockwise(p[2]);
+                const el: BarcodeElement = {
+                    kind: 'barcode', id: nextId++,
+                    ox: num(p[0], 0), oy: num(p[1], 0), f,
+                    symbology: '19',
+                    // Hn is the module's height; the IR wants a symbol height,
+                    // so the module count is carried as-is and the renderer
+                    // measures from moduleDots.
+                    heightDots: dim('H', 10),
+                    moduleDots: dim('W', 1),
+                    ratio: 1,
+                    hri: 0,
+                    source: { type: 'fixed', data: content },
+                };
+                elements.push(place(el));
+                break;
+            }
+
+            case 'PDF417': {
                 // PDF417 x,y,width,height,rotate,[option], "content"
                 // (manual p. 56). The option block carries letter-prefixed
                 // settings (P/E/M/U/W/H/R/C/T/Lm) which this subset reads past.
-                //
-                // MPDF417 shares the box layout. It was not a case here while
-                // services/ipl/barcodes.ts has encoded the IR's '19' as
-                // micropdf417 for every other language all along, so a TSPL
-                // MicroPDF417 drew nothing and reported only "MPDF417 is not
-                // part of the supported TSPL subset".
                 const which = cmd.name;
                 if (p.length < 5) {
                     issue('warning', 'tspl-pdf417-params', `${which} needs x,y,width,height,rotate. Found ${p.length}. Skipped.`, which);
@@ -662,7 +701,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 const el: BarcodeElement = {
                     kind: 'barcode', id: nextId++,
                     ox: num(p[0], 0), oy: num(p[1], 0), f,
-                    symbology: which === 'MPDF417' ? '19' : '12',
+                    symbology: '12',
                     heightDots: Math.max(1, Math.trunc(num(p[3], 10))),
                     moduleDots: Math.max(1, Math.trunc(num(p[2], 2) / 10) || 2),
                     ratio: 1,
