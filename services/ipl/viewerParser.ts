@@ -2680,6 +2680,65 @@ export class IPLViewerParser {
             this.printer.issue('info', 'picket-width-widened', `Bar width w1 in picket mode (bars across the web, f${this.rotationOf(params, cmd)}) prints as 2 dots — the printer cannot place a 1-dot bar across the head (PRM p.53).`, cmd);
         }
         const code39Mode = parts[0] === '0' ? parts[1] : undefined;
+        // The 1D types other than Code 39 take a single m, and it selects
+        // something the SYMBOL carries rather than a presentation detail
+        // (PRM p.151-152):
+        //
+        //   c2[,m]  Interleaved 2 of 5 — 0 no check digit, 1 the PRINTER enters
+        //           one, 2 the HOST enters it.
+        //   c3[,m]  Code 2 of 5 — 0 three-bar start/stop, 1 two-bar.
+        //   c4[,m]  Codabar — 0 host enters start/stop; 1,x,y has the printer
+        //           enter start code x and stop code y (A-D / a-d).
+        //   c5[,m]  Code 11 — 0 PRINTER enters 2 check digits, 1 printer enters
+        //           1, 2 host enters 2, 3 host enters 1. Note m0 is NOT "no
+        //           check digit": Code 11's default is two, printer-supplied.
+        //
+        // None of these reached the encoder, and one shortcut can look right
+        // and be wrong: the manual's Code 11 m0 is "printer enters 2 check
+        // digits" and m1 "printer enters 1", so a bare c5 draws a symbol the
+        // encoder built with NO check digits — arity, not just length, differs.
+        // bwip's includecheck does append a digit (measured: c2 +5 elements,
+        // c5 +3), but its algorithm is not necessarily the printer's, and a
+        // plausible-looking wrong digit is worse than none, so the printer-
+        // entered modes are NAMED rather than drawn with a guess. Host-entered
+        // modes need nothing: their check character is part of the field's data.
+        const isC2 = parts[0] === '2';
+        const isC5 = parts[0] === '5';
+        if (isC2 || isC5) {
+            const checkDigitMode = parts[1];
+            const stated = checkDigitMode !== undefined && checkDigitMode.trim() !== '';
+            // The manual's default for m is 0 in both. For c2 that is "no check
+            // digit"; for c5 it is "printer enters two" — so a BARE c5, which
+            // the designer emits when the user picks Code 11, is one of the
+            // streams this reports, while a bare c2 is not.
+            const m = stated ? Number(checkDigitMode) : 0;
+            const allowed = isC2 ? [0, 1, 2] : [0, 1, 2, 3];
+            // Which modes the PRINTER supplies — the ones this preview cannot
+            // draw. c2 m1; c5 m0 (two digits) and m1 (one). Host modes
+            // (c2 m2, c5 m2/m3) carry the digit in the data and stay silent.
+            const printerEnters = isC2 ? m === 1 : m === 0 || m === 1;
+            if (stated && !allowed.includes(m)) {
+                this.printer.issue('warning', 'check-digit-mode-invalid',
+                    `Bar code type c${parts[0]},m="${checkDigitMode}" is outside the values the manual gives (PRM p.15${isC2 ? '1' : '2'}); no check digit is added.`, cmd);
+            } else if (printerEnters) {
+                const digits = isC5 ? (m === 0 ? 'two check digits' : 'one check digit') : 'a check digit';
+                this.printer.issue('info', 'check-digit-not-drawn',
+                    `Bar code type c${parts[0]},m=${m} has the printer enter ${digits} (PRM p.15${isC2 ? '1' : '2'}); this preview draws the field's data without ${isC5 ? 'them' : 'it'}.`, cmd);
+            }
+        }
+        if (parts[0] === '3' && parts[1] !== undefined && parts[1].trim() !== '' && parts[1].trim() !== '0') {
+            // c3's m selects the START/STOP pattern, which is part of the
+            // symbol's structure rather than its data.
+            this.printer.issue('info', 'code2of5-bar-pattern',
+                `Code 2 of 5 m=${parts[1]} selects a two-bar start/stop pattern (PRM p.151); this preview draws the encoder's own start/stop.`, cmd);
+        }
+        if (parts[0] === '4' && parts[1] !== undefined && parts[1].trim() !== '' && parts[1].trim() !== '0') {
+            // c4,m = 1,x,y: "Printer enters start code x and stop code y", from
+            // A-D / a-d. The encoder has no start/stop option, so the
+            // characters the stream asked for are not the ones drawn.
+            this.printer.issue('info', 'codabar-start-stop',
+                `Codabar m=${parts.slice(1).join(',')} has the printer enter its own start/stop characters (PRM p.151); this preview has no start/stop option and draws the field's data as given.`, cmd);
+        }
         // Code 39 Prefix Character, Define (PRM p.181): "Defines the prefix for
         // a Code 39 field. The prefix is only valid for Code 39 fields." Syntax
         // p[n1][n2][n3][n4] — up to four characters, "A to Z (uppercase only)

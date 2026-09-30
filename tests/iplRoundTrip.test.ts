@@ -659,3 +659,63 @@ describe('c20 options are scoped to the version that accepts them (2026-09-30)',
         expect(codes(',6,1,7')).toContain('rss-segments-invalid');
     });
 });
+
+// The 1D types other than Code 39 take a single m, and it selects something the
+// SYMBOL carries rather than a presentation detail (PRM p.151-152):
+//
+//   c2[,m]  Interleaved 2 of 5 — 0 no check digit, 1 the PRINTER enters one,
+//           2 the HOST enters it
+//   c3[,m]  Code 2 of 5 — 0 three-bar start/stop, 1 two-bar
+//   c4[,m]  Codabar — 0 host enters start/stop, 1,x,y the printer enters them
+//   c5[,m]  Code 11 — 0 the PRINTER enters TWO check digits, 1 printer enters
+//           one, 2 host enters two, 3 host enters one
+//
+// None of these reached the encoder, so a Code 11 asking for the printer's two
+// check digits drew an arity-different symbol in silence. The trap is m0: Code
+// 11's is NOT "no check digit" but "printer enters two", so a bare c5 is one of
+// the streams that must be reported, and the report must skip the host modes
+// whose check character already sits in the field's data.
+describe('c2-c5 modifiers are either applied or named (2026-09-30)', () => {
+    const stx = (f: string) => '<STX>' + f + '<ETX>';
+    const codes = (spec: string) => parseViewerIPL(
+        [stx('<ESC>C<SI>W812<SI>L400'), stx('<ESC>P'), stx('E1;F1;'), stx(spec), stx('R')].join(''),
+    ).issues.map(i => i.code);
+
+    it('names the check digit only when the PRINTER supplies it', () => {
+        // c2 m1 and c5 m0/m1 are the printer-entered modes. bwip's includecheck
+        // does append a digit (measured: c2 +5 elements, c5 +3), but its
+        // algorithm is not necessarily the printer's, and a plausible-looking
+        // wrong digit is worse than none — so these are named, not guessed.
+        expect(codes('B1;o10,10;c2,1;d3,1234567890')).toContain('check-digit-not-drawn');
+        expect(codes('B1;o10,10;c5;d3,12345')).toContain('check-digit-not-drawn');   // m0 = printer, 2 digits
+        expect(codes('B1;o10,10;c5,0;d3,12345')).toContain('check-digit-not-drawn');
+        expect(codes('B1;o10,10;c5,1;d3,12345')).toContain('check-digit-not-drawn'); // printer, 1 digit
+    });
+
+    it('stays silent on host-entered modes and on no-check-digit c2', () => {
+        // The control: c2 m0 and m2 draw exactly what the printer would (no
+        // digit / a digit already in the data), and c5 m2/m3 carry their check
+        // character in the field's data too — reporting those would be noise.
+        for (const spec of ['c2', 'c2,0', 'c5,2', 'c5,3', 'c3,0', 'c4,0']) {
+            expect(codes(`B1;o10,10;${spec};d3,123456`), spec)
+                .not.toContain('check-digit-not-drawn');
+        }
+    });
+
+    it('rejects a modifier outside the documented values', () => {
+        // c2 allows 0-2, c5 allows 0-3; anything else is not a mode.
+        expect(codes('B1;o10,10;c2,9;d3,1234567890')).toContain('check-digit-mode-invalid');
+        expect(codes('B1;o10,10;c5,9;d3,12345')).toContain('check-digit-mode-invalid');
+    });
+
+    it('names the two structural modifiers it cannot draw', () => {
+        // c3's m picks the start/stop PATTERN and c4's picks the start/stop
+        // CHARACTERS; the encoder has no option for either, so both are named
+        // rather than silently drawn with the encoder's own.
+        expect(codes('B1;o10,10;c3,1;d3,12345')).toContain('code2of5-bar-pattern');
+        expect(codes('B1;o10,10;c4,1,A,B;d3,12345')).toContain('codabar-start-stop');
+        // The controls: the default values state nothing to draw differently.
+        expect(codes('B1;o10,10;c3,0;d3,12345')).not.toContain('code2of5-bar-pattern');
+        expect(codes('B1;o10,10;c4,0;d3,12345')).not.toContain('codabar-start-stop');
+    });
+});
