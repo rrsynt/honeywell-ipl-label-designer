@@ -170,10 +170,10 @@ export function iplToZpl(iplCode, dpi = 203) {
             // is e=Y; the old form put the HRI flag in that slot instead.
             const c39ck = sym === '0' && ['1', '4', '7'].includes(cParts[1]) ? 'Y' : 'N';
             const symCmd = {
-                '0': `^B3N,${c39ck},${hri},N,E`, '1': '^BAN,' + hri + ',N,N',
-                '2': `^B2N,${hri},N,N`, '3': '^BNN,' + hri,
+                '0': `^B3N,${c39ck},${hDots},${hri},N`, '1': '^BAN,' + hri + ',N,N',
+                '2': `^B2N,${hDots},${hri},N,N`, '3': '^BNN,' + hri,
                 '4': `^BKN,${hri},N,N`, '5': '^BIN,' + hri,
-                '6': `^BCN,${hri},Y,N,N`,
+                '6': `^BCN,${hDots},${hri},N,N`,
                 '7': ({ 13: '^BEN,' + hri, 8: '^B8N,' + hri, 12: '^BUN,' + hri })[data.replace(/\D/g, '').length] || '^BCN,' + hri,
                 '12': `^B7N,${hri},4,5,60`, '17': `^BXN,${Math.max(3, wMod * 2)},200`,
             }[sym];

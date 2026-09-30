@@ -40,24 +40,36 @@ export interface ZplGenerateResult {
 /**
  * Barcode symbologies this subset can emit, keyed by the design's symbology id.
  *
- * The 1D commands do NOT share a parameter order. ^BC and ^B2 are o,h,f,g —
- * orientation, HRI, height — while ^B3 is o,e,h,f,g: its second slot is the
- * CHECK DIGIT and its THIRD is the HRI. Measured against Labelary, which is the
- * only ZPL oracle this repo has: for ^B3, moving slot 3 from 60 to 200 takes
- * the rendered height from 30px to 220px and slot 2 changes nothing; for ^BC
- * and ^B2 the same test moves slot 2.
+ * The 1D commands do NOT share a parameter order:
  *
- * The old table wrote `^B3N,${hri},N,N` and `^B2N,${hri},N,N`, which put the
- * HRI flag where ^B3's check digit and ^B2's height belong — so a Code 39 came
- * out with its check-digit mode set from a human-readable flag, and an
- * Interleaved 2 of 5 lost its height to that same slot.
+ *   ^BC / ^B2   o,h,f,g     — HEIGHT second, HRI third
+ *   ^B3         o,e,h,f,g   — CHECK DIGIT second, height third, HRI fourth
+ *
+ * Measured against Labelary, the only ZPL oracle here, by decoding the returned
+ * PNG and measuring the ink rows (a NUMBER in the height slot grows the bars; a
+ * Y in the HRI slot adds a text row of its own):
+ *
+ *   ^B2N,60,...      60-dot bars          ^B2N,1,Y,...  1-dot bars + text
+ *   ^BCN,60,...      60-dot bars          ^BCN,1,N,...  1-dot bars
+ *   ^B3N,N,60,Y,...  60-dot bars + text   (so ^B3 = e, HEIGHT, HRI)
+ *
+ * An earlier reading of the same probe said the opposite for ^BC/^B2 — "o,h,f,g
+ * = orientation, HRI, height" — and the table then wrote the HRI flag into the
+ * HEIGHT slot and never wrote the height at all, so every HRI-enabled barcode
+ * was emitted as `^B2N,Y,N,N,N`: a request for a ONE-DOT bar height, which
+ * prints an invisible symbol. The slots below are the measured ones.
  */
 const ZPL_BARCODE: Record<string, (hri: 'Y' | 'N', height: number, e: 'Y' | 'N') => string> = {
-    // ^B3 o,e,h,f,g — e is the mod-43 CHECK DIGIT flag, the HRI flag is third.
-    '0': (hri, _height, e) => `^B3N,${e},${hri},N,N`, // Code 39
-    // ^B2 o,h,f,g — HRI first, like ^BC.
-    '2': (hri) => `^B2N,${hri},N,N,N`,        // Interleaved 2 of 5
-    '6': (hri) => `^BCN,${hri},Y,N,N`,        // Code 128
+    // ^B3 o,e,h,f,g — e is the mod-43 CHECK DIGIT flag, then HEIGHT, then HRI.
+    '0': (hri, height, e) => `^B3N,${e},${height},${hri},N`, // Code 39
+    // ^B2 o,h,f,g and ^BC o,h,f,g — HEIGHT second, HRI third. The old table put
+    // the HRI flag in the height slot and never wrote the height, so an
+    // HRI-enabled barcode came out ^B2N,Y,N,N,N — which asks the printer for a
+    // ONE-DOT bar height and prints an invisible symbol. Measured against
+    // Labelary: ^B2N,60,... gives 60-dot bars, ^B2N,1,Y,... gives 1-dot bars
+    // plus a text row.
+    '2': (hri, height) => `^B2N,${height},${hri},N,N`, // Interleaved 2 of 5
+    '6': (hri, height) => `^BCN,${height},${hri},N,N`, // Code 128
     '17': (_hri, height) => `^BXN,${Math.max(1, Math.round(height / 10))},200`, // DataMatrix
     '18': (_hri, height) => `^BQN,2,${Math.max(1, Math.round(height / 25))}`,   // QR
 };
@@ -117,8 +129,12 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
         if (field.type === 'barcode') {
             const emit = ZPL_BARCODE[field.symbology];
             if (!emit) { warnings.push(`"${field.name}" is barcode type ${field.symbology}, which this ZPL subset cannot draw. It was left off the label.`); continue; }
-            const h = dots(box.height);
             const hri = field.humanReadable === 'none' ? 'N' : 'Y';
+            // The HEIGHT slot is the BAR height. The field's h_mag is that height
+            // in dots; box.height adds the interpretive row on top, which the
+            // printer lays outside the bars, so using it would over-tall the
+            // symbol by the row. Matrix types size from the whole box.
+            const h = field.symbology === '17' || field.symbology === '18' ? dots(box.height) : field.h_mag;
             // Code 39's printer-generated check digit is ^B3's e flag. The ZPL
             // side has no host-verify mode, so 'host-verifies' maps to N.
             const e: 'Y' | 'N' = field.symbology === '0' && field.code39_checkDigit === 'printer-generated' ? 'Y' : 'N';

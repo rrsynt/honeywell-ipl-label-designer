@@ -85,6 +85,31 @@ describe('generateZPL', () => {
         expect(host.code39Mode).toBeUndefined();
     });
 
+    it('writes the HEIGHT into the height slot of every 1D command', () => {
+        // ^BC/^B2 are o,h,f,g and ^B3 is o,e,h,f,g — the height is a NUMBER
+        // slot, and the HRI flag is a separate Y/N slot. The generator put the
+        // HRI flag IN the height slot and never wrote the height, so an
+        // HRI-enabled barcode went out as ^B2N,Y,N,N,N: a one-dot bar height,
+        // which prints an invisible symbol. Labelary confirms ^B2N,60,... is
+        // 60-dot bars while ^B2N,1,Y,... is 1-dot bars plus a text row.
+        const barcode = (sym: string, hri: 'none' | 'below'): Field => ({
+            id: 1, type: 'barcode', name: 'B', x: 10, y: 10, rotation: 0,
+            dataSource: { type: 'fixed', data: '12345678' }, symbology: sym, humanReadable: hri,
+            h_mag: 200, w_mag: 2,
+        } as Field);
+        const cmd = (sym: string, hri: 'none' | 'below') =>
+            (generateZPL(design([barcode(sym, hri)])).zpl.match(/\^B[23C][^\^]*/) ?? [''])[0];
+
+        // h_mag 200 dots is the height the slot must carry, in every case.
+        expect(cmd('0', 'none')).toBe('^B3N,N,200,N,N');
+        expect(cmd('0', 'below')).toBe('^B3N,N,200,Y,N');
+        expect(cmd('2', 'none')).toBe('^B2N,200,N,N,N');
+        expect(cmd('2', 'below')).toBe('^B2N,200,Y,N,N');
+        expect(cmd('6', 'none')).toBe('^BCN,200,N,N,N');
+        // ^BC no longer hard-codes Y: an HRI of 'none' must not print a line.
+        expect(cmd('6', 'below')).toBe('^BCN,200,Y,N,N');
+    });
+
     it('keeps a rotated field at the same top-left the designer drew', () => {
         const { zpl } = generateZPL(design([text({ rotation: 90 })]));
         const el = parseZPL(zpl).elements[0];
