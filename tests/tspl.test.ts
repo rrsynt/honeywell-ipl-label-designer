@@ -757,3 +757,52 @@ describe('TSPL PDF417 reads its option block (2026-09-30)', () => {
         expect(el(',H0').heightDots, 'H floor is 4').toBe(4);
     });
 });
+
+// The TSPL QRCODE option tail, from the TSC guide p. 65:
+//   QRCODE x,y,ECC,cell width,mode,rotation,[justification,][model,][mask,][area,]"content"
+//   [model]  M1 original, M2 enhanced   — DIFFERENT SYMBOL
+//   [mask]   S0-S8, default S7          — DIFFERENT PATTERN
+//   [justification] J1-J9 and [area] Xn are placement only
+//
+// M1/M2 and S0-S8 change what is encoded and none of it was read: measured,
+// M2, S3, J5, X100 and all of them together produced byte-identical elements to
+// the bare command.
+describe('TSPL QRCODE reads its option tail (2026-09-30)', () => {
+    const el = (opts: string) => parseTSPL(
+        `SIZE 80 mm,50 mm\nCLS\nQRCODE 10,10,M,4,A,0${opts},"DATA"\nPRINT 1,1\n`,
+    ).elements[0] as { qrModel?: string; qrMask?: string };
+    const codes = (opts: string) => parseTSPL(
+        `SIZE 80 mm,50 mm\nCLS\nQRCODE 10,10,M,4,A,0${opts},"DATA"\nPRINT 1,1\n`,
+    ).issues.map(i => i.code);
+
+    it('carries the model and the mask into the encoder', () => {
+        expect(el(',M2').qrModel).toBe('2');
+        expect(el(',S3').qrMask, 'Sn maps straight through').toBe('3');
+        // The control: with neither, both stay absent and nothing is said.
+        expect(el('').qrModel).toBeUndefined();
+        expect(el('').qrMask).toBeUndefined();
+        expect(codes('')).toEqual([]);
+    });
+
+    it('says M1 has no encoder instead of drawing it as M2 silently', () => {
+        // Only model 2 has an encoder here — the same limitation IPL's c18,m1
+        // documents — so a stream asking for M1 must be told.
+        expect(codes(',M1')).toContain('tspl-qr-model1');
+        expect(el(',M1').qrModel, 'M2 is what gets drawn').toBe('1');
+    });
+
+    it('names a mask outside S0-S8 rather than passing it on', () => {
+        expect(codes(',S9')).toContain('tspl-qr-mask');
+        expect(el(',S9').qrMask).toBeUndefined();
+    });
+
+    it('names the placement options it cannot apply', () => {
+        // J and X place the symbol within a box; this preview draws from the
+        // field's own origin. Naming them is what keeps a silent drop from
+        // looking like agreement.
+        expect(codes(',J5')).toContain('tspl-qr-placement');
+        expect(codes(',X100')).toContain('tspl-qr-placement');
+        // The control: neither present means no placement message.
+        expect(codes(',M2,S3')).not.toContain('tspl-qr-placement');
+    });
+});

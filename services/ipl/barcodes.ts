@@ -624,7 +624,10 @@ const paramsKey = (p: BarcodeParams): string =>
         p.code128StartSubset ?? '',
         p.code128Ucc ?? '', p.code128KeepInterpretive ?? '',
         p.ratio ?? 1, p.narrowDots ?? 0,
-        p.qrModel ?? '', p.qrEcl ?? '', p.qrMask ?? '',
+        // qrModel is deliberately absent: neither encoder takes a model, so a
+        // model in the key would split the cache on a value that cannot change
+        // the raster the cache is keyed to produce.
+        p.qrEcl ?? '', p.qrMask ?? '',
         p.microColumns ?? '', p.microRows ?? '',
         p.pdfColumns ?? '', p.pdfEcLevel ?? '', p.pdfTruncate ?? '',
         p.compositeVersion ?? '', p.compositeColumns ?? '', p.compositeRowHeight ?? '',

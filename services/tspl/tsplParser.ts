@@ -614,6 +614,25 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     issue('info', 'tspl-qr-manual-mode',
                         'QRCODE mode M asks the printer to encode from explicit character/data/codeword counts (and an optional mask); this preview chooses the encoding itself, so the symbol may differ from the printed one.', 'QRCODE');
                 }
+                // The optional tail after the rotation is bracketed in the
+                // manual and its members are letter-prefixed:
+                //
+                //   [justification]  J1-J9, placement only
+                //   [model]          M1 original, M2 enhanced — DIFFERENT SYMBOL
+                //   [mask]           S0-S8, default S7 — DIFFERENT PATTERN
+                //   [area]           Xn, maximum barcode area in dots
+                //
+                // M1/M2 and S0-S8 both change what is encoded, and none of it
+                // was read: measured, M2, S3, J5, X100 and all of them together
+                // produced byte-identical elements to the bare command.
+                const tail = p.slice(6, -1).map(s => s.trim().toUpperCase()).filter(Boolean);
+                const opt = (letter: string): string | undefined => {
+                    const hit = tail.find(s => s.startsWith(letter));
+                    return hit ? hit.slice(1) : undefined;
+                };
+                const model = opt('M');
+                const mask = opt('S');
+                const area = opt('X');
                 const f = quadrantFromClockwise(p[5]);
                 const el: BarcodeElement = {
                     kind: 'barcode', id: nextId++,
@@ -629,7 +648,33 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     hri: 0,            // QR never carries a human-readable line
                     source: { type: 'fixed', data: content },
                     ...(TSPL_QR_ECL[ecc] ? { qrEcl: TSPL_QR_ECL[ecc] } : {}),
+                    // TSPL's model letters are its own; the IR numbers models
+                    // 1 and 2, so M1 -> '1' and M2 -> '2'.
+                    ...(model === '1' || model === '2' ? { qrModel: model } : {}),
+                    // Sn maps straight through: both languages number the masks
+                    // 0-8 with 0 meaning automatic.
+                    ...(mask !== undefined && /^[0-8]$/.test(mask) ? { qrMask: mask } : {}),
                 };
+                if (model === '1') {
+                    // M1 is the original QR model and no encoder here produces
+                    // it — the same limitation IPL's c18,m1 documents. Saying so
+                    // is the point: passing M1 through silently would draw a
+                    // model-2 symbol under a stream asking for model 1.
+                    issue('info', 'tspl-qr-model1',
+                        'QRCODE model M1 (original) has no encoder here; the symbol is drawn as model M2, which most scanners read.', 'QRCODE');
+                } else if (model !== undefined && model !== '2') {
+                    issue('info', 'tspl-qr-model', `QRCODE model "${model}" is not M1 or M2 (TSC guide p. 65); the encoder's default is used.`, 'QRCODE');
+                }
+                if (mask !== undefined && !/^[0-8]$/.test(mask)) {
+                    issue('info', 'tspl-qr-mask', `QRCODE mask "S${mask}" is outside S0-S8; the encoder's default is used.`, 'QRCODE');
+                }
+                if (area !== undefined || opt('J') !== undefined) {
+                    // J1-J9 place the symbol and Xn caps its area. This preview
+                    // draws from the field's own origin and does not lay the
+                    // symbol out within a box, so the two are named.
+                    issue('info', 'tspl-qr-placement',
+                        `QRCODE ${area !== undefined ? `area X${area}` : ''}${area !== undefined && opt('J') !== undefined ? ' and ' : ''}${opt('J') !== undefined ? `justification J${opt('J')}` : ''} control where the symbol sits within a box; this preview draws it from its own origin.`, 'QRCODE');
+                }
                 if (!TSPL_QR_ECL[ecc]) {
                     issue('info', 'tspl-qr-ecc', `QR error-correction level "${ecc}" is not L/M/Q/H. The encoder's default is used.`, 'QRCODE');
                 }
