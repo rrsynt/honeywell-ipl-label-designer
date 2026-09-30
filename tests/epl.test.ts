@@ -696,3 +696,55 @@ describe('P carries the copy count', () => {
         expect(totalLabelCount(parseEPL(out.epl))).toBe(4);
     });
 });
+
+// oW — Customize Bar Code Parameters (manual p. 3-82): p1..p5 are the narrow
+// white, narrow black, wide white, wide black and gap widths for every bar code
+// printed after it. The manual says plainly what it is for — to "reduce the bar
+// code size", beyond the symbology's design tolerances — which is exactly the
+// thing a preview draws. It sat in PRINTER_SETTINGS, so a stream that used it
+// drew the design's bar widths under no message at all.
+describe('oW changes the printed bar widths and must say so (2026-09-30)', () => {
+    const warn = (line: string) => parseEPL(`N\n${line}\nB10,10,0,1,2,4,50,B,"12345"\nP1\n`)
+        .issues.filter(i => i.code === 'epl-ow-bar-widths');
+
+    it('reports a stream that departs from the documented defaults', () => {
+        const hit = warn('oW1,1,2,2,1')[0];
+        expect(hit, 'halving every bar width is not the default').toBeDefined();
+        expect(hit.level).toBe('warning');
+        // All five widths, so the user can see which one they changed.
+        for (const v of ['narrow white 1', 'narrow black 1', 'wide white 2', 'wide black 2']) {
+            expect(hit.message, `the message must name ${v}`).toContain(v);
+        }
+        // It also says what this preview does instead, which is the actionable
+        // part.
+        expect(hit.message).toMatch(/preview draws each symbol from its own module/i);
+    });
+
+    it('stays silent on the documented defaults', () => {
+        // The control. A command that fires on every stream would be noise, and
+        // the manual's own defaults change nothing — issuing oW with the
+        // default values is what the manual tells you to do as a placeholder
+        // ("use the default parameter values as placeholders").
+        expect(warn('oW2,2,4,4,3')).toHaveLength(0);
+        // And with the command absent entirely.
+        expect(warn('')).toHaveLength(0);
+    });
+
+    it('fills missing parameters from the defaults, like the printer', () => {
+        // Fewer than five parameters is not an error the manual describes; the
+        // unspecified ones keep their default, which is what this asserts so a
+        // short oW cannot be read as "all zero".
+        const hit = warn('oW1,1')[0];
+        expect(hit).toBeDefined();
+        expect(hit.message).toContain('1,1,4,4,3');
+    });
+
+    it('the control: its silent neighbours are still silent', () => {
+        // oR and oB are genuinely printer settings that cannot change the
+        // image, so they stay in the list. A probe that fires on them could not
+        // tell "reported correctly" from "reports everything".
+        for (const cmd of ['oR', 'oB']) {
+            expect(parseEPL(`N\n${cmd}\nP1\n`).issues, cmd).toHaveLength(0);
+        }
+    });
+});

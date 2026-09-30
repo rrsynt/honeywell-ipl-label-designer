@@ -130,7 +130,12 @@ const EPL_KNOWN_UNENCODED: Record<string, string> = {
  */
 const PRINTER_SETTINGS = new Set([
     'Q', 'q', 'S', 'D', 'P', 'PA', 'Z',             // size, speed, density, print
-    'I', 'oR', 'oB', 'oE', 'oH', 'oM', 'oW', 'O',   // code page, options
+    // 'oW' used to be here. It is Customize Bar Code Parameters (manual
+    // p. 3-82): p1..p5 are the narrow white, narrow black, wide white, wide
+    // black and gap widths for EVERY bar code printed after it. It does not
+    // touch a printer setting the preview can ignore — it changes the printed
+    // bar widths, which is exactly what the preview draws. Reported now.
+    'I', 'oR', 'oB', 'oE', 'oH', 'oM', 'O',   // code page, options
     'M', 'U', 'UA', 'UB', 'UE', 'UF', 'UG', 'UI', 'UM', 'UN', 'UP', 'UQ', 'US', 'U$', 'U%',
     'V', 'C', 'TD', 'TT', 'TS', 'r', 'JB', 'JF', 'FE', 'FS', 'FK', 'FR', 'EK',
     'GM', 'GI', 'W',
@@ -627,6 +632,42 @@ export const parseEPL = (code: string): ViewerLabel => {
                 // the feed, with the gap as its second parameter.
                 qLengthDots = Math.max(1, Math.trunc(num(cmd.params.split(',')[0], 0)));
                 break;
+
+            case 'oW': {
+                // oW p1,p2,p3,p4,p5 — Customize Bar Code Parameters (manual
+                // p. 3-82). The manual's own words: it "allows the advanced
+                // programmer to modify specific bar code parameters to exceed
+                // the specified bar code's design tolerances, i.e. reduce the
+                // bar code size", and warns that doing so "may cause bar codes
+                // to become unreadable by some or all bar code scanners".
+                //
+                //   p1 initial width, narrow WHITE bar   (default 2)
+                //   p2 initial width, narrow BLACK bar   (default 2)
+                //   p3 initial width, WIDE white bar     (default 4)
+                //   p4 initial width, WIDE black bar     (default 4)
+                //   p5 initial bar code GAP              (default 3)
+                //
+                // It is a global printer command — it "cannot be issued inside
+                // a form" — and it applies to every bar code printed after it.
+                // The preview builds each symbol from the field's own narrow
+                // module and wide:narrow ratio, so it draws the DESIGN's bar
+                // widths and not these. That is a real divergence for any
+                // stream that sets values other than the defaults, which is
+                // the only reason to use the command at all.
+                //
+                // Reported as a warning rather than the generic info: the bar
+                // widths on the label differ from the ones the printer would
+                // lay down, and for these parameters that is the difference
+                // between a scan and a failed read.
+                const DEF = [2, 2, 4, 4, 3];
+                const asked = DEF.map((d, k) => Math.trunc(num(p[k], d)));
+                if (asked.every((v, k) => v === DEF[k])) break;  // defaults: nothing to say
+                const label = ['narrow white', 'narrow black', 'wide white', 'wide black', 'gap'];
+                issue('warning', 'epl-ow-bar-widths',
+                    `oW sets the bar widths to ${asked.join(',')} (${label.map((n, k) => `${n} ${asked[k]}`).join(', ')}); the manual's defaults are ${DEF.join(',')}. This preview draws each symbol from its own module and ratio, so the printed bars will differ in width.`,
+                    'oW');
+                break;
+            }
 
             case 'LE': {
                 // LE p1,p2,p3,p4 — Line Draw Exclusive OR (manual p. 3-68):
