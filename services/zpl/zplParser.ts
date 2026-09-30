@@ -129,7 +129,7 @@ export const parseZPL = (code: string): ViewerLabel => {
     let rotation = 0;          // ^FW, in IPL quadrants
     let fieldRotation: number | null = null; // a per-command orientation overrides ^FW
     let font: { h: number; w: number } | null = null;
-    let pendingBarcode: { symbology: string; heightDots: number; hri: 0 | 1 } | null = null;
+    let pendingBarcode: { symbology: string; heightDots: number; moduleDots: number; hri: 0 | 1 } | null = null;
     let byModule = 2;
     let byRatio = 3;           // ^BY wide:narrow, default 3.0
     let byHeight = 10;
@@ -161,7 +161,7 @@ export const parseZPL = (code: string): ViewerLabel => {
                 kind: 'barcode', id: nextId++, ox: origin.x, oy: origin.y, f,
                 symbology: pendingBarcode.symbology,
                 heightDots: pendingBarcode.heightDots,
-                moduleDots: Math.max(1, byModule),
+                moduleDots: Math.max(1, pendingBarcode.moduleDots),
                 // IR ratio codes: 0 = 2.5:1, 1 = 3:1, 2 = 2:1. ^BY's default is 3.
                 ratio: byRatio <= 2.2 ? 2 : byRatio < 2.8 ? 0 : 1,
                 hri: pendingBarcode.hri,
@@ -260,11 +260,33 @@ export const parseZPL = (code: string): ViewerLabel => {
             case 'BC': case 'B3': case 'BQ': case 'BX': {
                 const r = ROT[(p[0] ?? '').trim().toUpperCase()];
                 fieldRotation = r === undefined ? null : r;
+                // A 1D barcode's p[1] is its human-readable flag and p[2] is its
+                // height. The MATRIX commands put their MAGNIFICATION there
+                // instead — and ^BY does not apply to them at all. Measured
+                // against Labelary: ^BQN,2,2 renders 42px, ^BQN,2,6 renders
+                // 126px and ^BQN,2,10 renders 210px — exactly 21 modules wide
+                // each time, i.e. the magnification moves the MODULE, not the
+                // symbol. ^BXN,2 is 24px and ^BXN,6 is 72px, 12 modules.
+                //
+                // Reading those commands like the 1D ones took p[1] as a height
+                // flag, so every matrix symbol came out at ^BY's module size:
+                // our own generator's ^BQN,2,2 read back with module 2 while
+                // ^BQN,2,10 also read back as 2. The preview drew both at the
+                // same size, and the ^BX case is the worse one — that field is
+                // the only place a DataMatrix's size is stated, so it was
+                // ignored outright.
+                const matrixMag = Math.max(1, Math.trunc(num(p[1], 2)));
                 const hri: 0 | 1 = (p[1] ?? 'Y').trim().toUpperCase() === 'N' ? 0 : 1;
-                const height = cmd.name === 'BQ' ? num(p[1], byModule) * 25
-                    : cmd.name === 'BX' ? num(p[1], byModule) * 10
+                const height = cmd.name === 'BQ' ? matrixMag * 25
+                    : cmd.name === 'BX' ? matrixMag * 10
                     : num(p[2], byHeight);
-                pendingBarcode = { symbology: BARCODE_SYMBOLOGY[cmd.name], heightDots: Math.max(1, height), hri: cmd.name === 'BQ' || cmd.name === 'BX' ? 0 : hri };
+                const module = cmd.name === 'BQ' || cmd.name === 'BX' ? matrixMag : byModule;
+                pendingBarcode = {
+                    symbology: BARCODE_SYMBOLOGY[cmd.name],
+                    heightDots: Math.max(1, height),
+                    moduleDots: Math.max(1, module),
+                    hri: cmd.name === 'BQ' || cmd.name === 'BX' ? 0 : hri,
+                };
                 break;
             }
             case 'BY':

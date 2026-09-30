@@ -118,6 +118,31 @@ describe('parseZPL', () => {
         expect(box.radiusDots).toBe(Math.round(40 * (4 / 8)));
     });
 
+    it('reads a matrix barcode\'s magnification from its own parameter, not ^BY', () => {
+        // ^BQ and ^BX put the MAGNIFICATION where the 1D commands put the
+        // human-readable flag, and ^BY does not apply to them at all. Measured
+        // against Labelary (8 dpmm): ^BQN,2,2 -> 42px, ^BQN,2,6 -> 126px,
+        // ^BQN,2,10 -> 210px, all exactly 21 modules across, so the value moves
+        // the MODULE and not the symbol; ^BXN,2 -> 24px and ^BXN,6 -> 72px, 12
+        // modules. The old code took p[1] as an HRI flag and used ^BY's module
+        // for both, so every size read back as ^BY's — and for ^BX, whose p[1]
+        // is the only place its size is stated, that ignored it outright.
+        const modOf = (zpl: string) => (parseZPL(zpl).elements[0] as BarcodeElement)?.moduleDots;
+        for (const [mag, px] of [[2, 42], [6, 126], [10, 210]]) {
+            expect(modOf(`^XA^FO0,0^BQN,${mag},5^FDQA,HI^FS^XZ`), `^BQ mag ${mag} (Labelary ${px}px = 21 modules)`)
+                .toBe(mag);
+        }
+        for (const [mag, px] of [[2, 24], [6, 72]]) {
+            expect(modOf(`^XA^FO0,0^BXN,${mag},200^FDHI^FS^XZ`), `^BX mag ${mag} (Labelary ${px}px = 12 modules)`)
+                .toBe(mag);
+        }
+        // ^BY must not change either one — that is the whole correction.
+        expect(modOf('^XA^FO0,0^BY4^BQN,2,5^FDQA,HI^FS^XZ')).toBe(2);
+        expect(modOf('^XA^FO0,0^BY4^BXN,2,200^FDHI^FS^XZ')).toBe(2);
+        // The control: ^BY IS what sizes a 1D barcode, so it must still apply.
+        expect(modOf('^XA^FO0,0^BY4^BCN,Y,Y,N,N^FD123^FS^XZ')).toBe(4);
+    });
+
     it('warns about a barcode it cannot draw instead of dropping it quietly', () => {
         const label = parseZPL('^XA^FO0,0^BEN,50,Y,N^FD123456789012^FS^XZ');
         expect(label.elements).toHaveLength(0);
