@@ -442,6 +442,23 @@ describe('TSPL generator', () => {
         expect(tspl).toContain('PRINT 2,1'); // the rest of the label still prints
     });
 
+    it('emits DMATRIX for a Data Matrix, and parses it back', () => {
+        // It was refused as "TSPL does not have it" on a false premise; the TSC
+        // manual documents DMATRIX at p. 51 and the app has a DataMatrix encoder.
+        const { tspl, warnings } = generateTSPL(design([barcodeField({ symbology: '17', name: 'DM' })]));
+        const line = tspl.split('\n').find(l => l.startsWith('DMATRIX'))!;
+        expect(line).toContain('"12345"');
+        expect(warnings).toEqual([]);
+        const el = parseTSPL(tspl).elements[0] as { symbology?: string; moduleDots?: number };
+        expect(el.symbology).toBe('17');
+        expect(el.moduleDots).toBe(2); // w_mag of the test field
+        // The bare manual form parses, and a# turns it rectangular.
+        const bare = parseTSPL('SIZE 50 mm,25 mm\nCLS\nDMATRIX 10,10,400,400,"DATA"\nPRINT 1\n').elements[0] as { symbology?: string };
+        expect(bare.symbology).toBe('17');
+        const rect = parseTSPL('SIZE 50 mm,25 mm\nCLS\nDMATRIX 10,10,400,400,a1,"DATA"\nPRINT 1\n').elements[0] as { dmShape?: string };
+        expect(rect.dmShape).toBe('rectangle');
+    });
+
     it('emits QRCODE and PDF417 for the 2D symbols TSPL has', () => {
         const qr = lines([barcodeField({ symbology: '18', name: 'QR', qrEcl: 'Q', w_mag: 4 })])
             .find(l => l.startsWith('QRCODE'))!;
@@ -453,18 +470,18 @@ describe('TSPL generator', () => {
         expect(pdf).toContain('"12345"');
     });
 
-    it('names every 2D symbol it cannot draw, without claiming the language lacks it', () => {
+    it('draws Data Matrix with DMATRIX, and names MaxiCode without claiming the language lacks it', () => {
         // The TSC TSPL manual documents DMATRIX (p. 51) and MAXICODE (p. 54),
         // and this app draws other TSPL 2D commands (QRCODE p. 65, PDF417
-        // p. 56) from that same manual — so neither is a language gap. Both are
-        // viewer gaps and must say so, which is the difference between "TSPL
-        // has no such command" and "this output does not draw it yet".
-        for (const sym of ['17', '14']) {
-            const { tspl, warnings } = generateTSPL(design([barcodeField({ symbology: sym, name: 'X' })]));
-            expect(tspl.split('\n').some(l => l.startsWith('DMATRIX') || l.startsWith('MAXICODE')), sym).toBe(false);
-            expect(warnings.some(w => /does not have/.test(w)), sym).toBe(false);
-            expect(warnings.some(w => /TSPL has the command/.test(w)), sym).toBe(true);
-        }
+        // p. 56) from that same manual. Data Matrix is now drawn; MaxiCode is
+        // still a viewer gap and must say so — never "the language lacks it".
+        const dm = generateTSPL(design([barcodeField({ symbology: '17', name: 'DM' })]));
+        expect(dm.tspl).toContain('DMATRIX');
+        expect(dm.warnings).toEqual([]);
+        const mx = generateTSPL(design([barcodeField({ symbology: '14', name: 'MX' })]));
+        expect(mx.tspl).not.toContain('MAXICODE');
+        expect(mx.warnings.some(w => /does not have/.test(w))).toBe(false);
+        expect(mx.warnings.some(w => /TSPL has the command/.test(w))).toBe(true);
     });
 
     it('escapes a quote and a backslash the TSPL way, and the parser undoes it', () => {
@@ -685,13 +702,12 @@ describe('MicroPDF417 works in TSPL (2026-09-30)', () => {
         expect(warn, 'MaxiCode must not be reported as absent from TSPL')
             .not.toMatch(/does not have/);
         expect(warn, 'MaxiCode must say the command exists').toMatch(/TSPL has the command/);
-        // Data Matrix is the same case: the TSC manual documents DMATRIX (p. 51),
-        // so it is a viewer gap too, NOT the "language lacks it" wording an
-        // earlier version emitted on the false premise that TSPL has no
-        // DataMatrix. This is the symbol that proved the premise wrong.
-        const dm = generateTSPL(design('17')).warnings[0];
-        expect(dm, 'Data Matrix must NOT be reported as absent from TSPL').not.toMatch(/does not have/);
-        expect(dm, 'Data Matrix says the command exists').toMatch(/TSPL has the command/);
+        // Data Matrix was the same case — the TSC manual documents DMATRIX
+        // (p. 51), so "TSPL has no DataMatrix" was false; that premise is now
+        // gone entirely: Data Matrix is DRAWN, so there is no message at all.
+        const dm = generateTSPL(design('17'));
+        expect(dm.tspl, 'Data Matrix is now drawn with DMATRIX').toContain('DMATRIX');
+        expect(dm.warnings, 'and needs no warning').toEqual([]);
     });
 });
 

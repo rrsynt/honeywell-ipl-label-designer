@@ -83,6 +83,7 @@ const TSPL_BARCODE_FOR: Record<string, string> = {
  * the symbology.
  */
 const TSPL_2D_COMMAND: Record<string, string> = {
+    '17': 'DMATRIX',
     '18': 'QRCODE',
     '12': 'PDF417',
     '19': 'MPDF417',
@@ -106,7 +107,6 @@ const TSPL_2D_COMMAND: Record<string, string> = {
  * uses disproves.
  */
 const TSPL_2D_MISSING: Record<string, { name: string; reason: 'language' | 'viewer' }> = {
-    '17': { name: 'Data Matrix', reason: 'viewer' }, // DMATRIX, TSC manual p. 51
     '14': { name: 'MaxiCode', reason: 'viewer' },    // MAXICODE, TSC manual p. 54
 };
 
@@ -194,9 +194,8 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
             const data = fieldData(field, design);
 
             // The 2D symbols have their own commands, not the BARCODE type
-            // table (manual pp. 56, 65). DataMatrix and MaxiCode are NOT in the
-            // language, so those warn rather than emitting something a TSC
-            // printer would ignore.
+            // table (manual pp. 51, 56, 65). MaxiCode is left to TSPL_2D_MISSING
+            // below; every symbol in TSPL_2D_COMMAND is emitted.
             if (TSPL_2D_COMMAND[sym]) {
                 const cmd = TSPL_2D_COMMAND[sym];
                 const cell = Math.max(1, Math.round(field.w_mag ?? 3));
@@ -214,6 +213,18 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                     const w = Math.max(1, Math.round(field.w_mag ?? 1));
                     const h = Math.max(1, Math.round(field.h_mag ?? 10));
                     lines.push(`MPDF417 ${x},${y},${rotation},W${w},H${h},"${escapeTsplData(data)}"`);
+                } else if (cmd === 'DMATRIX') {
+                    // DMATRIX x,y,width,height,[x#,r#][,a#],"content" (TSC
+                    // manual p. 51). Positional width/height are the barcode
+                    // AREA; x# is the module size, r# the rotation. ECC-200 is
+                    // the only correction the command supports, which is the
+                    // encoder here. The rectangle option matches the IR's
+                    // dmShape, from the design's own rectangle request.
+                    const w = Math.max(1, dots(box.width));
+                    const h = Math.max(1, dots(box.height));
+                    const mod = Math.max(1, Math.round(field.w_mag ?? 3));
+                    const rot = (field.rotation / 90) * 90 % 360;
+                    lines.push(`DMATRIX ${x},${y},${w},${h},x${mod},r${rot},"${escapeTsplData(data)}"`);
                 } else {
                     const w = Math.max(1, dots(box.width));
                     const h = Math.max(1, dots(box.height));

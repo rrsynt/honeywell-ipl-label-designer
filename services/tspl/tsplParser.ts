@@ -849,6 +849,63 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 break;
             }
 
+            case 'DMATRIX': {
+                // DMATRIX x,y,width,height,[options,]"content" (TSC manual
+                // p. 51). The symbol is ECC-200, which is the encoder here, so
+                // the DATA is unambiguous; the bare form (the manual's example 1,
+                // "DMATRIX 10,110,400,400,"DMATRIX EXAMPLE 1"") is the common
+                // one. The bracketed options are the manual's own terse list:
+                //
+                //   c#  escape control char (how the DATA is escaped — NOT a
+                //       symbol property, so it is REPORTED, not guessed)
+                //   x#  module size in dots
+                //   r#  rotation 0/90/180/270 (clockwise, like every TSPL command)
+                //   a#  square (0, default) or rectangle (1)
+                //
+                // The bare x,y,width,height map to the field's origin, module
+                // and height as DMATRIX's positional width/height state the
+                // barcode AREA, not the symbol grid.
+                if (p.length < 5) {
+                    issue('warning', 'tspl-dmatrix-params', `DMATRIX needs x,y,width,height,"content". Found ${p.length}. Skipped.`, 'DMATRIX');
+                    break;
+                }
+                const content = p[p.length - 1] ?? '';
+                if (content === '') {
+                    issue('warning', 'tspl-dmatrix-empty', 'A Data Matrix with no data prints nothing.', 'DMATRIX');
+                    break;
+                }
+                const opts = p.slice(4, -1).map(s => s.trim().toUpperCase()).filter(Boolean);
+                const opt = (letter: string): string | undefined => {
+                    const hit = opts.find(s => s.startsWith(letter));
+                    return hit ? hit.slice(1) : undefined;
+                };
+                const moduleDots = Math.max(1, Math.trunc(num(opt('X'), 3)));
+                const f = quadrantFromClockwise(opt('R'));
+                const rect = (opt('A') ?? '0').trim();
+                const el: BarcodeElement = {
+                    kind: 'barcode', id: nextId++,
+                    ox: num(p[0], 0), oy: num(p[1], 0), f,
+                    symbology: '17',
+                    heightDots: Math.max(1, Math.trunc(num(p[3], 10))),
+                    moduleDots,
+                    ratio: 1,
+                    hri: 0,
+                    source: { type: 'fixed', data: content },
+                    // a# selects square or rectangular, the same IR shape the
+                    // IPL c17,m2 and EPL v options carry.
+                    ...(rect === '1' ? { dmShape: 'rectangle' } : {}),
+                };
+                elements.push(place(el));
+                if (opt('C') !== undefined) {
+                    issue('info', 'tspl-dmatrix-escape',
+                        'DMATRIX c# sets the escape control character, which changes how the DATA is unescaped, not the symbol; this preview decodes the content as written.', 'DMATRIX');
+                }
+                if (rect !== '0' && rect !== '1' && opt('A') !== undefined) {
+                    issue('info', 'tspl-dmatrix-shape', `DMATRIX a#"${rect}" is not 0 (square) or 1 (rectangle); a square symbol is drawn.`, 'DMATRIX');
+                }
+                break;
+            }
+
             case 'SHIFT':
             case 'REFERENCE':
             case 'OFFSET':
