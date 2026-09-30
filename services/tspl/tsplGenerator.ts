@@ -94,15 +94,20 @@ const TSPL_2D_COMMAND: Record<string, string> = {
  *
  * `reason` is 'language' when TSPL genuinely has no such command, and
  * 'viewer' when TSPL HAS the command but this app cannot encode the symbol.
- * Reporting the second as the first is a claim the guide disproves:
- * docs/manuals/TSPL_Programming_Guide_P1139068-01EN_outline.txt lists MAXICODE
- * among the supported commands (and its encoder exists in
- * services/ipl/barcodes.ts as '14'), so "TSPL does not have it" was never true
- * of MaxiCode — only "this viewer cannot draw it yet" was.
+ *
+ * Two TSPL references are in the repo and they disagree on 2D coverage: the TSC
+ * TSPL/TSPL2 manual (docs/manuals/TSPL_TSPL2_Programming_Manual_TSC_2014.pdf)
+ * documents DMATRIX (p. 51) and MAXICODE (p. 54), while the Honeywell TSPL
+ * guide's command list (docs/manuals/TSPL_Programming_Guide_P1139068-01EN) omits
+ * both. This app draws QRCODE (p. 65) and PDF417 (p. 56) FROM the TSC manual,
+ * so the TSC manual is the reference it follows — and against that reference
+ * Data Matrix and MaxiCode are viewer gaps, not language gaps. Reporting them as
+ * 'language' claimed TSPL has no DMATRIX, which the reference this app already
+ * uses disproves.
  */
 const TSPL_2D_MISSING: Record<string, { name: string; reason: 'language' | 'viewer' }> = {
-    '17': { name: 'Data Matrix', reason: 'language' },
-    '14': { name: 'MaxiCode', reason: 'viewer' },
+    '17': { name: 'Data Matrix', reason: 'viewer' }, // DMATRIX, TSC manual p. 51
+    '14': { name: 'MaxiCode', reason: 'viewer' },    // MAXICODE, TSC manual p. 54
 };
 
 /** EAN/UPC variants, by the DATA LENGTH — which is how TSPL's names map. */
