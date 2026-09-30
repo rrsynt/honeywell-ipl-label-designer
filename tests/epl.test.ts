@@ -245,6 +245,41 @@ b10,20,${letter},"DATA"`).elements[0] as any)?.symbology;
         expect(label.issues.some(i => i.code === 'epl-ls-unsupported')).toBe(true);
     });
 
+    it('reports LE, the line that inverts, instead of swallowing it', () => {
+        // LE is Line Draw Exclusive OR (manual p. 3-68): "Any area, line, image
+        // or field that this line intersects or overlays will have the image
+        // reversed or inverted ... all black will be reversed to white and all
+        // white will be reversed to black within the line's area."
+        //
+        // It is a DRAWING command, and it sat in PRINTER_SETTINGS — the list for
+        // sensor and job settings — so it produced no element and no issue. That
+        // is the one outcome this parser exists to prevent: even LS and GW,
+        // which it cannot draw either, name themselves.
+        //
+        // The control is LO, its black counterpart: both are p1,p2,p3,p4 lines,
+        // so a probe that cannot see LO cannot tell "reported" from "not
+        // looked at".
+        const lo = parseEPL('N\nLO50,200,400,20\nP1\n');
+        expect(lo.elements, 'LO must draw — without this the probe is blind').toHaveLength(1);
+
+        const le = parseEPL('N\nLE50,200,400,20\nP1\n');
+        const hit = le.issues.find(i => i.code === 'epl-le-invert');
+        expect(hit, 'LE changes the printed image and must say so').toBeDefined();
+        expect(hit!.level).toBe('warning');
+        // It says WHERE and HOW BIG, so the user can find the line.
+        expect(hit!.message).toContain('50,200');
+        expect(hit!.message).toContain('400x20');
+        // It draws nothing — the inversion cannot be expressed — and says that
+        // too, rather than leaving the element count to imply it.
+        expect(le.elements).toHaveLength(0);
+        expect(hit!.message).toMatch(/nothing is drawn/i);
+    });
+
+    it('still reports LE with bad parameters rather than ignoring the line', () => {
+        const le = parseEPL('N\nLE50,200\nP1\n');
+        expect(le.issues.some(i => i.code === 'epl-le-params')).toBe(true);
+    });
+
     it('says nothing about ordinary printer settings', () => {
         expect(parseEPL('N\nQ203,25\nq400\nS4\nD8\nP1\nV01').issues).toHaveLength(0);
     });

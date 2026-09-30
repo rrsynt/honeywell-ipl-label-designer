@@ -133,7 +133,12 @@ const PRINTER_SETTINGS = new Set([
     'I', 'oR', 'oB', 'oE', 'oH', 'oM', 'oW', 'O',   // code page, options
     'M', 'U', 'UA', 'UB', 'UE', 'UF', 'UG', 'UI', 'UM', 'UN', 'UP', 'UQ', 'US', 'U$', 'U%',
     'V', 'C', 'TD', 'TT', 'TS', 'r', 'JB', 'JF', 'FE', 'FS', 'FK', 'FR', 'EK',
-    'LD', 'LE', 'GG', 'GM', 'GI', 'H', 'W', 'K', 'e',
+    'LD', 'GG', 'GM', 'GI', 'H', 'W', 'K', 'e',
+    // 'LE' used to be here. It is Line Draw Exclusive OR (manual p. 3-68) — a
+    // DRAWING command that inverts every dot it crosses — so it belongs with
+    // LO/LW/LS, not with the sensor and job settings this list exists for. In
+    // here it produced no element and no issue, which is the one outcome this
+    // parser is built to avoid: even an unsupported command names itself.
     // 'a' used to be here as `'A'.toLowerCase()`. EPL is CASE-SENSITIVE — the
     // tokenizer takes the command name verbatim (`/^([A-Za-z$%]+)/`) and the
     // switch matches 'A' for text — so 'a' is not the text command and never
@@ -604,6 +609,30 @@ export const parseEPL = (code: string): ViewerLabel => {
                 // the feed, with the gap as its second parameter.
                 qLengthDots = Math.max(1, Math.trunc(num(cmd.params.split(',')[0], 0)));
                 break;
+
+            case 'LE': {
+                // LE p1,p2,p3,p4 — Line Draw Exclusive OR (manual p. 3-68):
+                // "Any area, line, image or field that this line intersects or
+                // overlays will have the image reversed or inverted ... all
+                // black will be reversed to white and all white will be
+                // reversed to black within the line's area". It is a DRAWING
+                // command that erases and inverts, and it sat in
+                // PRINTER_SETTINGS — the list meant for sensor and job
+                // settings — so it produced no element AND no issue: the worst
+                // case this parser has, since even an unsupported command names
+                // itself. Reported as a warning rather than the generic info,
+                // because unlike LS or GW the label is visibly wrong, not
+                // merely missing a feature.
+                if (p.length < 4) {
+                    issue('warning', 'epl-le-params', `LE needs x,y,horizontal,vertical. Found ${p.length}. Skipped.`, 'LE');
+                    break;
+                }
+                const w = Math.max(0, Math.trunc(num(p[2], 0)));
+                const h = Math.max(0, Math.trunc(num(p[3], 0)));
+                issue('warning', 'epl-le-invert',
+                    `LE inverts every dot it crosses — black to white and white to black — over a ${w}x${h} dot area at ${num(p[0], 0)},${num(p[1], 0)}. This preview has no way to invert what is already drawn, so nothing is drawn for it.`, 'LE');
+                break;
+            }
 
             default: {
                 if (PRINTER_SETTINGS.has(cmd.name)) break;
