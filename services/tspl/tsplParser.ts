@@ -143,12 +143,25 @@ const TSPL_QR_ECL: Record<string, string> = { L: 'L', M: 'M', Q: 'Q', H: 'H' };
  * each saying what it does to the image.
  */
 const PRINTER_SETTINGS = new Set([
-    'GAP', 'GAPDETECT', 'BLINDDETECT', 'SPEED', 'DENSITY', 'DIRECTION',
+    // BLINEDETECT is how the guide spells it — one D, its own command list at
+    // the front of "TSPL Programming Guide" (P1139068-01EN Rev A). The list
+    // here carried BLINDDETECT, with two, which could NEVER match: the tokenizer
+    // takes the name verbatim and the switch has no such case, so the real
+    // command was reported as unrecognized while the misspelling silenced
+    // nothing. Both spellings are accepted now — firmware in the wild is known
+    // to honour the doubled D, and neither touches the drawn image.
+    'GAP', 'GAPDETECT', 'BLINEDETECT', 'BLINDDETECT', 'SPEED', 'DENSITY', 'DIRECTION',
     'CODEPAGE', 'FEED', 'BACKFEED', 'BACKUP',
-    'HOME', 'SOUND', 'CUT', 'LIMITFEED', 'EOJ', 'DELAY', 'FORMFEED', 'FORMFEED',
+    'HOME', 'SOUND', 'CUT', 'LIMITFEED', 'EOJ', 'DELAY', 'FORMFEED',
     'SET', 'SETPEEL', 'SETTEAR', 'SETCUTTER', 'SETAUTODUMP', 'SETCOUNTER',
     'SETRIBBON', 'SETPARTIAL_CUTTER', 'SETBACK', 'AUTOBAUD', 'KILL', 'DOWNLOAD',
-    'ERASE', 'FILES', 'MOVE', 'COPY', 'OUT', 'OUTR', 'STATUS', 'WIDTH', 'RUN',
+    // 'ERASE' used to be here. It is in the guide's command list and it CLEARS
+    // a rectangular area of the image — the same family as IPL's LE and EPL's
+    // LW, both of which this project already reports rather than silences.
+    // Sitting here it produced no element AND no issue, so a label whose
+    // overprint had been erased previewed with the overprint still on it and
+    // nothing said otherwise.
+    'FILES', 'MOVE', 'COPY', 'OUT', 'OUTR', 'STATUS', 'WIDTH', 'RUN',
     'INPUT', 'PREINPUT', 'POSTINPUT', 'GOTO', 'IF', 'ELSE', 'ENDIF', 'END',
     'RETURN', 'STEP', 'BEep'.toUpperCase(), 'SIZE',
 ]);
@@ -531,6 +544,26 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     ...(mapped.code39Mode !== undefined ? { code39Mode: mapped.code39Mode } : {}),
                 };
                 elements.push(place(el));
+                break;
+            }
+
+            case 'ERASE': {
+                // ERASE x,y,width,height — clears a rectangular area of the
+                // image. This preview paints elements in order onto a white
+                // sheet and has no way to clear a region afterwards, so drawing
+                // it would be a different label: whatever it was meant to
+                // remove would still be there. Reported as a warning, not the
+                // generic info, because the label is visibly wrong rather than
+                // merely missing a feature — the same call this project made
+                // for IPL's LE and EPL's LW.
+                if (p.length < 4) {
+                    issue('warning', 'tspl-erase-params', `ERASE needs x,y,width,height. Found ${p.length}. Skipped.`, 'ERASE');
+                    break;
+                }
+                const w = Math.max(0, Math.trunc(num(p[2], 0)));
+                const h = Math.max(0, Math.trunc(num(p[3], 0)));
+                issue('warning', 'tspl-erase-clears',
+                    `ERASE clears a ${w}x${h} dot area at ${num(p[0], 0)},${num(p[1], 0)}; this preview cannot remove what is already drawn there, so nothing is erased.`, 'ERASE');
                 break;
             }
 

@@ -581,3 +581,84 @@ describe('MicroPDF417 works in TSPL (2026-09-30)', () => {
         expect(warn, 'and MaxiCode must say the command exists').toMatch(/TSPL has the command/);
     });
 });
+
+// The guide's own spelling of each command must be the one the parser reads.
+// A silence-list entry that can NEVER match is worse than a missing one: it
+// silences nothing and the real command is reported as unrecognized, so the
+// list looks like it covers a name it does not.
+describe('every guide command name is READ by the parser (2026-09-30)', () => {
+    const guide = readFileSync(join(process.cwd(), 'docs', 'manuals',
+        'TSPL_Programming_Guide_P1139068-01EN_outline.txt'), 'utf8')
+        .split('\n').map(s => s.trim()).filter(Boolean);
+    const from = guide.indexOf('Supported Commands');
+    // The outline mixes headings into this run; keep the ones shaped like a
+    // command name (no spaces, no lowercase prose).
+    const official = guide.slice(from + 1)
+        .filter(c => c && c !== 'TSPL Programming Guide' && /^[A-Z@~<][A-Za-z0-9_$()!?~<>\.@-]*$/.test(c))
+        .filter(c => !/^(Contents|Introduction|Overview|Enable|Configuring|Supported|TSPL)/.test(c));
+
+    it('finds the guide list to check against — positive control', () => {
+        // Without this, a filter that matched nothing would make the rest
+        // vacuous. These are commands the guide definitely names.
+        expect(official.length, 'the guide list must be readable').toBeGreaterThan(30);
+        for (const known of ['TEXT', 'BARCODE', 'BOX', 'ERASE', 'BLINEDETECT', 'GAP']) {
+            expect(official, `the guide must name ${known}`).toContain(known);
+        }
+    });
+
+    it('spells BLINEDETECT the guide\'s way, so the real command is silenced', () => {
+        // The list carried BLINDDETECT — two D's — which cannot ever match the
+        // guide's BLINEDETECT. The tokenizer takes names verbatim, so the real
+        // command was reported unrecognized while the misspelling silenced
+        // nothing at all.
+        expect(tokenizeTspl('BLINEDETECT 1\n')[0].name).toBe('BLINEDETECT');
+        expect(parseTSPL('SIZE 40 mm,30 mm\nBLINEDETECT\nPRINT 1,1\n').issues)
+            .toHaveLength(0);
+    });
+
+    it('reports ERASE instead of letting it clear the image in silence', () => {
+        // ERASE clears a rectangle of the image — the same family as IPL's LE
+        // and EPL's LW, both already reported. In the silence list it produced
+        // no element AND no issue, so a label whose overprint had been erased
+        // previewed with the overprint still on it.
+        const r = parseTSPL('SIZE 40 mm,30 mm\nCLS\nBOX 10,10,100,60,3\nERASE 10,10,50,30\nPRINT 1,1\n');
+        const hit = r.issues.find(i => i.code === 'tspl-erase-clears');
+        expect(hit, 'ERASE changes the image and must say so').toBeDefined();
+        expect(hit!.level).toBe('warning');
+        expect(hit!.message).toContain('50x30');
+        expect(hit!.message).toContain('10,10');
+        // The control: the BOX it would have erased is still drawn, which is
+        // exactly why the message is needed.
+        expect(r.elements.length, 'the box is still there — nothing was erased').toBe(1);
+    });
+});
+
+// The remaining guide commands have no dedicated handling, and that is
+// deliberate: each is a PRINTER ACTION — self-test, detect media, initialise,
+// end-of-print — that puts nothing on the label, so "not part of the supported
+// subset, so it has no effect here" is the honest sentence for them.
+//
+// They are pinned because the failure this file keeps meeting is the opposite:
+// a command that DOES draw sitting in a silence list, so it produces no element
+// and no issue. These must stay NAMED; if one is ever added to
+// PRINTER_SETTINGS it stops saying anything, and this test is what notices.
+describe('printer-action commands stay named, not silenced (2026-09-30)', () => {
+    const stx = (f: string) => `${f}\n`;
+    for (const name of ['INITIALPRINTER', 'SELFTEST', 'AUTODETECT', 'EOP']) {
+        it(`reports ${name} rather than dropping it`, () => {
+            const r = parseTSPL(`SIZE 40 mm,30 mm\n${stx(name)}PRINT 1,1\n`);
+            expect(r.elements, `${name} draws nothing`).toHaveLength(0);
+            expect(r.issues.map(i => i.code),
+                `${name} is a printer action and must say so, not vanish`).toContain('tspl-unsupported');
+        });
+    }
+
+    it('the control: a command that DOES draw is not merely named', () => {
+        // Without a drawing case
+        // the suite above would pass on a parser that reported EVERYTHING, so
+        // this proves the distinction the batch rests on.
+        const drawn = parseTSPL('SIZE 40 mm,30 mm\nCLS\nBOX 10,10,100,60,3\nPRINT 1,1\n');
+        expect(drawn.elements, 'BOX really draws').toHaveLength(1);
+        expect(drawn.issues, 'and draws without complaint').toHaveLength(0);
+    });
+});
