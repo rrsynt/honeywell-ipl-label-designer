@@ -893,6 +893,23 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     'DIRECTION rotates the whole label by 90°. This viewer draws the label as laid out, so the preview is turned compared with the print.', 'DIRECTION');
                 break;
 
+            case 'CODEPAGE': {
+                // CODEPAGE n selects the international character set (manual
+                // p. 17) — the same byte means a different glyph under each
+                // (0xE4 is 'ä' in Windows-1252, a box-drawing glyph in 437).
+                // The viewer decodes high bytes as Latin-1, so it draws the
+                // wrong character for any page other than a Latin-1-compatible
+                // one — silent until now, because CODEPAGE sat in
+                // PRINTER_SETTINGS with the sensor settings.
+                const n = (p[0] ?? '').trim().toUpperCase();
+                const latin1ish = n === '' || n === '1252' || n === '8859-1' || n === 'LATIN1' || n === 'LATIN 1';
+                if (!latin1ish) {
+                    once('codepage', 'info', 'tspl-codepage',
+                        `CODEPAGE ${n} selects a character set this viewer does not apply; it decodes high bytes as Latin-1, so characters outside that set may differ from the print.`, 'CODEPAGE');
+                }
+                break;
+            }
+
             default: {
                 if (PRINTER_SETTINGS.has(cmd.name)) break;
                 if (cmd.name === 'MAXICODE') {

@@ -361,7 +361,19 @@ export const parseZPL = (code: string): ViewerLabel => {
                 break;
             }
             case 'FH': break; // hex indicator — \_xx is always decoded, so this is a no-op here
-            case 'CI': break; // character set. UTF-8 (^CI28) is what we already assume.
+            case 'CI': {
+                // ^CI n selects the encoding. The viewer assumes UTF-8 (^CI28),
+                // which is what this app's own generator emits — but a source
+                // using another set (0 is the printer's default, 14 is cp850,
+                // ...) makes the same byte a different glyph, so those are
+                // named rather than silently decoded as UTF-8.
+                const n = (p[0] ?? '').trim();
+                if (n !== '' && n !== '28') {
+                    issue('info', 'zpl-charset',
+                        `^CI${n} selects a character encoding this viewer does not apply; it decodes text as UTF-8 (^CI28), so characters outside that set may differ from the print.`, '^CI');
+                }
+                break;
+            }
             case 'PQ': break; // print quantity — a job concern, not a label concern
             case 'XZ': break;
             default:

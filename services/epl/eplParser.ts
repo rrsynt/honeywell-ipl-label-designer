@@ -792,6 +792,23 @@ export const parseEPL = (code: string): ViewerLabel => {
                 break;
             }
 
+            case 'I': {
+                // I p1,p2 — Character Set Selection (manual p. 3-63): p2 picks a
+                // printer code page and the same byte means a different glyph
+                // under each (0xE4 is 'ä' under Windows Latin-1 / p2=A, a
+                // box-drawing glyph under DOS 437 / p2=0). The viewer decodes
+                // high bytes as Latin-1, so it draws the wrong character for any
+                // page other than A — silent until now, because 'I' sat in
+                // PRINTER_SETTINGS with the sensor settings.
+                const page = (p[1] ?? '').trim().toUpperCase();
+                const latin1ish = page === '' || page === 'A';
+                if (!latin1ish) {
+                    issue('info', 'epl-charset',
+                        `I selects character set ${page}, which this viewer does not apply; it decodes high bytes as Latin-1 (code page A), so characters outside that set may differ from the print.`, 'I');
+                }
+                break;
+            }
+
             case 'LE': {
                 // LE p1,p2,p3,p4 — Line Draw Exclusive OR (manual p. 3-68):
                 // "Any area, line, image or field that this line intersects or

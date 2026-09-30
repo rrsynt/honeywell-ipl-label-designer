@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseEPL } from '../services/epl/eplParser';
 import { parseTSPL } from '../services/tspl/tsplParser';
+import { parseZPL } from '../services/zpl/zplParser';
 
 /**
  * The EPL and TSPL command surfaces.
@@ -116,5 +117,30 @@ describe('the EPL and TSPL surfaces do not silence anything that draws', () => {
     it('draws the TSPL commands it does support', () => {
         expect(parseTSPL('SIZE 100 mm,50 mm\nCLS\nTEXT 10,10,"1",0,1,1,"HI"\nPRINT 1,1\n').elements).toHaveLength(1);
         expect(parseTSPL('SIZE 100 mm,50 mm\nCLS\nBARCODE 10,50,"128",50,1,0,2,2,"123"\nPRINT 1,1\n').elements).toHaveLength(1);
+    });
+});
+
+// CODEPAGE (TSPL p. 17), I (EPL p. 3-63) and ^CI (ZPL) all select the character
+// set. The viewer assumes a Latin-1-compatible page, so a stream using another
+// page draws the same byte as a different glyph — silent until now.
+describe('character-set commands are named, not silently assumed (2026-10-01)', () => {
+    it('TSPL CODEPAGE is named for a non-Latin-1 page', () => {
+        const codes = (n: string) => parseTSPL(`SIZE 50 mm,25 mm\nCODEPAGE ${n}\nCLS\nTEXT 10,10,"2",0,1,1,"x"`).issues.map(i => i.code);
+        expect(codes('850')).toContain('tspl-codepage');
+        // The control: 1252 and the empty command are the Latin-1 default.
+        expect(codes('1252')).not.toContain('tspl-codepage');
+    });
+
+    it('EPL I is named for a non-Latin-1 code page', () => {
+        const codes = (p2: string) => parseEPL(`N\nI8,${p2}\nA10,10,0,2,1,1,N,"x"\nP1\n`).issues.map(i => i.code);
+        expect(codes('0')).toContain('epl-charset');   // DOS 437
+        expect(codes('A')).not.toContain('epl-charset'); // Windows Latin 1 (the default)
+    });
+
+    it('ZPL ^CI is named for a non-UTF-8 encoding', () => {
+        const codes = (n: string) => parseZPL(`^XA^CI${n}^FO10,10^A0N,20,20^FDx^FS^XZ`).issues.map(i => i.code);
+        expect(codes('0')).toContain('zpl-charset');
+        expect(codes('14')).toContain('zpl-charset');
+        expect(codes('28')).not.toContain('zpl-charset'); // UTF-8, what we assume
     });
 });
