@@ -134,7 +134,9 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
             // in dots; box.height adds the interpretive row on top, which the
             // printer lays outside the bars, so using it would over-tall the
             // symbol by the row. Matrix types size from the whole box.
-            const h = field.symbology === '17' || field.symbology === '18' ? dots(box.height) : field.h_mag;
+            const h = field.symbology === '17' || field.symbology === '18'
+                ? Math.max(1, dots(box.height))
+                : Math.max(1, field.h_mag || 50);
             // Code 39's printer-generated check digit is ^B3's e flag. The ZPL
             // side has no host-verify mode, so 'host-verifies' maps to N.
             const e: 'Y' | 'N' = field.symbology === '0' && field.code39_checkDigit === 'printer-generated' ? 'Y' : 'N';

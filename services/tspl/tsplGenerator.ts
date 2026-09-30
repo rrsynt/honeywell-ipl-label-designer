@@ -244,7 +244,11 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                     : `"${field.name}" is barcode type ${sym}, which this TSPL subset cannot draw. It was left off the label.`);
                 continue;
             }
-            const heightDots = Math.max(1, dots(box.height));
+            // BARCODE's height is the BAR height (manual p. 38), and the HRI line is a
+            // separate parameter. The field's h_mag IS that bar height; box.height
+            // adds the interpretive row on top, so using it over-tallened the
+            // symbol by one text row whenever the HRI was on.
+            const heightDots = Math.max(1, field.h_mag || 50);
             // TSPL's human readable is 0 none / 1 left / 2 center / 3 right —
             // ALL below the bar, and there is no above at all. A design asking
             // for "above" gets it below WITH a warning: dropping it would lose

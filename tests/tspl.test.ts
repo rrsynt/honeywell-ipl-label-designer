@@ -331,6 +331,16 @@ describe('TSPL generator', () => {
         expect(t.split(',')[2]).toBe('"1"'); // design font '0' -> TSPL font 1
     });
 
+    it('emits the BAR height, not the HRI-inclusive box height', () => {
+        // BARCODE's height is the bar height (manual p. 38) and the HRI line is
+        // a separate parameter; box.height adds that row, so emitting it
+        // over-tallened the symbol by one text row whenever the HRI was on.
+        const heightOf = (hri: string) => lines([barcodeField({ h_mag: 200, humanReadable: hri })])
+            .find(l => l.startsWith('BARCODE'))!.split(',')[3];
+        expect(heightOf('below')).toBe('200');
+        expect(heightOf('none')).toBe('200');
+    });
+
     it('emits 39C for a host-verified Code 39 check digit, so it round-trips', () => {
         // The parser reads '39C' as code39Mode '2'. The generator wrote plain
         // '39' for every Code 39 variant, so that check digit was lost on

@@ -453,6 +453,16 @@ describe('EPL generator', () => {
         expect(eplLines([barcodeField()]).find(l => l.startsWith('B'))!.split(',')[3]).toBe('3');
     });
 
+    it('emits the BAR height, not the HRI-inclusive box height', () => {
+        // p7 is "Bar code height in dots" (manual p. 3-11); the interpretive row
+        // is a separate parameter. box.height adds that row, so emitting it
+        // over-tallened the symbol by one text row whenever the HRI was on.
+        const heightOf = (hri: string) => eplLines([barcodeField({ h_mag: 200, humanReadable: hri })])
+            .find(l => l.startsWith('B'))!.split(',')[6];
+        expect(heightOf('below')).toBe('200');
+        expect(heightOf('none')).toBe('200');
+    });
+
     it('emits 3C for a host-verified Code 39 check digit, so it round-trips', () => {
         // The parser reads '3C' as code39Mode '2' (host supplies the digit and
         // the printer verifies). The generator wrote plain '3' for every Code 39

@@ -218,7 +218,12 @@ export const generateEPL = (design: Design): EplGenerateResult => {
                     : `"${field.name}" is barcode type ${sym}, which this EPL subset cannot draw. It was left off the label.`);
                 continue;
             }
-            const heightDots = Math.max(1, dots(box.height));
+            // The height parameter is the BAR height ("p7 = Bar code height in dots",
+// manual p. 3-11), and the human-readable row is drawn separately (p8). The
+// field's h_mag IS that bar height; box.height adds the interpretive row on
+// top, so using it over-tallened the symbol by one text row whenever the HRI
+// was on.
+            const heightDots = Math.max(1, field.h_mag || 50);
             // IPL: 0 none, 1 below, 2 above. EPL has only below or none, so an
             // "above" request prints below WITH a warning. Emitting 'N' instead
             // would silently DROP the human-readable line, which is worse than
