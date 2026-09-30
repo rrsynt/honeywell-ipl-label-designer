@@ -602,6 +602,31 @@ export const parseEPL = (code: string): ViewerLabel => {
                     const hit = p.find(v => v.trim().toUpperCase().startsWith(letter.toUpperCase()));
                     return hit ? hit.trim().slice(1) : undefined;
                 };
+                // MaxiCode's mode is POSITIONAL too — the manual gives
+                // "bp1,p2,p3,[p4,]" with "p4 = Mode Selection: M2 Mode 2,
+                // M3 Mode 3, m4 Mode 4, m6 Mode 6", and automatic selection
+                // when p4 is omitted. The mixed case is the manual's own.
+                //
+                // Reading it as a prefixed option found nothing: measured, all
+                // four documented forms — M2, M3, m4, m6 — and the prefixed
+                // form alike produced an empty mode, so every MaxiCode came out
+                // with automatic selection whatever the stream asked for.
+                const p4Raw = (p[3] ?? '').trim();
+                let maxiMode: string | undefined;
+                if (kind === 'M' && /^[Mm][2346]$/.test(p4Raw)) {
+                    maxiMode = p4Raw.slice(1);
+                }
+                // A mode written anywhere other than the positional p4 is not
+                // the manual's form, but it is what a stream is likely to carry
+                // if someone read the PDF417 section by mistake — so it is
+                // named rather than silently ignored.
+                if (kind === 'M' && maxiMode === undefined) {
+                    const stray = p.slice(3).find(v => /^[Mm][2346]$/.test(v.trim()));
+                    if (stray !== undefined) {
+                        issue('warning', 'epl-maxicode-mode-position',
+                            `MaxiCode mode is written as "${stray.trim()}", but the manual puts it in the POSITIONAL p4: b x,y,M,M2,"DATA". The symbol is drawn with automatic selection.`, 'b');
+                    }
+                }
                 const isPdf = kind === 'P';
                 // p4 (www) and p5 (hhh) are MAXIMUM print width and height in
                 // DOTS. Neither is the IR's pdfColumns, which counts the
@@ -631,8 +656,24 @@ export const parseEPL = (code: string): ViewerLabel => {
                     ratio: 1,
                     hri: 0,
                     source: { type: 'fixed', data },
-                    ...(kind === 'M' ? { maxiMode: opt('m') ?? '' } : {}),
+                    ...(maxiMode !== undefined ? { maxiMode } : {}),
                 };
+                if (kind === 'M' && maxiMode === undefined) {
+                    // Manual: "If p4 (Mx) is not used, the printer will use the
+                    // following rules to automatically format the DATA ... all
+                    // numeric -> Mode 2, alpha -> Mode 3", which is what the
+                    // encoder does when no mode is given. Nothing to say.
+                }
+                if (kind === 'M' && maxiMode !== undefined) {
+                    // The four documented values are the whole set; anything
+                    // else is not a mode, and saying so beats passing it to an
+                    // encoder that would reject or misread it.
+                    if (!['2', '3', '4', '6'].includes(maxiMode)) {
+                        issue('warning', 'epl-maxicode-mode',
+                            `MaxiCode mode "${p4Raw}" is not one of the documented selections (M2, M3, m4, m6); the symbol is drawn with automatic selection.`, 'b');
+                        delete el.maxiMode;
+                    }
+                }
                 if (isPdf && (opt('s') !== undefined || opt('c') !== undefined)) {
                     // s = error correction level 1-8, c = data compression 0/1.
                     // The encoder takes an EC level; the compression mode has no

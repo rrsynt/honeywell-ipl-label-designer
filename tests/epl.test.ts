@@ -850,3 +850,43 @@ describe('EPL PDF417 takes a positional tail, its siblings do not (2026-09-30)',
         expect(codes('b80,100,D,h5,"DATA"'), 'Data Matrix has no positional tail').toEqual([]);
     });
 });
+
+// MaxiCode's mode is POSITIONAL, like PDF417's box and unlike Data Matrix's
+// prefixed options. The manual gives "bp1,p2,p3,[p4,]" with
+//   p4 = Mode Selection: M2 Mode 2, M3 Mode 3, m4 Mode 4, m6 Mode 6
+// and automatic selection when p4 is omitted — the mixed case is the manual's
+// own, not a typo in this test.
+//
+// The parser looked for a prefixed "m" option, which matched nothing: measured,
+// all four documented forms produced an EMPTY mode, so every MaxiCode came out
+// with automatic selection whatever the stream asked for.
+describe('EPL MaxiCode mode is positional (2026-09-30)', () => {
+    const mode = (src: string) => (parseEPL(`N\n${src}\nP1\n`).elements[0] as {
+        maxiMode?: string;
+    }).maxiMode;
+    const codes = (src: string) => parseEPL(`N\n${src}\nP1\n`).issues.map(i => i.code);
+
+    it('reads all four documented selections, in the manual case', () => {
+        expect(mode('b80,100,M,M2,"DATA"')).toBe('2');
+        expect(mode('b80,100,M,M3,"DATA"')).toBe('3');
+        expect(mode('b80,100,M,m4,"DATA"')).toBe('4');
+        expect(mode('b80,100,M,m6,"DATA"')).toBe('6');
+    });
+
+    it('leaves the mode unset when p4 is omitted', () => {
+        // The documented default is automatic selection, which the encoder
+        // performs from the data — so an absent p4 must produce no mode AND no
+        // message, or every ordinary MaxiCode would carry a warning.
+        expect(mode('b80,100,M,"DATA"')).toBeUndefined();
+        expect(codes('b80,100,M,"DATA"')).toEqual([]);
+    });
+
+    it('names a mode written in the wrong place instead of ignoring it', () => {
+        // A stream that puts the mode where PDF417's option block goes is
+        // readable but not the manual's form; saying so beats drawing the
+        // wrong symbol quietly.
+        expect(codes('b80,100,M,h5,m2,"DATA"')).toContain('epl-maxicode-mode-position');
+        // The control: the correct positional form says nothing.
+        expect(codes('b80,100,M,M2,"DATA"')).toEqual([]);
+    });
+});

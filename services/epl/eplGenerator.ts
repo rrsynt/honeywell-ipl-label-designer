@@ -176,6 +176,18 @@ export const generateEPL = (design: Design): EplGenerateResult => {
                     lines.push(`b${origin.x},${origin.y},P,${w},${h},"${escapeEplData(data)}"`);
                     continue;
                 }
+                if (letter === 'M') {
+                    // MaxiCode's mode is the positional p4, and the manual's own
+                    // spellings are mixed case: M2, M3 (structured carrier) and
+                    // m4, m6 (standard / reader programming). No p4 at all is
+                    // the documented default — automatic selection.
+                    const mode = field.maxiMode;
+                    const p4 = mode === 2 || mode === 3 ? `,M${mode}`
+                        : mode === 4 || mode === 6 ? `,m${mode}`
+                        : '';
+                    lines.push(`b${origin.x},${origin.y},M${p4},h${moduleSize},"${escapeEplData(data)}"`);
+                    continue;
+                }
                 lines.push(`b${origin.x},${origin.y},${letter},h${moduleSize},"${escapeEplData(data)}"`);
                 continue;
             }
