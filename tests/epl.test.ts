@@ -14,6 +14,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { totalLabelCount } from '../services/ipl/odometer';
 import { parseEPL, tokenizeEpl, unescapeEpl, EPL_FONT_SIZES } from '../services/epl/eplParser';
 import { generateEPL, escapeEplData } from '../services/epl/eplGenerator';
 import { jobSendabilityError, renderJobChunk, type PrintJob } from '../services/printQueue';
@@ -487,5 +488,55 @@ describe('label size from q and Q', () => {
         const label = parseEPL(['N', 'q812', 'R10,20', 'Q406', 'A10,10,0,3,1,1,N,"X"', 'P1'].join('\n'));
         expect(label.widthDots).toBe(812);
         expect(label.heightDots).toBe(406);
+    });
+});
+
+// P is the print command (manual p. 3-87): P1 prints one copy, Pn n copies. The
+// EPL GENERATOR emits it for the design's quantity, so a stream this app writes
+// carries the copy count — but the parser returned no settings at all, and the
+// viewer's batch controls stay hidden while totalLabelCount reads 1.
+describe('P carries the copy count', () => {
+    const withP = (p: string) => parseEPL([
+        'N', 'q812', 'Q406,24', 'A10,10,0,3,1,1,N,"X"', p,
+    ].join('\n'));
+
+    it('P3 is three labels, not one', () => {
+        const label = withP('P3');
+        expect(label.settings.quantity).toBe(3);
+        // The viewer's own count, which is what the batch buttons key off.
+        expect(totalLabelCount(label)).toBe(3);
+    });
+
+    it('P1 is one label', () => {
+        expect(totalLabelCount(withP('P1'))).toBe(1);
+    });
+
+    it('a stream with no P at all stays at one label', () => {
+        const label = parseEPL(['N', 'q812', 'Q406,24', 'A10,10,0,3,1,1,N,"X"'].join('\n'));
+        expect(totalLabelCount(label)).toBe(1);
+    });
+
+    it('a nonsense count cannot reach zero or a fraction', () => {
+        // Zero copies is not a thing, and the clamp is what keeps the preview
+        // from asking for a negative or fractional batch.
+        expect(totalLabelCount(withP('P0'))).toBe(1);
+        expect(totalLabelCount(withP('P'))).toBe(1);
+    });
+
+    it('round-trips the designer generator: quantity in, same quantity out', async () => {
+        // The generator writes P{quantity}; parsing its own output must return
+        // that quantity, or the two halves of the app disagree about how many
+        // labels a job prints.
+        const { generateEPL } = await import('../services/epl/eplGenerator');
+        const design = {
+            name: 'T',
+            labelSettings: { width: 100, height: 65, columns: 1, rows: 1, unit: 'mm' as const, orientation: 'landscape' as const },
+            printerSettings: { model: 'PD43', dpi: 203 as const, quantity: 4, mediaType: 'thermal-transfer' as const,
+                               mediaSenseMode: 'gap' as const, printSpeed: 6, darkness: 10 },
+            fields: [], dataSources: [], nextId: 1, guides: { horizontal: [], vertical: [] },
+        };
+        const out = generateEPL(design as never);
+        expect(out.epl).toContain('P4');
+        expect(totalLabelCount(parseEPL(out.epl))).toBe(4);
     });
 });

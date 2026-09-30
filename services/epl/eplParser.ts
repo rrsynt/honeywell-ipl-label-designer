@@ -283,6 +283,10 @@ export const parseEPL = (code: string): ViewerLabel => {
     // stream that sets a reference point, which most do.
     let qWidthDots: number | null = null;
     let qLengthDots: number | null = null;
+
+    // Job settings the viewer reads back, matching what the TSPL parser
+    // does with PRINT and what <RS>/<US> carry in IPL.
+    const settings: ViewerLabel['settings'] = {};
     // Font and soft-font notes repeat on every field of a large label; the
     // issue list is for the user, so each distinct note is said once.
     const saidOnce = new Set<string>();
@@ -579,6 +583,17 @@ export const parseEPL = (code: string): ViewerLabel => {
                 break;
             }
 
+            case 'P': {
+                // Print (manual p. 3-87): P1 prints one copy, Pn n copies.
+                // The EPL GENERATOR already emits this line for the design's
+                // quantity, so a stream this app produced carries the copy
+                // count — and the parser returned no settings at all, so it
+                // read back as a single label and the viewer's batch controls
+                // stayed hidden for a job that really prints several.
+                settings.quantity = Math.max(1, Math.trunc(num(cmd.params.split(',')[0], 1)));
+                break;
+            }
+
             case 'q':
                 // Set Label Width (manual p. 3-89): the width of the label in
                 // dots, across the printhead.
@@ -614,6 +629,6 @@ export const parseEPL = (code: string): ViewerLabel => {
     return {
         widthDots: sized ? qWidthDots : null,
         heightDots: sized ? qLengthDots : null,
-        elements, issues, settings: {},
+        elements, issues, settings,
     };
 };
