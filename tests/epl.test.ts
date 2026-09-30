@@ -14,6 +14,9 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import './golden/setup';
+import { newRealCanvas } from './golden/setup';
+import { renderLabel, computeLabelExtent } from '../services/ipl/renderer';
 import { totalLabelCount } from '../services/ipl/odometer';
 import { parseEPL, tokenizeEpl, unescapeEpl, EPL_FONT_SIZES } from '../services/epl/eplParser';
 import { generateEPL, escapeEplData } from '../services/epl/eplGenerator';
@@ -148,6 +151,28 @@ describe('EPL parser', () => {
         expect([v.lengthDots, v.thicknessDots, v.f]).toEqual([400, 20, 1]);
     });
 
+    it('marks LW white, so it erases, and leaves LO black', () => {
+        // Manual p. 3-71: LW is the WHITE line — it removes ink rather than
+        // adding any. The old code pushed it as an ordinary line, which the
+        // renderer painted BLACK, and then reported "not painted" — a message
+        // describing the opposite of what the code did. The control here is LO:
+        // a probe that cannot tell the two apart cannot see this at all.
+        const lw = parseEPL('N\nLW10,10,100,8').elements[0] as any;
+        const lo = parseEPL('N\nLO10,10,100,8').elements[0] as any;
+        expect(lw.white).toBe(true);
+        expect(lo.white).toBeUndefined();
+        // Geometry is otherwise identical — only the ink differs.
+        expect([lw.lengthDots, lw.thicknessDots, lw.f]).toEqual([lo.lengthDots, lo.thicknessDots, lo.f]);
+    });
+
+    it('stops warning that LW is unpaintable — it is painted, in white', () => {
+        // The message read "this renderer cannot express [erasing]... It is
+        // listed here but not painted", and both halves were wrong. The ink
+        // itself is measured in the render test below; this only asserts the
+        // misleading message is gone.
+        expect(parseEPL('N\nLW10,10,100,8').issues.map(i => i.code)).not.toContain('epl-lw-erase');
+    });
+
     it('pins the resident font sizes from the manual, and knows there is no font 0', () => {
         expect(EPL_FONT_SIZES[1]).toEqual({ width: 8, height: 12 });
         expect(EPL_FONT_SIZES[2]).toEqual({ width: 10, height: 16 });
@@ -224,8 +249,62 @@ b10,20,${letter},"DATA"`).elements[0] as any)?.symbology;
         expect(parseEPL('N\nQ203,25\nq400\nS4\nD8\nP1\nV01').issues).toHaveLength(0);
     });
 
-    it('notes that LW erases rather than draws', () => {
-        expect(parseEPL('N\nLW10,10,100,8').issues.some(i => i.code === 'epl-lw-erase')).toBe(true);
+});
+
+// --- LW paints white, measured -----------------------------------------------------
+//
+// The parse assertions above say what the IR CARRIES. These measure what the
+// renderer actually puts on the canvas, because the failure being fixed was a
+// disagreement between the two: the element was pushed like any other line and
+// painted BLACK, while a message said it was not painted at all.
+
+describe('LW paints white where LO paints black', () => {
+    // quality 1 keeps the device scale equal to pxPerDot: renderLabel defaults
+    // to quality 2, which silently doubles it and put the first version of this
+    // probe's band in the wrong place — it read LO's ink as zero.
+    const PX = 4;          // pxPerDot, with quality 1
+    const LINE = { x0: 40, y0: 40, len: 100, thick: 8 };
+
+    /** Dark pixels inside the line's own rectangle, in device pixels. */
+    const inkInLineBand = (source: string) => {
+        const label = parseEPL(source);
+        const extent = computeLabelExtent(label, 203);
+        const canvas = newRealCanvas(extent.widthDots * PX, extent.heightDots * PX);
+        renderLabel(canvas as never, label, extent, { dpi: 203, pxPerDot: PX, quality: 1 });
+        const d = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+        let dark = 0;
+        for (let y = LINE.y0 * PX; y < (LINE.y0 + LINE.thick) * PX; y++) {
+            for (let x = LINE.x0 * PX; x < (LINE.x0 + LINE.len) * PX; x++) {
+                const o = (y * canvas.width + x) * 4;
+                if (d[o] < 100 && d[o + 1] < 100 && d[o + 2] < 100) dark++;
+            }
+        }
+        return dark;
+    };
+
+    const line = (cmd: string) => `N\n${cmd}${LINE.x0},${LINE.y0},${LINE.len},${LINE.thick}\nP1\n`;
+
+    it('puts ink down for LO and none for LW', () => {
+        // The label is filled white before anything is drawn, so a white line
+        // over untouched stock is invisible — which is exactly what the printer
+        // does with it. The control is LO in the same band: if that does not
+        // ink, the probe is blind and "LW inked nothing" would mean nothing.
+        const lo = inkInLineBand(line('LO'));
+        const lw = inkInLineBand(line('LW'));
+        expect(lo, 'LO must lay ink down — without this the probe is blind').toBeGreaterThan(0);
+        expect(lw, `LW must lay NO ink down (LO had ${lo}, LW had ${lw})`).toBe(0);
+    });
+
+    it('erases ink that is already there', () => {
+        // The stronger claim, and the one that matters: LW removes ink rather
+        // than merely failing to add any. A filled box is laid down first, then
+        // the line across its top band — LO keeps that crossing dark, LW clears
+        // it. Measured: the band goes from solid ink to none.
+        const box = 'X0,0,60,200,200';
+        const crossing = inkInLineBand(`N\n${box}\nLO${LINE.x0},${LINE.y0},${LINE.len},${LINE.thick}\nP1\n`);
+        const cleared = inkInLineBand(`N\n${box}\nLW${LINE.x0},${LINE.y0},${LINE.len},${LINE.thick}\nP1\n`);
+        expect(crossing, "the box's top band must be inked").toBeGreaterThan(0);
+        expect(cleared, `LW must clear it (LO ${crossing}, LW ${cleared})`).toBe(0);
     });
 });
 

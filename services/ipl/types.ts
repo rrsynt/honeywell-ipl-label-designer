@@ -158,6 +158,11 @@ export interface LineElement extends ElementBase {
     kind: 'line';
     lengthDots: number;
     thicknessDots: number;
+    /** EPL's LW draws a WHITE line: it erases the ink under it rather than
+     *  adding any. Painting white is correct because the label is filled white
+     *  first and elements are drawn in order — the same order a printer lays
+     *  them down. Only LW sets it. */
+    white?: boolean;
 }
 
 export interface BoxElement extends ElementBase {

@@ -492,14 +492,13 @@ export const parseEPL = (code: string): ViewerLabel => {
                     // A vertical run is the horizontal one turned a quadrant.
                     f: w >= h ? 0 : 1,
                     lengthDots: length, thicknessDots: thickness,
+                    // LW is the WHITE line (manual p. 3-71): it ERASES the ink
+                    // under it. The renderer paints it white, which is the
+                    // whole effect — the label is white to begin with and
+                    // elements are drawn in order.
+                    ...(cmd.name === 'LW' ? { white: true } : {}),
                 };
                 elements.push(place(el));
-                if (cmd.name === 'LW') {
-                    // LW is the white line (manual p. 3-71): it ERASES. Without
-                    // XOR compositing the renderer cannot express that, so
-                    // painting it black would be a different label. Say so.
-                    issue('info', 'epl-lw-erase', 'LW draws a white (erasing) line, which this renderer cannot express. It is listed here but not painted.', 'LW');
-                }
                 break;
             }
 

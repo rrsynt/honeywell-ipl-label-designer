@@ -441,7 +441,11 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
             break;
         }
         case 'line': {
-            ctx.fillStyle = '#000000';
+            // EPL's LW is a white line — it ERASES. Painting it white is the
+            // whole of the effect: the label is filled white (see the label
+            // fill below) and this draws over whatever came before it, in
+            // element order, which is the order the printer lays them down.
+            ctx.fillStyle = el.white ? '#ffffff' : '#000000';
             ctx.fillRect(0, 0, Math.max(1, el.lengthDots * s), Math.max(1, el.thicknessDots * s));
             break;
         }
