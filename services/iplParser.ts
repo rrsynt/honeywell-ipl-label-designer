@@ -37,6 +37,60 @@ const FIELD_PARAM_AFTER_DATA = /^[abcefghijkmnpqrstuwz][\d,.\-]+$/;
 const CODE39_PREFIX_AFTER_DATA = /^p(?:@|[A-Z0-9]{1,4})$/;
 
 /**
+ * The start of a NEW FIELD inside a `;`-chain, e.g. `B2`, `H1`, `L3`, `W4`.
+ *
+ * `d3` fixed text is greedy — "H0;o10,10;d3,A;B" is ONE field reading "A;B" —
+ * but greedy without limit swallowed the REST OF THE LABEL when a chain held
+ * more than one field. In the manual's own form,
+ *   <STX>E1;F1;H1;o100,100;…;d3,Hello World!;B2;o100,200;…;d3,12345678<ETX>
+ * the `H1` field's data read "Hello World!;B2;o100,200;…;d3,12345678;R" and the
+ * barcode was never created.
+ *
+ * Only a segment that is exactly a field letter followed by its id can start a
+ * new field, which is the same "trailing run of well-formed segments" tradeoff
+ * as the parameter rules above: text that happens to end in `;B2` is still read
+ * as a new barcode field, and that is intentional — it is indistinguishable
+ * from the real thing, and the manual's layout is the common case.
+ */
+const FIELD_START = /^[HBLWU]\d+$/;
+
+/**
+ * Break a `;`-chain into one segment-group per FIELD.
+ *
+ * The manual writes a label as a single frame:
+ *   <STX>E1;F1;H1;o100,100;…;d3,Hello World!;B2;o100,200;…;d3,12345678;R<ETX>
+ * and the viewer has always read that. The importer treated the whole frame as
+ * ONE field, so `d3`'s greedy text ran to the end of the label and everything
+ * after the first field vanished — samples/chained.ipl imported as ZERO fields.
+ *
+ * The split is made only at a segment that IS a field start (`H1`, `B2`), so
+ * the `d3` greediness that splitFieldCommand protects still holds within each
+ * field: "H0;o10,10;d3,A;B" has no field-shaped segment after the data and
+ * stays one field reading "A;B".
+ */
+const splitChainIntoFields = (body: string): string[] => {
+    const segs = body.split(';');
+    const out: string[] = [];
+    let current: string[] = [];
+    for (let i = 0; i < segs.length; i++) {
+        const seg = segs[i].trim();
+        // A new field starts here, and only here.
+        if (i > 0 && FIELD_START.test(seg)) {
+            out.push(current.join(';'));
+            current = [seg];
+            continue;
+        }
+        // `R` exits program mode and ends the label; it is a command, never
+        // data. Without this it stayed glued to the last field's text —
+        // "...d3,12345678;R" imported the barcode's data as "12345678;R".
+        if (i > 0 && seg === 'R' && i === segs.length - 1) break;
+        current.push(segs[i]);
+    }
+    out.push(current.join(';'));
+    return out.filter(s => s.trim().length > 0);
+};
+
+/**
  * Splits one frame body into field-command segments, keeping `d3` fixed text
  * greedy.
  *
@@ -50,6 +104,10 @@ const CODE39_PREFIX_AFTER_DATA = /^p(?:@|[A-Z0-9]{1,4})$/;
  * Only a TRAILING RUN of well-formed parameters is split off, so a
  * param-shaped segment in the middle of intended text cannot cut it. That is
  * the same rule and the same tradeoff as viewerParser.splitParams.
+ *
+ * This splits ONE field into its parts. Breaking a `;`-chain into several
+ * FIELDS is splitChainIntoFields' job, which runs first — doing it here would
+ * return the later fields' segments as if they were parameters of this one.
  */
 const splitFieldCommand = (body: string): string[] => {
     const di = body.search(/(?:^|;)d3,/);
@@ -203,15 +261,49 @@ export const parseIPL = (
     // program-mode exit (<STX>R<ETX>), a stray field-data frame (<STX>D#<ETX>),
     // the print invocation (<STX><ESC>E...), or end of input. Some generators
     // (including this app) never emit <STX>D0<ETX>, so it must not be required.
-    const startMatch = /<STX>E\d+;F\d*;?[^<]*<ETX>/.exec(iplCode);
+    // The format head is `E#;F#`, and it may be a frame of its own —
+    // `<STX>E1;F1<ETX>` — or the HEAD OF A CHAINED FRAME, which is how the
+    // manual writes a label and how samples/chained.ipl is written:
+    //   <STX><ESC>P;E1;F1;H1;o100,100;…;B2;o100,200;…;R<ETX>
+    // Matching only the standalone form found no start in a chained stream, so
+    // `formatContent` stayed empty and the import produced ZERO fields: the
+    // whole label dropped, with nothing said. The viewer has always read both.
+    //
+    // The match therefore may begin mid-frame, and when it does the frame's
+    // REMAINDER after `E#;F#` is label content that must be kept.
+    const startMatch = /E\d+;F\d*;?/.exec(iplCode);
     let formatContent = '';
     if (startMatch) {
-        const rest = iplCode.slice(startMatch.index + startMatch[0].length);
+        const headEnd = iplCode.indexOf('<ETX>', startMatch.index);
+        const frameEnd = headEnd < 0 ? iplCode.length : headEnd;
+        // Everything from `E#;F#` to the end of its frame is content, whether
+        // the frame carried anything else.
+        const inFrame = iplCode.slice(startMatch.index, frameEnd);
+        const rest = iplCode.slice(frameEnd);
         const endMatch = /<STX>(?:R|D\d+)<ETX>|<STX><ESC>/.exec(rest);
-        formatContent = endMatch ? rest.slice(0, endMatch.index) : rest;
+        const afterFrame = endMatch ? rest.slice(0, endMatch.index) : rest;
+        // The head segment itself is a command; the rest of its frame follows
+        // it as sibling segments, so both are joined by the separator the
+        // splitter below expects.
+        formatContent = inFrame + afterFrame;
     }
 
-    const commands = formatContent.split('<STX>').filter(cmd => cmd.trim().length > 0).map(cmd => cmd.replace(/<ETX>\s*$/, ''));
+    // A frame holds either ONE command or a `;`-CHAIN of them. A chained frame
+    // begins with the format head, `<STX>E1;F1;H1;o…;d3,…<ETX>`. Two things
+    // have to happen to it, and leaving out either one silently imported an
+    // empty label:
+    //
+    //   1. the head `E#;F#` is dropped — it is not a field, and while it was
+    //      `commandParts[0]` read `E1`, which matches no field letter;
+    //   2. the remainder is broken at the NEXT FIELD, so the first field's
+    //      greedy `d3` text does not run to the end of the label.
+    const commands = formatContent
+        .split('<STX>')
+        .filter(cmd => cmd.trim().length > 0)
+        .flatMap(cmd => {
+            const body = cmd.replace(/<ETX>\s*$/, '').replace(/^E\d+;F\d*;?/, '');
+            return body.trim().length > 0 ? splitChainIntoFields(body) : [];
+        });
 
     const variableFields: (TextField | BarcodeField)[] = [];
 

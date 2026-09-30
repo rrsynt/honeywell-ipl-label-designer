@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { generateIPL } from '../services/iplGenerator';
 import { parseIPL } from '../services/iplParser';
 import { parseViewerIPL } from '../services/ipl/viewerParser';
@@ -374,5 +376,73 @@ describe('d3 fixed text with semicolons: importer/viewer parity (2026-09-29)', (
         ]) {
             expect(importedText(field), field).toBe(viewedText(field));
         }
+    });
+});
+
+// A `;`-CHAIN in one frame is how the manual writes a label, and it is what
+// samples/chained.ipl is. The importer read it as ONE field, so the first
+// field's greedy `d3` text ran to the end of the label and everything after it
+// was lost: chained.ipl imported as ZERO fields and regenerated as an empty
+// label, while the viewer drew both fields. The two forms below are the same
+// label written the two ways.
+describe('chained frames import like split frames (2026-09-30)', () => {
+    const stx = (f: string) => `<STX>${f}<ETX>`;
+    const CHAINED = `<STX><ESC>P;E1;F1;H1;o100,100;f0;c25;k12;d3,Hello World!;B2;o100,200;f0;c6;h80;w2;i1;d3,12345678;R<ETX>`;
+    const SPLIT = [
+        stx('<ESC>P'), stx('E1;F1'),
+        stx('H1;o100,100;f0;c25;k12;d3,Hello World!'),
+        stx('B2;o100,200;f0;c6;h80;w2;i1;d3,12345678'),
+        stx('R'),
+    ].join('');
+
+    const shape = (src: string) => parseIPL(src, DPI).fields.map(f => {
+        // A field holding data — text or barcode. The union also covers `line`,
+        // which has no dataSource, so the cast is what the other cases in this
+        // file do too.
+        const d = f as TextField | BarcodeField;
+        return {
+            type: f.type,
+            data: (d.dataSource as { data?: string }).data,
+            // The face each field names, so a barcode's parameters cannot be
+            // read as the text field's font.
+            face: f.type === 'text' ? (d as TextField).font : (d as BarcodeField).symbology,
+        };
+    });
+
+    it('reads the chained form as its two fields, not as none', () => {
+        expect(shape(CHAINED)).toHaveLength(2);
+        expect(shape(CHAINED)).toEqual(shape(SPLIT));
+    });
+
+    it('keeps each field\'s data intact, with no trailing R', () => {
+        const [text, bar] = shape(CHAINED);
+        expect(text.data).toBe('Hello World!');
+        expect(bar.data).toBe('12345678');
+        // The face is the field's OWN: the barcode's c6 must not become the
+        // text field's font, which is what reading the chain as one field did.
+        expect(text.face).toBe('25');
+        expect(bar.face).toBe('6');
+    });
+
+    it('still keeps a semicolon inside d3 when no field follows it', () => {
+        // The greedy rule is the reason the split is made only at a segment
+        // that IS a field start — the control for the two above.
+        const design = parseIPL([stx('<ESC>P'), stx('E1;F1'),
+            stx('H1;o10,10;c0;d3,A;B'), stx('R')].join(''), DPI);
+        const f = design.fields[0] as TextField;
+        expect((f.dataSource as { data: string }).data).toBe('A;B');
+        expect(design.fields).toHaveLength(1);
+    });
+
+    it('regenerates the chained sample into a label the viewer draws', () => {
+        // The end-to-end claim: samples/chained.ipl must survive import and
+        // come back as content, not as an empty shell. Before the fix the
+        // regenerated stream held only setup frames and the viewer drew 0 ink.
+        const src = fs.readFileSync(path.join(process.cwd(), 'samples', 'chained.ipl'), 'utf8');
+        const design = parseIPL(src, DPI);
+        expect(design.fields.length, 'the sample must import its fields').toBe(2);
+        expect(design.fields.map(f => f.type)).toEqual(['text', 'barcode']);
+        const text = design.fields[0] as TextField;
+        expect((text.dataSource as { data: string }).data).toBe('Hello World!');
     });
 });
