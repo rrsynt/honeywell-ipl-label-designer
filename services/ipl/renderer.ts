@@ -401,7 +401,18 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
             // Manual: interpretive prints in the default font (font 0, 7x9
             // standard) at h2/w2, 2 dots below the bar code field, left
             // justified (PRM p.191). i2 places it above instead.
-            const hriCellH = 9 * 2 * s;
+            //
+            // "Default" is the operative word. A stream that enables i and then
+            // names a font in its interpretive field (In;c5;k30) is asking for
+            // something else, and the parser carries that here — the designer
+            // importer has always read it. Sizing is the font's own cell height
+            // at h2 (the documented default magnification), or k when the field
+            // gives a point size, which is how PRM p.189 expresses an outline
+            // face.
+            const hriMeta = el.hriFont ? FONT_MAP[el.hriFont] : undefined;
+            const hriCellH = el.hriPointSize
+                ? Math.round((el.hriPointSize / 72) * dpi) * s
+                : (hriMeta?.baseHeight ?? 9) * 2 * s;
             const barYPx = el.hri === 2 && data ? hriCellH + 2 * s : 0;
             ctx.save();
             ctx.translate(0, barYPx);

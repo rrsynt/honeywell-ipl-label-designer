@@ -2537,6 +2537,20 @@ export class IPLViewerParser {
         // Interpretive fields take the same `c n[,m][,p]` font spec as H fields
         // ("Selects a font type for human-readable and interpretive fields").
         const spec = this.fontSpecOf(params, cmd);
+        // PRM p.189 "Font Type, Select — Selects a font type for human-readable
+        // fields", and the Bar Code Field table (p.171): enabling `i` creates an
+        // interpretive field, and this In is where that field's font is stated.
+        // The renderer draws a barcode's HRI under the bar with font 0 at h2/w2
+        // — the DOCUMENTED DEFAULT — so a stream that names anything else needs
+        // it here. The designer importer has always honoured this (iplParser's
+        // hriFontMap); the viewer dropped it, which made the same stream print
+        // one way and preview another.
+        const kParam = params.find(p => p.key === 'k');
+        const pointSize = kParam ? parseInt(kParam.value.split(',')[0], 10) || undefined : undefined;
+        if (host && (spec.font !== '0' || pointSize !== undefined)) {
+            host.hriFont = spec.font;
+            if (pointSize !== undefined) host.hriPointSize = pointSize;
+        }
         const element: TextElement = {
             kind: 'text',
             id: undefined,
@@ -2546,10 +2560,7 @@ export class IPLViewerParser {
             font: spec.font,
             hMag: this.int(params, 'h', 2),
             wMag: this.int(params, 'w', 2),
-            pointSize: (() => {
-                const k = params.find(p => p.key === 'k');
-                return k ? parseInt(k.value.split(',')[0], 10) || undefined : undefined;
-            })(),
+            pointSize,
             intercharGapDots: spec.gap,
             borderDots: undefined,
             charRot: this.charRotationOf(params, cmd),
