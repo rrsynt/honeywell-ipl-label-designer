@@ -807,3 +807,46 @@ describe('A applies p5 horizontally and p6 vertically (2026-09-30)', () => {
             .not.toContain('epl-h-multiplier');
     });
 });
+
+// PDF417 is the ONE EPL 2D command with a positional tail. The manual gives
+// "b p1,p2,p3,p4,p5[,p6][,p7]..." where p4 (www) is the maximum print WIDTH in
+// dots and p5 (hhh) the maximum HEIGHT, and only then come the prefixed
+// options p6 (s = error correction) and p7 (c = compression). Data Matrix and
+// MaxiCode keep their h/m prefix form.
+//
+// The parser looked for an h-prefixed option for every type, so a PDF417's
+// stated height was never read and the symbol fell back to the module default.
+describe('EPL PDF417 takes a positional tail, its siblings do not (2026-09-30)', () => {
+    const read = (src: string) => parseEPL(`N\n${src}\nP1\n`).elements[0] as {
+        symbology: string; heightDots: number; moduleDots: number;
+        pdfEcLevel?: string; pdfColumns?: string;
+    };
+    const codes = (src: string) => parseEPL(`N\n${src}\nP1\n`).issues.map(i => i.code);
+
+    it('reads the maximum height from p5, where the manual puts it', () => {
+        const el = read('b80,100,P,700,600,"DATA"');
+        expect(el.symbology).toBe('12');
+        expect(el.heightDots, 'p5 (hhh) is the maximum print height').toBe(600);
+    });
+
+    it('reads the error-correction level from the s prefix', () => {
+        expect(read('b80,100,P,700,600,s5,"DATA"').pdfEcLevel).toBe('5');
+    });
+
+    it('reports the maximum width rather than mistaking it for columns', () => {
+        // www is a dot ceiling, not the IR's pdfColumns — which counts the
+        // symbol's DATA columns. Storing 700 there would have told the encoder
+        // to lay out 700 columns.
+        const el = read('b80,100,P,700,600,"DATA"');
+        expect(el.pdfColumns, 'a dot width is not a column count').toBeUndefined();
+        expect(codes('b80,100,P,700,600,"DATA"')).toContain('epl-pdf417-max-width');
+    });
+
+    it('leaves Data Matrix and MaxiCode on their prefix form', () => {
+        // The control: these two really do use h/m, so a change that made every
+        // 2D type positional would break them.
+        expect(read('b80,100,D,h5,"DATA"').symbology).toBe('17');
+        expect(read('b80,100,M,h5,m2,"DATA"').symbology).toBe('14');
+        expect(codes('b80,100,D,h5,"DATA"'), 'Data Matrix has no positional tail').toEqual([]);
+    });
+});

@@ -590,13 +590,35 @@ export const parseEPL = (code: string): ViewerLabel => {
                         `EPL 2D type "${kind}" is not one this viewer knows. EPL2 defines D (Data Matrix), M (MaxiCode) and P (PDF417); there is no QR code in the language at all. Nothing is drawn for it.`, 'b');
                     break;
                 }
-                // The optional parameters are letter-prefixed: read the ones
-                // this viewer can use, let the rest pass (they are printer
-                // preferences, not geometry).
+                // The optional parameters after the type letter carry their own
+                // prefix — EXCEPT for PDF417, which the manual gives a
+                // positional tail: "p3 = P ... p4 (www) = maximum print width in
+                // dots, p5 (hhh) = maximum print height in dots", then the
+                // prefixed p6 (s = error correction) and p7 (c = compression).
+                // Reading p4 as a prefixed option never matched, so a PDF417's
+                // stated width and height were dropped, and the symbol came out
+                // at the h-prefix default instead.
                 const opt = (letter: string): string | undefined => {
                     const hit = p.find(v => v.trim().toUpperCase().startsWith(letter.toUpperCase()));
                     return hit ? hit.trim().slice(1) : undefined;
                 };
+                const isPdf = kind === 'P';
+                // p4 (www) and p5 (hhh) are MAXIMUM print width and height in
+                // DOTS. Neither is the IR's pdfColumns, which counts the
+                // symbol's data columns — putting a dot count there would tell
+                // the encoder to lay out that many columns. Only the height
+                // maps onto the IR directly; the width is a ceiling the encoder
+                // sizes within, so it is reported rather than stored.
+                const maxWidth = isPdf ? Math.max(1, Math.trunc(num(p[3], 0))) : 0;
+                const maxHeight = isPdf ? Math.max(1, Math.trunc(num(p[4], 0))) : 0;
+                if (isPdf && maxWidth > 1) {
+                    issue('info', 'epl-pdf417-max-width',
+                        `PDF417 maximum print width is ${maxWidth} dots; this preview sizes the symbol from its data and does not cap it.`, 'b');
+                }
+                // The module size still comes from the h prefix where a stream
+                // uses one (Data Matrix and MaxiCode both do); for PDF417 the
+                // box states the extent and a nominal module keeps the anchor
+                // sane, which is what this preview measures matrices from.
                 const moduleSize = Math.max(1, Math.trunc(num(opt('h'), 5)));
                 const el: BarcodeElement = {
                     kind: 'barcode', id: nextId++,
@@ -604,13 +626,23 @@ export const parseEPL = (code: string): ViewerLabel => {
                     symbology: found.symbology,
                     // 2D symbols are measured from their module size, not a bar
                     // height; a nominal extent keeps the anchor sane.
-                    heightDots: moduleSize * 21,
+                    heightDots: isPdf && maxHeight > 1 ? maxHeight : moduleSize * 21,
                     moduleDots: moduleSize,
                     ratio: 1,
                     hri: 0,
                     source: { type: 'fixed', data },
                     ...(kind === 'M' ? { maxiMode: opt('m') ?? '' } : {}),
                 };
+                if (isPdf && (opt('s') !== undefined || opt('c') !== undefined)) {
+                    // s = error correction level 1-8, c = data compression 0/1.
+                    // The encoder takes an EC level; the compression mode has no
+                    // slot, so it is named rather than dropped.
+                    if (opt('s') !== undefined) el.pdfEcLevel = opt('s');
+                    if (opt('c') !== undefined) {
+                        issue('info', 'epl-pdf417-compression',
+                            `PDF417 data compression c${opt('c')} is not reproduced; the encoder chooses its own compaction.`, 'b');
+                    }
+                }
                 elements.push(place(el));
                 break;
             }

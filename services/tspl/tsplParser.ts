@@ -684,9 +684,24 @@ export const parseTSPL = (code: string): ViewerLabel => {
             }
 
             case 'PDF417': {
-                // PDF417 x,y,width,height,rotate,[option], "content"
-                // (manual p. 56). The option block carries letter-prefixed
-                // settings (P/E/M/U/W/H/R/C/T/Lm) which this subset reads past.
+                // PDF417 x,y,width,height,rotate,[option],"content"
+                // (TSC manual p. 56). The option block is letter-prefixed:
+                //
+                //   P     data compression 0 auto / 1 binary
+                //   E     error correction level 0-8
+                //   M     centre pattern 0 upper-left / 1 middle
+                //   Ux,y,c human readable position and chars per line
+                //   W     MODULE WIDTH in dots, 2-9
+                //   H     BAR HEIGHT in dots, 4-99
+                //   R,C   maximum rows / columns
+                //   T     truncation 0 / 1
+                //   Lm    expression length
+                //
+                // These were read past entirely: measured, E3, W4, H80, T1, C5
+                // and all of them together produced byte-identical elements to
+                // the bare command, under no message. W and H in particular
+                // state the symbol's physical size, which is the one thing a
+                // size-checking preview must not ignore.
                 const which = cmd.name;
                 if (p.length < 5) {
                     issue('warning', 'tspl-pdf417-params', `${which} needs x,y,width,height,rotate. Found ${p.length}. Skipped.`, which);
@@ -697,18 +712,57 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     issue('warning', 'tspl-pdf417-empty', `A ${which} with no data prints nothing.`, which);
                     break;
                 }
+                // Everything between the rotation and the content is the option
+                // block, one letter-prefixed token each.
+                const opts = p.slice(5, -1).map(s => s.trim().toUpperCase()).filter(Boolean);
+                const opt = (letter: string): string | undefined => {
+                    const hit = opts.find(s => s.startsWith(letter));
+                    return hit ? hit.slice(1) : undefined;
+                };
+                // W and H override the positional width/height. Their ranges —
+                // W is 2-9 and H is 4-99 — bound the OPTION only: the manual
+                // gives those numbers for the letter-prefixed values, while the
+                // positional height is a plain dot count with no such ceiling.
+                // Clamping the positional value would silently shrink any
+                // stream asking for a taller symbol, which the test below
+                // caught at 200 dots becoming 99.
+                const wOpt = opt('W');
+                const hOpt = opt('H');
+                const moduleDots = wOpt !== undefined
+                    ? Math.max(2, Math.min(9, Math.trunc(num(wOpt, 2))))
+                    : Math.max(1, Math.trunc(num(p[2], 2) / 10) || 2);
+                const barHeight = hOpt !== undefined
+                    ? Math.max(4, Math.min(99, Math.trunc(num(hOpt, 10))))
+                    : Math.max(1, Math.trunc(num(p[3], 10)));
                 const f = quadrantFromClockwise(p[4]);
                 const el: BarcodeElement = {
                     kind: 'barcode', id: nextId++,
                     ox: num(p[0], 0), oy: num(p[1], 0), f,
                     symbology: '12',
-                    heightDots: Math.max(1, Math.trunc(num(p[3], 10))),
-                    moduleDots: Math.max(1, Math.trunc(num(p[2], 2) / 10) || 2),
+                    heightDots: Math.max(1, barHeight),
+                    moduleDots: Math.max(1, moduleDots),
                     ratio: 1,
                     hri: 0,
                     source: { type: 'fixed', data: content },
+                    // Carried through to the encoder, which understands these
+                    // three; R/C (max rows/columns) have no IR slot and are
+                    // reported below instead of being dropped.
+                    ...(opt('E') !== undefined ? { pdfEcLevel: opt('E') } : {}),
+                    ...(opt('C') !== undefined ? { pdfColumns: opt('C') } : {}),
+                    ...(opt('T') !== undefined ? { pdfTruncate: opt('T') } : {}),
                 };
                 elements.push(place(el));
+                // What this preview cannot apply, said rather than dropped.
+                const ignored: string[] = [];
+                if (opt('P') !== undefined) ignored.push('P (data compression)');
+                if (opt('M') !== undefined) ignored.push('M (centre pattern)');
+                if (opt('U') !== undefined) ignored.push('U (human-readable position)');
+                if (opt('R') !== undefined) ignored.push('R (maximum rows)');
+                if (opt('L') !== undefined) ignored.push('L (expression length)');
+                if (ignored.length > 0) {
+                    issue('info', 'tspl-pdf417-options',
+                        `${which} options not reproduced here: ${ignored.join(', ')}. The symbol is drawn without them.`, which);
+                }
                 break;
             }
 

@@ -157,7 +157,26 @@ export const generateEPL = (design: Design): EplGenerateResult => {
             // has no EPL representation and says so.
             if (EPL_2D_LETTER[sym]) {
                 const moduleSize = Math.max(1, Math.round(field.w_mag ?? 5));
-                lines.push(`b${origin.x},${origin.y},${EPL_2D_LETTER[sym]},h${moduleSize},"${escapeEplData(data)}"`);
+                const letter = EPL_2D_LETTER[sym];
+                if (letter === 'P') {
+                    // PDF417 is the one with a POSITIONAL tail: the manual gives
+                    // "bp1,p2,p3,p4,p5[,p6][,p7]" where p4 (www) is the maximum
+                    // print width in dots and p5 (hhh) the maximum height, and
+                    // only then come the prefixed p6 (s, error correction) and
+                    // p7 (c, compression). Emitting the h-prefix form used for
+                    // Data Matrix and MaxiCode put a prefixed option where a
+                    // bare dot count belongs.
+                    //
+                    // No s or c is written: the design model has no PDF417
+                    // error-correction or compression field, so there is nothing
+                    // to state. The printer picks its own defaults, which is
+                    // what the manual describes for an omitted parameter.
+                    const w = Math.max(1, dots(box.width));
+                    const h = Math.max(1, dots(box.height));
+                    lines.push(`b${origin.x},${origin.y},P,${w},${h},"${escapeEplData(data)}"`);
+                    continue;
+                }
+                lines.push(`b${origin.x},${origin.y},${letter},h${moduleSize},"${escapeEplData(data)}"`);
                 continue;
             }
             if (sym === '18') {

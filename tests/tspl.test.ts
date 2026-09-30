@@ -711,3 +711,49 @@ describe('printer-action commands stay named, not silenced (2026-09-30)', () => 
         expect(drawn.issues, 'and draws without complaint').toHaveLength(0);
     });
 });
+
+// The TSPL PDF417 option block, from the TSC manual p. 56: P compression,
+// E error correction, M centre pattern, Ux,y,c human-readable position,
+// W module width 2-9, H bar height 4-99, R/C maximum rows/columns,
+// T truncation, Lm expression length.
+//
+// All of them were read past. Measured before the fix: E3, W4, H80, T1, C5 and
+// every option together produced byte-identical elements to the bare command,
+// under no message — including W and H, which are the symbol's physical size.
+describe('TSPL PDF417 reads its option block (2026-09-30)', () => {
+    const el = (opts: string) => parseTSPL(
+        `SIZE 80 mm,50 mm\nCLS\nPDF417 10,10,400,200,0${opts},"DATA"\nPRINT 1,1\n`,
+    ).elements[0] as { heightDots: number; moduleDots: number; pdfEcLevel?: string; pdfTruncate?: string };
+    const codes = (opts: string) => parseTSPL(
+        `SIZE 80 mm,50 mm\nCLS\nPDF417 10,10,400,200,0${opts},"DATA"\nPRINT 1,1\n`,
+    ).issues.map(i => i.code);
+
+    it('takes the module width from W and the bar height from H', () => {
+        expect(el(',W4').moduleDots, 'W is the module width').toBe(4);
+        expect(el(',H80').heightDots, 'H is the bar height').toBe(80);
+        // The control: with neither, the positional height is used unchanged.
+        expect(el('').heightDots).toBe(200);
+    });
+
+    it('carries the error-correction level and truncation to the encoder', () => {
+        expect(el(',E3').pdfEcLevel).toBe('3');
+        expect(el(',T1').pdfTruncate).toBe('1');
+    });
+
+    it('names the options it cannot reproduce instead of dropping them', () => {
+        // P, M, U, R and L have no IR slot. Silence about them is what let the
+        // whole block go unnoticed in the first place.
+        const c = codes(',P1,M1,U10,20,5,R30,L5');
+        expect(c, 'the unapplied options must be named').toContain('tspl-pdf417-options');
+        // The control: a stream with none of them says nothing extra.
+        expect(codes(',E3,W3')).not.toContain('tspl-pdf417-options');
+    });
+
+    it('bounds W and H to the ranges the manual gives', () => {
+        // W 2-9 and H 4-99; a stream outside that is clamped rather than
+        // producing a symbol of zero or negative size.
+        expect(el(',W0').moduleDots, 'W floor is 2').toBe(2);
+        expect(el(',W99').moduleDots, 'W ceiling is 9').toBe(9);
+        expect(el(',H0').heightDots, 'H floor is 4').toBe(4);
+    });
+});
