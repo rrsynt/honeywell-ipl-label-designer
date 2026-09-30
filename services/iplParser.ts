@@ -571,6 +571,22 @@ export const parseIPL = (
                      // PRM p.166: segments per row must be EVEN 2-22.
                      const seg = numIn(cParts[3], 2, 22);
                      barcodeField.rssSegments = seg !== undefined && seg % 2 === 0 ? seg : undefined;
+                 } else if ((symbology === '12' || symbology === '17' || symbology === '21')
+                     && cParts.slice(1).some(x => x !== undefined && x.trim() !== '')) {
+                     // PDF417 (c12 columns/EC/truncate), Data Matrix (c17 ECC/
+                     // shape/Structured Append) and EAN.UCC Composite (c21
+                     // version/columns/row height) modifiers have no slot in the
+                     // design model — the model carries the ones above but never
+                     // these three — so a stream using them regenerated with the
+                     // printer's defaults and nothing said so. Named, matching
+                     // the c0-charset and Code 39 prefix notices above.
+                     const which = symbology === '12' ? 'PDF417 options (columns, error correction, truncation)'
+                         : symbology === '17' ? 'Data Matrix options (ECC version, square/rectangular, Structured Append)'
+                         : 'EAN.UCC Composite options (version, columns, row height)';
+                     onNotice?.({
+                         command: `c${symbology},${cParts.slice(1).join(',')}`.slice(0, 24),
+                         message: `${which} on c${symbology} were not imported: this designer has no setting for them, so the bar code regenerates with the printer's defaults.`,
+                     });
                  }
                  const hriFontInfo = hriFontMap.get(fieldId);
                  if (hriFontInfo && hri !== 'none') {

@@ -315,4 +315,25 @@ describe('designer <-> viewer conversions for POSTNET/Planet (review 2026-09-21)
         expect(notices('1')).toBe('');
         expect(notices('0')).toBe('');
     });
+
+    it('designer import: names the 2D modifiers it has no setting for', async () => {
+        // The importer carries modifiers for c8/c14/c18/c19/c20 but has no slot
+        // for c12 (PDF417), c17 (Data Matrix) or c21 (composite) — a stream
+        // using them regenerated with the printer's defaults in silence.
+        const { parseIPL } = await import('../services/iplParser');
+        const notices = (spec: string) => {
+            const out: string[] = [];
+            parseIPL([
+                '<STX><ESC>C<SI>W812<ETX>', '<STX><ESC>P<ETX>', '<STX>E1;F1<ETX>',
+                `<STX>${spec}<ETX>`, '<STX>R<ETX>',
+            ].join('\n'), 203, (n: { message: string }) => out.push(n.message));
+            return out.join(' ');
+        };
+        expect(notices('B1;o40,40;c12,4,3;d3,DATA')).toMatch(/PDF417 options/);
+        expect(notices('B1;o40,40;c17,200,1;d3,DATA')).toMatch(/Data Matrix options/);
+        expect(notices('B1;o40,40;c21,2;d3,DATA')).toMatch(/EAN.UCC Composite options/);
+        // The controls: a bare command carries nothing to lose.
+        expect(notices('B1;o40,40;c12;d3,DATA')).toBe('');
+        expect(notices('B1;o40,40;c17;d3,DATA')).toBe('');
+    });
 });
