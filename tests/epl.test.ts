@@ -449,6 +449,19 @@ describe('EPL generator', () => {
         expect(a.split(',')[3]).toBe('1');
     });
 
+    it('round-trips the bitmap font number through EPL, in rank order', () => {
+        // The generator's font map must be the parser's exact reverse. It sent
+        // design font 1 -> EPL 3 and 2 -> EPL 2, swapping the middle two: a
+        // saved design's font 1 reloaded as font 2. Both tables keep the rank
+        // 0<1<2 (7x9 < 7x11 < 10x14) = 1<2<3 (8x12 < 10x16 < 12x20).
+        const p4 = (font: string) => eplLines([textField({ font })]).find(l => l.startsWith('A'))!.split(',')[3];
+        expect(p4('0')).toBe('1');
+        expect(p4('1')).toBe('2');
+        expect(p4('2')).toBe('3');
+        const { epl } = generateEPL(withFields([textField({ font: '1' })]));
+        expect((parseEPL(epl).elements[0] as { font?: string }).font).toBe('1');
+    });
+
     it('puts the WIDTH multiplier in p5 and the HEIGHT in p6', () => {
         // Manual p. 3-4: p5 is the horizontal multiplier, p6 the vertical. The
         // generator wrote h_mag into p5, so a wide text printed tall and vice

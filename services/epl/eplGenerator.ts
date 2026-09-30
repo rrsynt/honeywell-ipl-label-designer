@@ -41,10 +41,20 @@ export interface EplGenerateResult {
 }
 
 /** The EPL `A` font for a design font id, or null when it is not a resident face. */
+/**
+ * Design font -> EPL resident font (1-5, manual pp. 3-4/3-5). This MUST be the
+ * exact reverse of the parser's cell table, and the two keep the RANK order:
+ * the designer's bitmap fonts grow 0 (7x9) < 1 (7x11) < 2 (10x14), and EPL's
+ * grow 1 (8x12) < 2 (10x16) < 3 (12x20), so 0->1, 1->2, 2->3. The table used
+ * to send font 1 -> EPL 3 and font 2 -> EPL 2, which swapped the middle two and
+ * broke the round trip: a saved design's font 1 reloaded as font 2 and back.
+ * (EPL has no cell that is 7 dots wide, so width cannot drive the choice; the
+ * height rank is what both tables can agree on.)
+ */
 const EPL_FONT_FOR: Record<string, number> = {
-    '0': 1,  // 7x9  -> EPL 1 (8x12)
-    '2': 2,  // 10x14 -> EPL 2 (10x16)
-    '1': 3,  // 7x11 OCR -> EPL 3 (12x20)
+    '0': 1,  // 7x9   -> EPL 1 (8x12)
+    '1': 2,  // 7x11  -> EPL 2 (10x16)
+    '2': 3,  // 10x14 -> EPL 3 (12x20)
 };
 
 /**
