@@ -399,7 +399,23 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     break;
                 }
                 const fontName = (p[2] ?? '').trim();
-                const content = p[6] ?? '';
+                // The content is the LAST parameter, not p[6]: an optional
+                // alignment may precede it, and reading a fixed index took the
+                // alignment as the content — `TEXT 10,10,"2",0,1,1,1,"HELLO"`
+                // printed "1" and lost "HELLO" without a word. BARCODE, QRCODE
+                // and PDF417 all read the last parameter for this reason; TEXT
+                // was the only one that did not.
+                const content = p[p.length - 1] ?? '';
+                // Anything between the multipliers and the content is the
+                // alignment: 0 left, 1 center, 2 right. The renderer has no
+                // slot for it, so it is named rather than dropped — the text
+                // still prints, just from its own left edge.
+                const rawAlign = p.length > 7 ? p[6] : '';
+                const align = rawAlign === '' ? NaN : Math.trunc(num(rawAlign, NaN));
+                if (align === 1 || align === 2) {
+                    once('text-align', 'info', 'tspl-text-align',
+                        `TEXT alignment ${align === 1 ? '1 (center)' : '2 (right)'} is not reproduced: the text is drawn from its left edge.`, 'TEXT');
+                }
                 if (fontName === '') {
                     issue('warning', 'tspl-text-params', 'TEXT has no quoted font name. Skipped.', 'TEXT');
                     break;
@@ -476,6 +492,18 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     issue('info', 'tspl-addon-ignored',
                         `"${type}" carries a printed add-on, which this viewer draws as the main symbol only.`, 'BARCODE');
                 }
+                {
+                    // p4 is 0 none / 1 left / 2 center / 3 right. The IR carries
+                    // only none/below/above, so centre and right were collapsing
+                    // to 1 and the digits drew from the symbol's left edge under
+                    // no message. Left (1) is genuinely what this draws, so it
+                    // stays silent; the other two are named.
+                    const align = (p[4] ?? '').trim();
+                    if (align === '2' || align === '3') {
+                        issue('info', 'tspl-hri-align',
+                            `The human-readable line is aligned ${align === '2' ? 'centre' : 'right'} in the stream; this preview always draws it from the symbol's left edge.`, 'BARCODE');
+                    }
+                }
                 const heightDots = Math.max(1, Math.trunc(num(p[3], 1)));
                 const hriMode = Math.trunc(num(p[4], 0));
                 const f = quadrantFromClockwise(p[5]);
@@ -489,6 +517,13 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     // TSPL's human readable is 0 none / 1 left / 2 center /
                     // 3 right, ALL below the bar — the IR's 1 means "below",
                     // and there is no above in TSPL at all.
+                    //
+                    // The 2 and 3 are horizontal ALIGNMENTS of the line, and
+                    // the IR has no slot for them: hri is just none/below/above.
+                    // Collapsing them to 1 drew the digits from the symbol's
+                    // left edge with no word about it, so the difference is
+                    // named instead. Nothing is lost about WHERE the line is —
+                    // only its alignment across the symbol.
                     hri: hriMode === 0 ? 0 : 1,
                     ratio: wide / narrow <= 2.2 ? 2 : wide / narrow < 2.8 ? 0 : 1,
                     source: { type: 'fixed', data: content },
@@ -534,6 +569,17 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 if (content === '') {
                     issue('warning', 'tspl-qrcode-empty', 'A QR code with no data prints nothing.', 'QRCODE');
                     break;
+                }
+                // p4 is the mode: A = automatic, M = manual (it then takes
+                // character/data/codeword counts and an optional mask). The
+                // encoder here picks the encoding itself, so M is reported
+                // rather than carried — the symbol's content is what the
+                // stream asked for either way, but the module STREAM can
+                // differ, and a mask the user asked for is not applied.
+                const mode = (p[4] ?? '').trim().toUpperCase();
+                if (mode === 'M') {
+                    issue('info', 'tspl-qr-manual-mode',
+                        'QRCODE mode M asks the printer to encode from explicit character/data/codeword counts (and an optional mask); this preview chooses the encoding itself, so the symbol may differ from the printed one.', 'QRCODE');
                 }
                 const f = quadrantFromClockwise(p[5]);
                 const el: BarcodeElement = {

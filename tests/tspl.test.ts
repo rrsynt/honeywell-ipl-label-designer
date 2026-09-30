@@ -139,6 +139,64 @@ describe('TSPL parser', () => {
         expect(label.issues.some(i => i.code === 'tspl-font-download')).toBe(true);
     });
 
+    it('reads the TEXT content as the LAST parameter, alignment or not', () => {
+        // TEXT x,y,"font",rotation,x-mult,y-mult,[alignment,]"content" — the
+        // alignment is optional, and the parser read a fixed p[6]. So a stream
+        // WITH an alignment printed the alignment and lost the text:
+        // TEXT 10,10,"2",0,1,1,1,"HELLO" drew "1", silently.
+        //
+        // The convention was already settled in this file: BARCODE, QRCODE and
+        // PDF417 all read `p[p.length - 1]`. The control is the same label
+        // without the alignment — if that ever stops yielding HELLO, this test
+        // is not measuring what it claims.
+        const textOf = (src: string) => (parseTSPL(src).elements[0] as any)?.source?.data;
+        expect(textOf('CLS\nTEXT 10,10,"2",0,1,1,"HELLO"')).toBe('HELLO');
+        expect(textOf('CLS\nTEXT 10,10,"2",0,1,1,1,"HELLO"')).toBe('HELLO');
+        expect(textOf('CLS\nTEXT 10,10,"2",0,1,1,2,"HELLO"')).toBe('HELLO');
+        // A comma inside a quoted payload must still not split anything.
+        expect(textOf('CLS\nTEXT 10,10,"2",0,1,1,1,"SMITH, JOHN"')).toBe('SMITH, JOHN');
+    });
+
+    it('names a TEXT alignment it does not draw instead of dropping it', () => {
+        // Alignment 0 is the left edge, which is where this renderer draws, so
+        // it is genuinely nothing to report.
+        expect(parseTSPL('CLS\nTEXT 10,10,"2",0,1,1,0,"X"').issues.map(i => i.code))
+            .not.toContain('tspl-text-align');
+        for (const align of [1, 2]) {
+            const label = parseTSPL(`CLS\nTEXT 10,10,"2",0,1,1,${align},"X"`);
+            expect(label.elements, `alignment ${align} must still draw the text`).toHaveLength(1);
+            expect(label.issues.map(i => i.code), `alignment ${align}`).toContain('tspl-text-align');
+        }
+    });
+
+    it('names a human-readable alignment it cannot draw, and stays quiet on left', () => {
+        // BARCODE ... ,<hri>,<rotation>,<narrow>,<wide> — p4 is 0 none / 1 left
+        // / 2 centre / 3 right. The IR carries only none/below/above, so 2 and
+        // 3 collapsed to 1 and the digits drew from the symbol's left edge
+        // silently. Left is genuinely what this draws, so it must NOT report —
+        // that is the control: a warning fired on every mode would be noise.
+        const codesOf = (hri: number) =>
+            parseTSPL(`CLS\nBARCODE 10,50,"128",100,${hri},0,2,2,"12345"`).issues.map(i => i.code);
+        expect(codesOf(0)).not.toContain('tspl-hri-align');
+        expect(codesOf(1), 'left is what this preview draws').not.toContain('tspl-hri-align');
+        for (const hri of [2, 3]) {
+            expect(codesOf(hri), `hri ${hri} is not reproduced`).toContain('tspl-hri-align');
+        }
+    });
+
+    it('names a QR manual-mode request instead of silently re-encoding', () => {
+        // p4 A = automatic, M = manual. The encoder here always chooses the
+        // encoding, so an M stream can produce a different module pattern (and
+        // any mask the user asked for is not applied). A is the default and is
+        // exactly what this does, so it stays silent.
+        const codesOf = (mode: string) =>
+            parseTSPL(`CLS\nQRCODE 10,10,M,4,${mode},0,"DATA"`).issues.map(i => i.code);
+        expect(codesOf('A')).not.toContain('tspl-qr-manual-mode');
+        expect(codesOf('M')).toContain('tspl-qr-manual-mode');
+        // Either way the symbol is drawn — the warning is about how it encodes.
+        expect(parseTSPL('CLS\nQRCODE 10,10,M,4,M,0,"DATA"').elements).toHaveLength(1);
+    });
+
     it('maps the barcode TYPES BY NAME, which is what TSPL uses', () => {
         // Not numbers like EPL. A from-memory table would be wrong here.
         const symOf = (type: string, data = '12345') =>
