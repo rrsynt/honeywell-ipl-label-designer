@@ -331,6 +331,26 @@ describe('TSPL generator', () => {
         expect(t.split(',')[2]).toBe('"1"'); // design font '0' -> TSPL font 1
     });
 
+    it('emits 39C for a host-verified Code 39 check digit, so it round-trips', () => {
+        // The parser reads '39C' as code39Mode '2'. The generator wrote plain
+        // '39' for every Code 39 variant, so that check digit was lost on
+        // export and came back as none.
+        const typeOf = (ck: string) => {
+            const line = lines([barcodeField({ code39_checkDigit: ck })]).find(l => l.startsWith('BARCODE'))!;
+            return line.split('"')[1];
+        };
+        expect(typeOf('host-verifies')).toBe('39C');
+        expect(typeOf('none')).toBe('39');
+        // The round trip: what the generator writes is what the parser reads.
+        const { tspl } = generateTSPL(design([barcodeField({ code39_checkDigit: 'host-verifies' })]));
+        expect((parseTSPL(tspl).elements[0] as { code39Mode?: string }).code39Mode).toBe('2');
+    });
+
+    it('names the Code 39 printer check digit TSPL cannot add', () => {
+        const { warnings } = generateTSPL(design([barcodeField({ code39_checkDigit: 'printer-generated' })]));
+        expect(warnings.some(w => /printer add/i.test(w))).toBe(true);
+    });
+
     it('emits BARCODE with the type NAME, not a number', () => {
         const b = lines([barcodeField()]).find(l => l.startsWith('BARCODE'))!;
         expect(b.split(',')[2]).toBe('"39"');

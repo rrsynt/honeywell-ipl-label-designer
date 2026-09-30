@@ -198,7 +198,20 @@ export const generateEPL = (design: Design): EplGenerateResult => {
             // The IPL id '7' is "EAN/UPC" and the printer infers the variant
             // from the data length; EPL spells the variant out in its type
             // letter, so it is resolved the same way the printer would.
-            const eplType = sym === '7' ? eplEanType(data) : EPL_BARCODE_FOR[sym];
+            // Code 39's host-verified check digit is EPL type '3C' (manual
+            // Table 2-1, p. 3-12). Emitting plain '3' for it dropped the check
+            // digit in one direction while the parser reads '3C' back as
+            // host-verifies — a design saved and reloaded changed its bar code
+            // silently, the exact drift the reverse-table comment forbids.
+            const code39HostChecked = sym === '0' && field.code39_checkDigit === 'host-verifies';
+            const eplType = sym === '7' ? eplEanType(data) : (code39HostChecked ? '3C' : EPL_BARCODE_FOR[sym]);
+            if (field.code39_checkDigit === 'printer-generated' && sym === '0') {
+                // EPL has no "printer enters the check digit" Code 39 type — '3C'
+                // is the host-verified one. The nearest honest form is plain '3',
+                // which prints the data as given (the digit the designer asked the
+                // printer to compute is not added). Named so it is not silent.
+                warnings.push(`"${field.name}" asks Code 39 to have the printer add its check digit. EPL has no such type ('3C' verifies a digit the host supplied), so the bar code prints without it.`);
+            }
             if (!eplType) {
                 warnings.push(sym === '7'
                     ? `"${field.name}" is an EAN/UPC bar code whose data is ${data.replace(/\D/g, '').length} digits, which is not a length EPL recognizes (7, 8, 12 or 13). It was left off the label.`

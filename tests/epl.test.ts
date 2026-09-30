@@ -453,6 +453,30 @@ describe('EPL generator', () => {
         expect(eplLines([barcodeField()]).find(l => l.startsWith('B'))!.split(',')[3]).toBe('3');
     });
 
+    it('emits 3C for a host-verified Code 39 check digit, so it round-trips', () => {
+        // The parser reads '3C' as code39Mode '2' (host supplies the digit and
+        // the printer verifies). The generator wrote plain '3' for every Code 39
+        // variant, so a design with that check digit lost it on export and came
+        // back as no check digit — the silent drift the reverse table forbids.
+        const typeOf = (ck: string) => {
+            const { epl } = generateEPL(withFields([barcodeField({ code39_checkDigit: ck })]));
+            return epl.split('\n').find(l => l.startsWith('B'))!.split(',')[3];
+        };
+        expect(typeOf('host-verifies')).toBe('3C');
+        expect(typeOf('none')).toBe('3');
+        // The round trip: what the generator writes is what the parser reads.
+        const { epl } = generateEPL(withFields([barcodeField({ code39_checkDigit: 'host-verifies' })]));
+        expect((parseEPL(epl).elements[0] as { code39Mode?: string }).code39Mode).toBe('2');
+    });
+
+    it('names the Code 39 printer check digit EPL cannot add', () => {
+        // EPL has no "printer enters the digit" Code 39 type — '3C' is the
+        // host-verified one. The nearest honest form is plain '3', and the
+        // difference is named rather than silent.
+        const { warnings } = generateEPL(withFields([barcodeField({ code39_checkDigit: 'printer-generated' })]));
+        expect(warnings.some(w => /printer add/i.test(w))).toBe(true);
+    });
+
     it('resolves the EAN/UPC letter from the DATA LENGTH', () => {
         const typeOf = (data: string) => eplLines([barcodeField({ symbology: '7', dataSource: { type: 'fixed', data } })])
             .find(l => l.startsWith('B'))!.split(',')[3];

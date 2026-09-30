@@ -226,7 +226,18 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
 
             // The IPL id '7' is "EAN/UPC" and the printer infers the variant
             // from the data length; TSPL spells the variant out in its name.
-            const type = sym === '7' ? tsplEanType(data) : TSPL_BARCODE_FOR[sym];
+            // Code 39's host-verified check digit is type '39C' (manual p. 13);
+            // emitting plain '39' for it dropped the digit in one direction
+            // while the parser reads '39C' back as code39Mode '2'.
+            const code39HostChecked = sym === '0' && field.code39_checkDigit === 'host-verifies';
+            const type = sym === '7' ? tsplEanType(data) : (code39HostChecked ? '39C' : TSPL_BARCODE_FOR[sym]);
+            if (field.code39_checkDigit === 'printer-generated' && sym === '0') {
+                // TSPL has no "printer adds the code" Code 39 type — '39C' is the
+                // host-supplied+verified one. Plain '39' prints the data as given,
+                // so the digit the designer asked the printer to compute is not
+                // added. Named rather than silent.
+                warnings.push(`"${field.name}" asks Code 39 to have the printer add its check digit. TSPL has no such type ('39C' verifies a digit the host supplied), so the bar code prints without it.`);
+            }
             if (!type) {
                 warnings.push(sym === '7'
                     ? `"${field.name}" is an EAN/UPC bar code whose data is ${data.replace(/\D/g, '').length} digits, which is not a length TSPL recognizes (7, 8, 12 or 13). It was left off the label.`
