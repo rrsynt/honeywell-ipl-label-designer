@@ -135,7 +135,7 @@ export const parseZPL = (code: string): ViewerLabel => {
     let rotation = 0;          // ^FW, in IPL quadrants
     let fieldRotation: number | null = null; // a per-command orientation overrides ^FW
     let font: { h: number; w: number } | null = null;
-    let pendingBarcode: { symbology: string; heightDots: number; moduleDots: number; hri: 0 | 1 } | null = null;
+    let pendingBarcode: { symbology: string; heightDots: number; moduleDots: number; hri: 0 | 1; code39Mode?: string } | null = null;
     let byModule = 2;
     let byRatio = 3;           // ^BY wide:narrow, default 3.0
     let byHeight = 10;
@@ -173,6 +173,7 @@ export const parseZPL = (code: string): ViewerLabel => {
                 hri: pendingBarcode.hri,
                 source: { type: 'fixed', data },
             };
+            if (pendingBarcode.code39Mode) el.code39Mode = pendingBarcode.code39Mode;
             // The anchor is derived from the size the RENDERER measures, not an
             // estimate of our own. The two diverging is exactly what put a
             // rotated field's top-left somewhere other than its ^FO point.
@@ -307,6 +308,13 @@ export const parseZPL = (code: string): ViewerLabel => {
                 const heightIdx = isB3 ? 2 : 1;
                 const hriIdx = isB3 ? 3 : 2;
                 const hri: 0 | 1 = (p[hriIdx] ?? 'Y').trim().toUpperCase() === 'N' ? 0 : 1;
+                // ^B3 slot 2 (index 1) is the mod-43 CHECK DIGIT flag. It changes
+                // the symbol — Labelary draws ^B3N,N,... and ^B3N,Y,... at
+                // different ink (3-byte-different PNG, and the bar run gains the
+                // check character) — so it is carried. The earlier note that "slot
+                // 2 changes nothing" was measured by putting a NUMBER there, which
+                // is not a value a Y/N flag can take and so proved nothing.
+                const code39Mode = isB3 && (p[1] ?? '').trim().toUpperCase() === 'Y' ? '1' : undefined;
                 const height = cmd.name === 'BQ' ? matrixMag * 25
                     : cmd.name === 'BX' ? matrixMag * 10
                     : num(p[heightIdx], byHeight);
@@ -316,6 +324,7 @@ export const parseZPL = (code: string): ViewerLabel => {
                     heightDots: Math.max(1, height),
                     moduleDots: Math.max(1, module),
                     hri: cmd.name === 'BQ' || cmd.name === 'BX' ? 0 : hri,
+                    code39Mode,
                 };
                 break;
             }

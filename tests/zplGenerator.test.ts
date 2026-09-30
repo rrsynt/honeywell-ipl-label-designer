@@ -65,6 +65,26 @@ describe('generateZPL', () => {
         expect(el.kind === 'text' && el.source).toEqual({ type: 'fixed', data: '2^3' });
     });
 
+    it('round-trips the Code 39 printer check digit through ^B3 e', () => {
+        // ^B3 is o,e,h,f,g; e is the mod-43 check digit. The generator wrote e=N
+        // always and the parser read the slot as "nothing", so a designer Code 39
+        // with a printer-generated check digit lost it in both directions.
+        const barcode = (ck?: 'none' | 'printer-generated' | 'host-verifies'): Field => ({
+            id: 1, type: 'barcode', name: 'B', x: 10, y: 10, rotation: 0,
+            dataSource: { type: 'fixed', data: 'ABC123' }, symbology: '0', humanReadable: 'none',
+            h_mag: 50, w_mag: 2, code39_checkDigit: ck,
+        } as Field);
+
+        const on = parseZPL(generateZPL(design([barcode('printer-generated')])).zpl).elements[0] as { code39Mode?: string };
+        expect(on.code39Mode, 'e=Y survives to the parser').toBe('1');
+        // Default (no check digit) and host-verify both emit e=N and read back
+        // as no mode — e=Y does not mean "verify".
+        const off = parseZPL(generateZPL(design([barcode()])).zpl).elements[0] as { code39Mode?: string };
+        expect(off.code39Mode).toBeUndefined();
+        const host = parseZPL(generateZPL(design([barcode('host-verifies')])).zpl).elements[0] as { code39Mode?: string };
+        expect(host.code39Mode).toBeUndefined();
+    });
+
     it('keeps a rotated field at the same top-left the designer drew', () => {
         const { zpl } = generateZPL(design([text({ rotation: 90 })]));
         const el = parseZPL(zpl).elements[0];

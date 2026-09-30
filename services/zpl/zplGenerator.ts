@@ -52,9 +52,9 @@ export interface ZplGenerateResult {
  * out with its check-digit mode set from a human-readable flag, and an
  * Interleaved 2 of 5 lost its height to that same slot.
  */
-const ZPL_BARCODE: Record<string, (hri: 'Y' | 'N', height: number) => string> = {
-    // ^B3 o,e,h,f,g — check digit N, then the HRI flag in the HRI slot.
-    '0': (hri) => `^B3N,N,${hri},N,N`,        // Code 39
+const ZPL_BARCODE: Record<string, (hri: 'Y' | 'N', height: number, e: 'Y' | 'N') => string> = {
+    // ^B3 o,e,h,f,g — e is the mod-43 CHECK DIGIT flag, the HRI flag is third.
+    '0': (hri, _height, e) => `^B3N,${e},${hri},N,N`, // Code 39
     // ^B2 o,h,f,g — HRI first, like ^BC.
     '2': (hri) => `^B2N,${hri},N,N,N`,        // Interleaved 2 of 5
     '6': (hri) => `^BCN,${hri},Y,N,N`,        // Code 128
@@ -119,7 +119,10 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
             if (!emit) { warnings.push(`"${field.name}" is barcode type ${field.symbology}, which this ZPL subset cannot draw. It was left off the label.`); continue; }
             const h = dots(box.height);
             const hri = field.humanReadable === 'none' ? 'N' : 'Y';
-            lines.push(`^FO${origin.x},${origin.y}`, `^BY${Math.max(1, field.w_mag)}`, `${emit(hri, h)}^FD${escapeFd(fieldData(field, design))}^FS`);
+            // Code 39's printer-generated check digit is ^B3's e flag. The ZPL
+            // side has no host-verify mode, so 'host-verifies' maps to N.
+            const e: 'Y' | 'N' = field.symbology === '0' && field.code39_checkDigit === 'printer-generated' ? 'Y' : 'N';
+            lines.push(`^FO${origin.x},${origin.y}`, `^BY${Math.max(1, field.w_mag)}`, `${emit(hri, h, e)}^FD${escapeFd(fieldData(field, design))}^FS`);
             continue;
         }
         if (field.type === 'box') {

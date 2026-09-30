@@ -224,14 +224,14 @@ describe('parseZPL', () => {
 //
 //   ^B2 [1] -> height grows  ([2] only moves the HRI row)
 //   ^BC [1] -> height grows  ([2] only moves the HRI row)
-//   ^B3 [1] -> nothing at all (it is the CHECK DIGIT)
+//   ^B3 [1] -> the CHECK DIGIT flag (changes the symbol; not the height)
 //   ^B3 [2] -> height grows
 //
 // ^BC and ^B2 are therefore o,h,f,g while ^B3 is o,e,h,f,g. Reading all three
 // alike took ^BC's and ^B2's HEIGHT for a human-readable flag.
 describe('1D barcode slots differ per command, measured (2026-09-30)', () => {
     const el = (b: string) => parseZPL(`^XA^FO10,10^${b}^FD12345678^FS^XZ`).elements[0] as {
-        heightDots: number; hri: number;
+        heightDots: number; hri: number; code39Mode?: string;
     };
 
     it('reads ^B2 and ^BC height from p[1]', () => {
@@ -247,6 +247,18 @@ describe('1D barcode slots differ per command, measured (2026-09-30)', () => {
         expect(el('B3N,150,N,N,N').heightDots, 'p[1] is the check digit').toBe(10);
         // The HRI flag is p[3] for ^B3, so p[1] must not be read as one.
         expect(el('B3N,150,N,N,N').hri, 'the check digit is not an HRI flag').toBe(0);
+    });
+
+    it('carries ^B3 e=Y as the Code 39 printer check digit', () => {
+        // Labelary draws ^B3N,N,... and ^B3N,Y,... differently — e=Y adds the
+        // mod-43 check character to the symbol — so it cannot be dropped. The
+        // earlier "slot 2 changes nothing" note was measured with a NUMBER in
+        // the slot, which a Y/N flag cannot take and which proved nothing.
+        expect(el('B3N,Y,150,N,N').code39Mode, 'e=Y is the printer check digit').toBe('1');
+        // The control: e=N adds nothing.
+        expect(el('B3N,N,150,N,N').code39Mode).toBeUndefined();
+        // And it is Code 39 only — ^BC's p[1] is a height, never a check mode.
+        expect(el('BCN,150,N,N,N').code39Mode).toBeUndefined();
     });
 
     it('reads ^B2 at all, which it did not before', () => {

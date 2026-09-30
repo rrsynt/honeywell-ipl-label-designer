@@ -165,8 +165,12 @@ export function iplToZpl(iplCode, dpi = 203) {
             const hri = intP(params, 'i', 1) !== 0 ? 'Y' : 'N';
             const [vx, vy] = visualTopLeft(oRaw[0], oRaw[1], f, estW, hDots);
             out.push(`^FO${vx},${vy}`, `^FW${'NREB'[f] ?? 'N'}`, `^BY${wMod},2.5,${hDots}`);
+            // ^B3 is o,e,h,f,g: the second slot is the mod-43 check digit, not
+            // the HRI flag. A Code 39 printer-generated check digit (c0 m=1/4/7)
+            // is e=Y; the old form put the HRI flag in that slot instead.
+            const c39ck = sym === '0' && ['1', '4', '7'].includes(cParts[1]) ? 'Y' : 'N';
             const symCmd = {
-                '0': `^B3N,${hri},N,E`, '1': '^BAN,' + hri + ',N,N',
+                '0': `^B3N,${c39ck},${hri},N,E`, '1': '^BAN,' + hri + ',N,N',
                 '2': `^B2N,${hri},N,N`, '3': '^BNN,' + hri,
                 '4': `^BKN,${hri},N,N`, '5': '^BIN,' + hri,
                 '6': `^BCN,${hri},Y,N,N`,
