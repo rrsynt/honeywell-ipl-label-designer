@@ -121,10 +121,50 @@ export const tokenizeDpl = (source: string, now: Date = new Date()): DplCommand[
         .replace(/<SOH>/gi, '\x01')
         .replace(/<CR>/gi, '\r')
         .replace(/<ESC>/gi, '\x1b')
-        .replace(/<LF>/gi, '\n');
+        .replace(/<LF>/gi, '\n')
+        // The manual's CARET notation, which it defines in as many words: "the
+        // attention-getters (e.g., 'SOH') are standard ASCII control labels
+        // that represent a one character control code (i.e., ^A or Ctrl A)"
+        // (p. 7). Appendix B's ASCII sample program is written entirely that
+        // way — `^BL`, `H07`, `D11` — and without this the caret was read as a
+        // label command and reported as unsupported.
+        //
+        // Expanded across `^@` to `^_` so nothing is left behind: an unexpanded
+        // caret would print as a stray glyph, and the one in `^L` was exactly
+        // the "label command '^' is not part of the supported subset" message
+        // this removes. A `^` before anything else is left as itself.
+        .replace(/\^(.)/g, (whole, ch: string) => {
+            const n = ch.charCodeAt(0);
+            return n >= 0x40 && n <= 0x5f ? String.fromCharCode(n - 0x40) : whole;
+        });
+    // The alternate control codes, where `~` (0x7E) is the attention-getter in
+    // place of STX and `^` (0x5E) replaces SOH. Appendix B's VB sample sends a
+    // whole label built this way — `CharSet = Chr$(126)  'Alternate <stx>
+    // character ~` — and Appendix M "(CC) Control Codes" defines the switch:
+    // value 1 is "Hex 5E = SOH command; Hex 7E = STX command", value S the
+    // standard pair.
+    //
+    // The `~` form is honoured whether or not the stream announces it. A printer
+    // is put into alternate mode by its own menu as often as by the command, and
+    // the sample above never sends one — so requiring it would fail the manual's
+    // own example. SOH needs no equivalent: nothing in this parser acts on an
+    // immediate command, so the `^` spelling can be treated as notation.
+    //
+    // A switch is detected by SHAPE rather than by the command, because the
+    // command cannot be relied on to be present: a printer is put into
+    // alternate mode by its own menu as often as by `<STX>CC1`, and Appendix
+    // B's sample never sends one. What distinguishes the two is that an
+    // attention-getter OPENS a line and is followed by a command letter — so
+    // `~L` enters formatting while a `~` inside a data field is just a
+    // character, and a stream that never uses the prefix has no such line at
+    // all. Requiring the absence of `<STX>` would have missed the manual's own
+    // shape, where the `<STX>CC1` announcing the switch is itself a plain
+    // attention-getter on its own line.
+    const alternate = /(^|[\r\n])~[A-Za-z]/.test(text);
+    const stxChar = alternate ? '~' : '\x02';
     for (const line of text.split(/\r\n|\r|\n/)) {
         if (line === '') continue;
-        const parts = line.split('\x02');
+        const parts = line.split(stxChar);
 
         // Everything before the first attention-getter is the record. An empty
         // head means the attention-getter opened the line, which makes it a
@@ -529,7 +569,10 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                 for (; cursor < cmds.length; cursor++) {
                     const next = cmds[cursor];
                     if (next.name !== '') break;
-                    const line = next.params.trim().toUpperCase();
+                    // A stray attention-getter off the end of a dot row is not
+                    // data — the manual can only mean it as a terminator, since
+                    // it is not a hex digit.
+                    const line = next.params.trim().replace(/^[~^]/, '').toUpperCase();
                     if (line === 'FFFF') break;
                     // `80nndd…d` — the leading 80 is fixed, nn is the pair count.
                     if (!/^80[0-9A-F]{2}/.test(line)) break;
@@ -564,6 +607,14 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                 ci = cursor - 1;
                 continue;
             }
+            // "(CC) Control Codes - This command, depending upon printer type,
+            // allows a change to the prefix of the software commands
+            // interpreted by the printer" (Appendix M). It is acted on by the
+            // tokenizer, which has to know the prefix before it can split
+            // anything, so by the time it reaches here the switch has already
+            // been applied — and leaving it to the unknown-command report would
+            // name a command the parser does understand.
+            if (letter === 'C' && /^C[12S]$/i.test(cmd.params)) continue;
             if (letter === 'L') { inFormat = true; continue; }
             if (letter === 'm') { metric = true; continue; }
             if (letter === 'n') { metric = false; continue; }
@@ -586,6 +637,14 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                 `DPL system-level command "${letter}" is not part of the supported subset; it has no effect on the preview.`, letter);
             continue;
         }
+
+        // The switch that turns on the ALTERNATE prefix. A stream announces it
+        // with the standard `<STX>CC1` and then goes on using `~` — which is
+        // what the manual describes and what its own VB sample does. Splitting
+        // on `~` leaves that opening sigil inside the text, so the line arrives
+        // as `\x02CC1` and was reported as an unknown label command, naming a
+        // defect in a stream that is doing exactly what it should.
+        if (/^\x02?CC[12S]$/i.test(cmd.params.trim())) continue;
 
         let line = cmd.params;
         // Advanced format attributes can also trail a record on its own line —

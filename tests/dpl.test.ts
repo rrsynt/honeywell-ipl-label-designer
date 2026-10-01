@@ -928,6 +928,78 @@ describe('DPL images (<STX>I p.20 and Table 8-11)', () => {
     });
 });
 
+describe('DPL Appendix B: the manual\'s own programs, end to end', () => {
+    // There is no oracle for DPL — Labelary refuses it as input — so these
+    // worked examples are the closest thing available to a reference, and they
+    // are read as a corpus rather than one at a time.
+
+    it('Figure B-1 parses the same whether written in caret notation or bytes', () => {
+        // The manual gives this one label twice. The ASCII file form uses the
+        // CARET notation it defines on p. 7 — "the attention-getters ... (i.e.,
+        // ^A or Ctrl A)" — and the C program sends the byte. Both must produce
+        // the same two fields; before the caret was expanded, `^BL` was read as
+        // a label command named "^" and the format never opened.
+        const ascii = '^BL\rH07\rD11\r19110080100002510K OHM 1/4 WATT\r1a6210000000050590PCS\rE\r';
+        const bytes = '\x02L\rH07\rD11\r19110801000002510K OHM 1/4 WATT\r1a6210000000050 590PCS\rE\r';
+        const shape = (src: string) =>
+            parseDPL(src, PAGE).elements.map(e => `${e.kind}:${(e as any).source?.data}`);
+        expect(shape(ascii)).toHaveLength(2);
+        expect(shape(ascii)).toEqual(shape(bytes));
+        expect(shape(ascii)[0]).toContain('10K OHM 1/4 WATT');
+        expect(shape(ascii)[1]).toContain('590PCS');
+    });
+
+    it('sends no noise for either spelling', () => {
+        for (const src of ['^BL\rH07\rD11\r191100801000025X\r1a6210000000050Y\rE\r',
+                           '\x02L\rH07\rD11\r191108010000025X\r1a6210000000050 Y\rE\r']) {
+            const codes = parseDPL(src, PAGE).issues.map(i => i.code);
+            expect(codes, src).not.toContain('dpl-command');
+            expect(codes, src).not.toContain('dpl-record');
+            expect(codes, src).not.toContain('dpl-system-command');
+        }
+    });
+
+    it('reads the VB application, which is built entirely from the ~ prefix', () => {
+        // "CharSet = Chr$(126) `Alternate <stx> character ~" — and the program
+        // never sends <STX>CC1, because that printer was put into alternate
+        // mode by its menu. So the `~` form has to be honoured on its own,
+        // which is why the switch is detected by shape and not by the command.
+        const V = '~';
+        const label = (s: string) => [
+            `${s}L`, 'D11', '1Y3300004750010SLANT1', '19110070415001012345',
+            '1a620500420012012345', '191100603600010ACME CORP', '191100303400010Item #',
+            '191100303400250Quantity', '1X1100003050240B065035002002', 'E',
+        ].join('\r') + '\r';
+        const alt = parseDPL(`${V}CC1\r${label(V)}`, PAGE);
+        const std = parseDPL(label('\x02'), PAGE);
+        const shape = (lab: typeof alt) =>
+            lab.elements.map(e => `${e.kind}:${(e as any).source?.data ?? ''}`);
+        expect(shape(alt), 'the alternate form draws the whole label').toHaveLength(7);
+        expect(shape(alt), 'and draws it exactly as the standard form does').toEqual(shape(std));
+        expect(shape(alt)).toContain('text:ACME CORP');
+        expect(shape(alt)).toContain('barcode:12345');
+        expect(shape(alt)).toContain('box:');
+        // The one thing it prints is the image it never loads, which is named.
+        expect(alt.issues.map(i => i.code)).toContain('dpl-image-missing');
+        expect(alt.issues.map(i => i.code), 'the CC1 switch is not an unknown command')
+            .not.toContain('dpl-command');
+    });
+
+    it('leaves a caret that is not notation alone', () => {
+        // `^` before an uppercase letter at or after `@` IS the notation — `^B`
+        // is the byte 0x02, and a stream writing `A^B` is sending an
+        // attention-getter, not a caret. What must survive is a caret that
+        // denotes nothing, and the label really prints one.
+        expect((parseDPL('\x02L\r141100001000100cost^5\rE\r', PAGE).elements[0] as any).source.data)
+            .toBe('cost^5');
+        expect((parseDPL('\x02L\r14110000100010060% ^\rE\r', PAGE).elements[0] as any).source.data)
+            .toBe('60% ^');
+        // and the notation really does expand, in data as well as at the start
+        expect((parseDPL('\x02L\r141100001000100A^B\rE\r', PAGE).elements[0] as any).source.data)
+            .toBe('A');
+    });
+});
+
 describe('DPL tables are complete against the manual', () => {
     it('every letter the manual lists is present', () => {
         // Appendix F Table F-1 lists these single-letter ids; a gap would make
