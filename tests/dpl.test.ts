@@ -1149,6 +1149,50 @@ describe('DPL EAN/UPC variants and the price checksum (Appendix F/G/P)', () => {
     });
 });
 
+describe('DPL configuration that MOVES the image (<STX>Kc, Appendix K)', () => {
+    const msgFor = (cmd: string) =>
+        parseDPL(`\x02L\r\x02${cmd}\r141100001000100HI\rE\r`, PAGE).issues[0];
+
+    it('names a fine tune that shifts the printed image', () => {
+        // Appendix K: "CF, Column Adjust Fine Tune — shifting both the
+        // horizontal start of print position and the Label Width termination
+        // point to the right in dots"; "RF, Row Adjust Fine Tune — shifts the
+        // vertical start of print position in dots upward or downward". Both
+        // exist so that "multiple printers share label formats", so a stream
+        // may carry one — and the generic "has no effect on the preview" is
+        // untrue for them, because the label really does move.
+        const cf = msgFor('KcCF100');
+        expect(cf?.code).toBe('dpl-config-shift');
+        expect(cf?.message).toContain('HORIZONTALLY');
+        expect(cf?.message).toContain('100');
+        const rf = msgFor('KcRF-20');
+        expect(rf?.code).toBe('dpl-config-shift');
+        expect(rf?.message).toContain('VERTICALLY');
+    });
+
+    it('reads several parameters off one command', () => {
+        // "<STX>Kcaa1val1[;aaIvalI][;aanvaln]" — the manual's own sample is
+        // "KcPA120;CL600;STC", so a shift is rarely alone.
+        const both = msgFor('KcCF12;RF-8');
+        expect(both?.code).toBe('dpl-config-shift');
+        expect(both?.message).toContain('KcCF');
+        expect(both?.message).toContain('KcRF');
+        // and each value is the one that belongs to its own name
+        expect(both?.message).toContain('12 dots');
+        expect(both?.message).toContain('-8 dots');
+    });
+
+    it('leaves configuration that does NOT move the image to the generic report', () => {
+        // The serial-port sample from Appendix J, whose values are LETTERS —
+        // a regex that read any two letters plus digits would misreport it.
+        for (const cmd of ['KcSPAPB;SPApN;SPAD8;SPAS1;SPAB19', 'KcPA120;CL600;STC', 'KcCL600']) {
+            const i = msgFor(cmd);
+            expect(i?.code, cmd).toBe('dpl-system-command');
+            expect(i?.message, cmd).not.toContain('shifts');
+        }
+    });
+});
+
 describe('DPL symbol sets (Appendix I Tables I-1 and I-2)', () => {
     const msgFor = (cmd: string) =>
         parseDPL(`\x02L\r${cmd}\r141100001000100HI\rE\r`, PAGE).issues[0]?.message ?? '';

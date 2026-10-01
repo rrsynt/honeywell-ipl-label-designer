@@ -690,6 +690,43 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
             // been applied — and leaving it to the unknown-command report would
             // name a command the parser does understand.
             if (letter === 'C' && /^C[12S]$/i.test(cmd.params)) continue;
+            // <STX>Kc — "Configuration Set", the menu's settings over the wire:
+            // "<STX>Kcaa1val1[;aaIvalI][;aanvaln]", with two-letter parameter
+            // names (p. 42). Most of it is printer setup the preview has no
+            // opinion about, but two parameters MOVE the printed image and
+            // would otherwise reach the generic "has no effect on the preview",
+            // which for them is untrue:
+            //
+            //   CF, Column Adjust Fine Tune — "shifting both the horizontal
+            //       start of print position and the Label Width termination
+            //       point to the right in dots"
+            //   RF, Row Adjust Fine Tune — "shifts the vertical start of print
+            //       position in dots upward or downward"
+            //
+            // Both exist "to compensate for slight mechanical differences
+            // sometimes evident if multiple printers share label formats", so a
+            // stream may well carry one, and a preview that ignores it draws the
+            // label at an origin the printer will not use.
+            if (letter === 'K' && /^c/i.test(cmd.params)) {
+                const shifts: string[] = [];
+                for (const m of cmd.params.slice(1).matchAll(/([A-Za-z]{2})(-?\d+)/g)) {
+                    const name = m[1].toUpperCase();
+                    const what = name === 'CF' ? 'shifts the printed image HORIZONTALLY'
+                        : name === 'RF' ? 'shifts the printed image VERTICALLY'
+                            : name === 'CO' ? 'shifts the column offset'
+                                : name === 'PJ' ? 'shifts the present position'
+                                    : null;
+                    if (what) shifts.push(`Kc${name} ${what} by ${m[2]} dots`);
+                }
+                if (shifts.length > 0) {
+                    issue('info', 'dpl-config-shift',
+                        `${shifts.join('; ')}. The preview draws the label at its own origin, so the printed label will sit at a different position on the media.`, 'Kc');
+                } else {
+                    issue('info', 'dpl-system-command',
+                        'DPL system-level command "Kc" sets printer configuration; it has no effect on the preview.', letter);
+                }
+                continue;
+            }
             if (letter === 'L') { inFormat = true; continue; }
             if (letter === 'm') { metric = true; continue; }
             if (letter === 'n') { metric = false; continue; }
