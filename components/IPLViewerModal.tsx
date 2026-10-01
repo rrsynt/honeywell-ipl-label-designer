@@ -331,7 +331,16 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
             // has to be supplied. The manual "Paper mm" control is the only
             // place a person can give it — the same control, and the same gap,
             // the IPL parser has for its page height.
-            : language === 'dpl' ? parseDPL(debouncedCode, paperMm && paperMm.h > 0 ? Math.round(paperMm.h / 25.4 * dpi) : undefined)
+            : language === 'dpl' ? parseDPL(
+                debouncedCode,
+                paperMm && paperMm.h > 0 ? Math.round(paperMm.h / 25.4 * dpi) : undefined,
+                undefined,
+                // The resolution decides how many dots an inch of DPL becomes.
+                // Without it every bar code, box and polygon is sized for a
+                // 203 dpi machine whatever the reader has selected — a `eee=040`
+                // bar code drew 81 dots at 300 dpi where its 0.40 in is 120.
+                dpi,
+            )
             : parseViewerIPL(debouncedCode, {
                 model: driverModel || undefined,
                 dpi,

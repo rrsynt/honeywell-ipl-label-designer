@@ -1149,6 +1149,54 @@ describe('DPL EAN/UPC variants and the price checksum (Appendix F/G/P)', () => {
     });
 });
 
+describe('DPL resolutions (Appendix K, p. 240)', () => {
+    it('sizes an inch of DPL by the printer\'s resolution, not a constant', () => {
+        // Every DPL measurement is a physical distance in hundredths of an
+        // inch, so the dots it becomes depend on the machine — Appendix K lists
+        // each model's dpi — and the parser had a literal 203 at every call
+        // site. It was invisible while the PAGE also came through the same
+        // function, because both scaled together and the layout stayed right,
+        // but every bar code and box was sized for a 203 dpi printer. Measured:
+        // a `eee=040` bar code drew 81 dots at 300 dpi, where its 0.40 in is
+        // 120 — a third too short.
+        const barAt = (dpi: number) => {
+            const page = Math.round(100 / 25.4 * dpi);
+            const rec = '1A1104000' + '020' + '0020' + 'X';
+            return (parseDPL(`\x02L\r${rec}\rE\r`, page, new Date(), dpi).elements[0] as any).heightDots;
+        };
+        expect(barAt(203), '0.40 in at 203 dpi').toBe(81);
+        expect(barAt(300), '0.40 in at 300 dpi').toBe(120);
+        expect(barAt(406)).toBe(162);
+        expect(barAt(600)).toBe(240);
+    });
+
+    it('leaves the default at 203 dpi', () => {
+        // The viewer always passes its selection, but a caller that does not —
+        // a test, the cross-check tool — must keep the old behaviour exactly.
+        const rec = '1A1104000' + '020' + '0020' + 'X';
+        const el = parseDPL(`\x02L\r${rec}\rE\r`, 799).elements[0] as any;
+        expect(el.heightDots).toBe(81);
+    });
+
+    it('scales a position with the resolution too', () => {
+        // A row is in the same hundredths-of-an-inch units as a height, so one
+        // inch up from home stays one inch up whatever the printer: `ffff` is
+        // 0100 in every case, and the dots it lands at follow the dpi.
+        // Layout: a b c d (4) + eee (3) + ffff (4) + gggg (4) = 15, then data.
+        const dotsForRow = (dpi: number) => {
+            const page = Math.round(200 / 25.4 * dpi);
+            const rec = '1411' + '000' + '0100' + '0100' + 'HI';
+            const el = parseDPL(`\x02L\r${rec}\rE\r`, page, new Date(), dpi).elements[0] as any;
+            return page - el.oy;
+        };
+        for (const dpi of [203, 300, 600]) {
+            // the height of the text is subtracted too, so compare the step
+            // between two rows rather than the absolute position
+            expect(dotsForRow(dpi), `dpi ${dpi}`).toBeGreaterThan(dpi * 0.9);
+        }
+    });
+});
+
 describe('DPL configuration that MOVES the image (<STX>Kc, Appendix K)', () => {
     const msgFor = (cmd: string) =>
         parseDPL(`\x02L\r\x02${cmd}\r141100001000100HI\rE\r`, PAGE).issues[0];

@@ -398,7 +398,12 @@ interface PendingShape {
  * size passes it; without it the rows are placed against the content's own
  * extent, which is exact whenever some field already sits at the label's top.
  */
-export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new Date()): ViewerLabel => {
+export const parseDPL = (
+    code: string,
+    labelLengthDots?: number,
+    now: Date = new Date(),
+    dpiHint = 203,
+): ViewerLabel => {
     const issues: ViewerIssue[] = [];
     const elements: ViewerElement[] = [];
     let nextId = 1;
@@ -576,8 +581,20 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
      */
     const globalRegisters: string[] = [];
 
-    /** DPL position units -> dots. Hundredths of an inch, or tenths of a mm. */
-    const positionToDots = (units: number, dpi: number): number =>
+    /**
+     * DPL position units -> dots. Hundredths of an inch, or tenths of a mm.
+     *
+     * The resolution is the CALLER'S, not a constant. Every measurement in DPL
+     * is a physical distance in hundredths of an inch, so the dots it becomes
+     * depend on the printer: "0.40" is 81 dots at 203 dpi and 120 at 300. This
+     * function used to be passed a literal 203 at all thirteen call sites,
+     * which was invisible while the page height came through it too — both
+     * scaled together and the LAYOUT stayed right — but left every bar code,
+     * box, polygon and circle sized for a 203 dpi machine. Measured: a `eee=040`
+     * bar code drew 81 dots at 300 dpi where the inch it names is 120, so every
+     * symbol was a third too short.
+     */
+    const positionToDots = (units: number, dpi: number = dpiHint): number =>
         metric ? (units / 10) * (dpi / 25.4) : (units / 100) * dpi;
 
     const cmds = tokenizeDpl(code, now);
@@ -1042,8 +1059,8 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
             }
         }
 
-        const row = positionToDots(num(ffff, 0) + rowOffset, 203);
-        const col = positionToDots(num(gggg, 0) + columnOffset, 203);
+        const row = positionToDots(num(ffff, 0) + rowOffset);
+        const col = positionToDots(num(gggg, 0) + columnOffset);
         const rot = quadrantFromDpl(rotationDigit);
 
         // A <STX>S following this record replaces its data with a global
@@ -1096,11 +1113,11 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
             const w = num(shape.slice(1, 1 + wLen), 0);
             const h = num(shape.slice(1 + wLen, 1 + wLen + hLen), 0);
             if (head === 'L' || head === 'l') {
-                pendingShape = { kind: 'line', widthDots: positionToDots(w, 203), heightDots: positionToDots(h, 203), thicknessDots: Math.max(1, dotHeight) };
+                pendingShape = { kind: 'line', widthDots: positionToDots(w), heightDots: positionToDots(h), thicknessDots: Math.max(1, dotHeight) };
             } else if (head === 'B' || head === 'b') {
                 const tIdx = 1 + wLen + hLen;
                 const top = num(shape.slice(tIdx, tIdx + wLen), 1);
-                pendingShape = { kind: 'box', widthDots: positionToDots(w, 203), heightDots: positionToDots(h, 203), thicknessDots: Math.max(1, positionToDots(top, 203)) };
+                pendingShape = { kind: 'box', widthDots: positionToDots(w), heightDots: positionToDots(h), thicknessDots: Math.max(1, positionToDots(top)) };
             } else if (head === 'C' || head === 'c') {
                 // "1 X 11 fff rrrr cccc C ppp bbbb rrrr" (Table 8-14, p. 141).
                 //
@@ -1125,7 +1142,7 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                 if (radius <= 0) {
                     issue('warning', 'dpl-circle-radius', 'A circle record has a radius of zero, so there is nothing to draw.', 'X');
                 } else {
-                    const d = positionToDots(radius, 203);
+                    const d = positionToDots(radius);
                     pendingShape = {
                         kind: 'circle',
                         widthDots: d * 2,
@@ -1134,7 +1151,7 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                         fillPattern: fill,
                         // The centre, not a corner: the record names the point
                         // the circle is drawn around.
-                        centre: { row: positionToDots(cRow, 203), col: positionToDots(cCol, 203) },
+                        centre: { row: positionToDots(cRow), col: positionToDots(cCol) },
                     };
                 }
             } else if (head === 'P') {
@@ -1175,8 +1192,8 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                         thicknessDots: 1,
                         fillPattern: fill,
                         points: points.map(p => ({
-                            row: positionToDots(p.row + rowOffset, 203),
-                            col: positionToDots(p.col + columnOffset, 203),
+                            row: positionToDots(p.row + rowOffset),
+                            col: positionToDots(p.col + columnOffset),
                         })),
                     };
                 }
@@ -1256,7 +1273,7 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
             // appendix is written, so reading it as zero drew each of them as a
             // one-dot line.
             const heightDots = (num(eee, 0) > 0
-                ? Math.max(1, Math.round(positionToDots(num(eee, 0), 203)))
+                ? Math.max(1, Math.round(positionToDots(num(eee, 0))))
                 : dplDefaultHeightDots(bField)) * barMagnification;
             const wideDots = dplMultiplierValue(cChar);
             const narrowDots = dplMultiplierValue(dChar);
@@ -1463,7 +1480,7 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
     // content already spans the page.
     let contentMaxRow = 0;
     for (const el of elements) {
-        const sz = estimateElementSize(el, 203);
+        const sz = estimateElementSize(el, dpiHint);
         contentMaxRow = Math.max(contentMaxRow, el.oy + sz.crossDots);
     }
     // DPL states no label WIDTH in the stream at all, and its one length
@@ -1472,7 +1489,7 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
     // label length", so treating it as the page height would draw every label
     // two to three times too tall.
     const statedDots = continuousLengthUnits && continuousLengthUnits > 0
-        ? Math.ceil(positionToDots(continuousLengthUnits, 203))
+        ? Math.ceil(positionToDots(continuousLengthUnits))
         : 0;
     const supplied = labelLengthDots && labelLengthDots > 0 ? Math.round(labelLengthDots) : 0;
     // The page height has to be an INDEPENDENT fact. Deriving it from the
@@ -1496,7 +1513,7 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
     // height AND the object's own height subtracted — without that second part
     // every field sits one object-height too low.
     const flipped: ViewerElement[] = elements.map((el) => {
-        const sz = estimateElementSize(el, 203);
+        const sz = estimateElementSize(el, dpiHint);
         const moved = { ...el, oy: Math.max(0, pageDots - el.oy - sz.crossDots) };
         // A polygon's vertices and a circle's centre are ABSOLUTE, in the
         // printer's own counting-up rows, so they need the same flip the origin
@@ -1522,7 +1539,7 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
     // page, which is the same element TSPL's REVERSE and ZPL's ^FR use.
     if (currentAttribute === 5 && flipped.length > 0) {
         const maxX = flipped.reduce((m, el) => {
-            const sz = estimateElementSize(el, 203);
+            const sz = estimateElementSize(el, dpiHint);
             return Math.max(m, el.ox + sz.lengthDots);
         }, 0);
         issue('info', 'dpl-inverse-mode',
