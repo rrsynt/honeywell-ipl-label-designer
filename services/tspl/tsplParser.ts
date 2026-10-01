@@ -1409,9 +1409,6 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 } else if (cmd.name === 'TLC39') {
                     issue('info', 'tspl-tlc39-unsupported',
                         'TLC39 is a composite symbol — Code 39 carrying a MicroPDF417 (manual p. 44) — and no encoder here produces that pairing, so it is not drawn.', 'TLC39');
-                } else if (cmd.name === 'BLOCK') {
-                    issue('info', 'tspl-block-unsupported',
-                        'BLOCK lays a paragraph out inside a width/height box, wrapping and aligning the text to fit (manual p. 80). This preview draws single-line TEXT fields, so the paragraph is not laid out.', 'BLOCK');
                 } else {
                     issue('info', 'tspl-unsupported', `${cmd.name} is not part of the supported TSPL subset, so it has no effect here.`, cmd.name);
                 }

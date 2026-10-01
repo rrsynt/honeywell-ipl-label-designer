@@ -1305,3 +1305,27 @@ describe('TSPL MPDF417 reads Cn, the column count (2026-09-30)', () => {
         expect(e.heightDots, 'H12').toBe(12);
     });
 });
+
+describe('BLOCK is drawn, and no dead branch may claim otherwise', () => {
+    // A stale claim survived here for exactly as long as it took someone to
+    // believe it: the default branch of the command dispatcher still said BLOCK
+    // "lays a paragraph out inside a width/height box ... this preview draws
+    // single-line TEXT fields, so the paragraph is not laid out" — while the
+    // command had its own `case` and had been drawing since e1ee7af. That is
+    // the same class of false signpost that kept ^GS "unsupported" long after
+    // its reason expired, so it is worth a test with teeth.
+    it('draws a wrapped paragraph and reports nothing', () => {
+        const lab = parseTSPL('SIZE 60 mm,40 mm\nGAP 2 mm,0\nBLOCK 10,10,40,20,"2",0,1,1,"hello world this wraps"\nPRINT 1,1');
+        expect(lab.elements.filter(e => e.kind === 'text'), 'BLOCK draws').toHaveLength(1);
+        // and NOT the claim that it does not
+        expect(lab.issues.map(i => i.code)).not.toContain('tspl-block-unsupported');
+    });
+
+    it('has no unreachable branch claiming it is unsupported', () => {
+        // The type check cannot see an unreachable `else if`, so the source is
+        // read: a claim that can never fire is worse than no claim, because it
+        // is read as documentation.
+        const src = readFileSync(join(__dirname, '..', 'services', 'tspl', 'tsplParser.ts'), 'utf8');
+        expect(src, 'the dead BLOCK claim must be gone').not.toContain('tspl-block-unsupported');
+    });
+});
