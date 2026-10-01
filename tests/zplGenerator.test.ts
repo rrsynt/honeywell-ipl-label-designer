@@ -152,13 +152,34 @@ describe('generateZPL', () => {
         expect([box.kind === 'box' && box.widthDots, box.kind === 'box' && box.heightDots]).toEqual([160, 80]);
     });
 
-    it('warns about a field type it cannot represent and still emits the rest', () => {
+    it('DRAWS an ellipse rather than warning about it', () => {
+        // This used to assert the opposite — that an ellipse was named as
+        // unsupported and left off the label. The ZPL PARSER had drawn ^GE
+        // since 6dadfb9 (its parameter order settled by probing Labelary); the
+        // generator simply never emitted it, so the test was pinning a gap
+        // that only existed on one side of the same language.
         const fields: Field[] = [
             text(),
             { id: 2, type: 'ellipse', name: 'E', x: 0, y: 0, rotation: 0, width: 10, height: 10, thickness: 1 } as Field,
         ];
         const { zpl, warnings } = generateZPL(design(fields));
-        expect(warnings.some(w => w.includes('"E"') && w.includes('ellipse'))).toBe(true);
+        expect(warnings.filter(w => w.includes('ellipse'))).toEqual([]);
+        expect(zpl).toContain('^GE');
+        // and it round-trips: the parser reads back the shape the generator wrote
+        const kinds = parseZPL(zpl).elements.map(e => e.kind);
+        expect(kinds).toContain('text');
+        expect(kinds).toContain('ellipse');
+    });
+
+    it('still warns for a shape no ZPL command expresses', () => {
+        // A polygon is genuinely outside the language — ZPL has no free-point
+        // outline — so the warning has to survive for it.
+        const fields: Field[] = [
+            text(),
+            { id: 2, type: 'polygon', name: 'P', x: 0, y: 0, rotation: 0, width: 20, height: 20, sides: 5, radius: 10, thickness: 1 } as unknown as Field,
+        ];
+        const { zpl, warnings } = generateZPL(design(fields));
+        expect(warnings.some(w => w.includes('"P"') && w.includes('polygon'))).toBe(true);
         expect(parseZPL(zpl).elements).toHaveLength(1);
     });
 

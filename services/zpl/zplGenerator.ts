@@ -172,6 +172,23 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
             lines.push(`^FO${origin.x},${origin.y}`, `^GB${vertical ? t : len},${vertical ? len : t},${t}^FS`);
             continue;
         }
+        if (field.type === 'ellipse') {
+            // ^GE w,h,t, one command for both shapes. The PARSER has drawn ^GE
+            // since 6dadfb9 — probing it against Labelary settled the parameter
+            // order — but the generator never emitted it, so the designer's
+            // ellipse was told "ZPL output does not support yet" by the very
+            // language whose parser already understood it.
+            //
+            // A circle states both axes as its diameter, which is what ^GE
+            // takes anyway; ^GC would also work and the parser reads both into
+            // the same element, so either round-trips.
+            const w = dots(field.width);
+            const h = dots(field.height);
+            const t = Math.max(1, dots(field.thickness));
+            lines.push(`^FO${origin.x},${origin.y}`, `^GE${w},${h},${t}^FS`);
+            continue;
+        }
+
         warnings.push(`"${field.name}" is a ${field.type}, which ZPL output does not support yet. It was left off the label.`);
     }
 

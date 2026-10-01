@@ -1461,3 +1461,49 @@ describe('DPL tables are complete against the manual', () => {
         }
     });
 });
+
+describe('DPL generator: the circle the parser already understood', () => {
+    // The parser has drawn DPL's circle record since 7011cd4 — Table 8-14, the
+    // centre in the header and one radius in the data. The GENERATOR never
+    // emitted one, so a designer ellipse warned "DPL output does not support
+    // yet" about a language whose parser drew it. The two sides of a language
+    // drifting apart is the shape method-generator-parser-asymmetry describes.
+    const one = (f: Record<string, unknown>): Design => ({
+        name: 'P', labelSettings: { width: 80, height: 50, columns: 1, rows: 1, unit: 'mm', orientation: 'portrait' },
+        printerSettings: { model: 'PD43', dpi: 203, quantity: 1, mediaType: 'direct-thermal', mediaSenseMode: 'gap', printSpeed: 6, darkness: 10 },
+        fields: [f as never], dataSources: [], nextId: 2, guides: { horizontal: [], vertical: [] },
+    });
+    const circle = { id: 1, type: 'ellipse', name: 'E', x: 10, y: 10, rotation: 0, width: 20, height: 20, thickness: 1, visible: true };
+
+    it('emits a circle record shaped like the manual\'s own sample', () => {
+        // Manual Table 8-14: "1 X 11 fff rrrr cccc C ppp bbbb rrrr". With the
+        // spaces removed its example is `1X1100001000100C00100010025` — so the
+        // data field is `C` + fill(3) + a FIXED 0001(4) + radius(4). Emitting
+        // `C000` + radius left the radius three characters short and the record
+        // would not read back.
+        const rec = generateDPL(one(circle)).dpl.split('\r').find(l => l.includes('C000'));
+        expect(rec, 'a circle record is emitted').toBeDefined();
+        expect(rec).toHaveLength(27);
+        expect(rec!.slice(15, 16), 'the data field starts with C').toBe('C');
+        expect(rec!.slice(16, 19), 'fill pattern').toBe('000');
+        expect(rec!.slice(19, 23), 'the fixed 0001').toBe('0001');
+        // radius = half of 20 mm, in hundredths of an inch
+        expect(rec!.slice(23)).toBe('0040');
+    });
+
+    it('round-trips: the parser reads back an equal-sided ellipse', () => {
+        const back = parseDPL(generateDPL(one(circle)).dpl, 1200);
+        const el = back.elements.find(e => e.kind === 'ellipse') as { widthDots: number; heightDots: number } | undefined;
+        expect(el, 'DPL sends a circle, the parser draws one').toBeDefined();
+        expect(el!.widthDots).toBe(el!.heightDots);
+        expect(el!.widthDots).toBeGreaterThan(100);
+    });
+
+    it('prints an ellipse as a circle of the smaller axis, and says so', () => {
+        // A DPL circle carries ONE radius, so two axes cannot be expressed.
+        // Printing a circle and saying nothing would be a wrong shape drawn
+        // without comment; printing nothing would be a silent drop.
+        const r = generateDPL(one({ ...circle, width: 20, height: 10 }));
+        expect(r.warnings.some(w => w.includes('ellipse') && w.includes('smaller axis'))).toBe(true);
+    });
+});

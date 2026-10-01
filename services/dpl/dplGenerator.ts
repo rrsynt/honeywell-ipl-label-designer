@@ -168,6 +168,36 @@ export const generateDPL = (design: Design): DplGenerateResult => {
             continue;
         }
 
+        if (field.type === 'ellipse') {
+            // Only a CIRCLE can be written. DPL's circle record — "1 X 11 fff
+            // rrrr cccc C ppp bbbb rrrr", Table 8-14 — carries ONE radius and
+            // has no way to state two axes, which is why the PARSER already
+            // maps it to an equal-axis ellipse. The gap was on this side: the
+            // parser drew a circle DPL sends, and the generator never sent one.
+            //
+            // An ellipse is therefore printed as a circle of the smaller axis
+            // and the difference is NAMED — a wrong shape drawn without comment
+            // is the failure mode this project exists to prevent.
+            const w = Math.round((field.width / 25.4) * 100);
+            const h = Math.round((field.height / 25.4) * 100);
+            if (w !== h) {
+                warnings.push(`"${field.name}" is an ellipse, but a DPL circle carries a single radius, so it prints as a circle of its smaller axis.`);
+            }
+            const r = Math.max(1, Math.round(Math.min(w, h) / 2));
+            // The header's ffff/gggg are the CENTRE, not a corner: the parser
+            // reads them that way, and every manual sample agrees.
+            const cy = rowFor(field.y + field.height / 2);
+            const cx = colFor(field.x + field.width / 2);
+            // Data field: `C` + fill pattern + a FIXED `0001` + the radius.
+            // The manual's own sample, spaces removed, is
+            // `1X1100001000100C00100010025` — `C` `001` `0001` `0025` — and the
+            // parser takes the radius as `body.slice(7, 11)` for exactly that
+            // reason. Emitting `C000` + radius left the radius three characters
+            // short, and a round-trip came back with none.
+            lines.push(`1X11000${String(cy).padStart(4, '0')}${String(cx).padStart(4, '0')}C0000001${String(r).padStart(4, '0')}`);
+            continue;
+        }
+
         if (field.type === 'line') {
             const vertical = field.rotation === 90 || field.rotation === 270;
             const len = Math.round((field.length / 25.4) * 100);
