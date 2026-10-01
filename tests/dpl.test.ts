@@ -601,6 +601,122 @@ describe('DPL global registers and <STX>S (manual p. 114 and p. 126)', () => {
         expect(lab.elements, 'a bare S does not eat the record').toHaveLength(1);
         expect(lab.issues.map(i => i.code)).not.toContain('dpl-global-recall');
     });
+
+    it('finds the record a recall fills even with a command between them', () => {
+        // The record is the nearest one BEFORE the sigil, not necessarily the
+        // token immediately before it. `J`, `R` and `C` are toggles commonly
+        // written on a line of their own, and requiring strict adjacency made
+        // the pairing fail — the recall then fell through to the system-level
+        // Set Feed Speed reading, and the record drew its placeholder with no
+        // recall issue and no warning at all.
+        const lab = parseDPL(
+            '\x02L\r121100000000000Testing\rG\r1A2210001000000\rJC\r\x02SA\rE\r', PAGE);
+        expect(lab.issues.map(i => i.code), 'the recall must still be recognised').toContain('dpl-global-recall');
+        const drawn = lab.elements.filter(e => (e as any).source?.data === 'Testing');
+        expect(drawn, 'both fields print the stored value').toHaveLength(2);
+    });
+});
+
+describe('DPL data that follows a closed time string (manual p. 126)', () => {
+    it('keeps text beginning with a command letter as DATA, not as a command', () => {
+        // "the string may now be terminated by an <STX> command and then
+        // followed by more data terminated by a <CR>" (p. 126) — so after the
+        // closing sigil there is no string left to open and what follows is
+        // printed. Testing the segment's first CHARACTER instead of the state
+        // sent anything beginning with a letter down the command path, and a
+        // barcode is where that bites hardest: its data has no spaces, so
+        // `<STX>TBCD<STX>SUFFIX` is how a date plus a literal is written.
+        // Measured before the fix: barcode "THU" with an `S:"UFFIX"` command
+        // and NO issue, the literal silently gone. `<STX>TCD<STX>MORE` was
+        // worse — `M` is Mirror Mode, silently flipping the label.
+        const seed = new Date(2026, 9, 1, 14, 30, 45);
+        for (const [src, want] of [
+            ['1E2210001000000\x02TBCD\x02SUFFIX', 'THUSUFFIX'],
+            ['1E2210001000000\x02TBCD\x02 SUFFIX', 'THU SUFFIX'],
+            // CD is the day name's 2nd and 3rd letters — THURSDAY on this
+            // date — so the substitution is "HU", not "THU".
+            ['121100001000100\x02TCD\x02MORE', 'HUMORE'],
+        ] as const) {
+            const lab = parseDPL(`\x02L\r${src}\rE\r`, PAGE, seed);
+            expect((lab.elements[0] as any).source.data, src).toBe(want);
+            expect(lab.issues.map(i => i.code), `${src} must not touch mirror mode`).not.toContain('dpl-mirror');
+        }
+    });
+});
+
+describe('DPL system-level commands are named too', () => {
+    it('reports a system-level command it does not model', () => {
+        // The `<STX>x` branch used to `continue` for every unrecognised letter
+        // and never reach the reporting the label commands do, so DPL's whole
+        // system-level surface — immediate commands, extended setup, print
+        // quality and memory tests — disappeared without a word. A mistyped
+        // attention-getter command reported NOTHING.
+        for (const src of ['\x02L\r\x02Zabc\r141100001000100HI\rE\r',
+                           '\x02L\r141100001000100ABC\x02Zxyz\rE\r']) {
+            const lab = parseDPL(src, PAGE);
+            expect(lab.issues.map(i => i.code), src).toContain('dpl-system-command');
+        }
+        // and the ones the preview DOES act on stay quiet
+        const quiet = parseDPL('\x02L\rm\x02L\r141100001000100HI\rE\r', PAGE);
+        expect(quiet.issues.map(i => i.code).filter(c => c === 'dpl-system-command')).toHaveLength(0);
+    });
+});
+
+describe('DPL advanced format attributes (manual Table 8-16, p. 144)', () => {
+    // Figure 2's stream, taken from the per-line dump of the manual page rather
+    // than from a text extraction, which MERGES lines and would have hidden the
+    // distinction this whole block is about. Six attribute groups around five
+    // records, every one printing "New DPL World".
+    const FIG2 = '\x02L\r'
+        + 'D11FA+FB+\r'
+        + '1911S0102600040P018P018New DPL World\r'
+        + 'FU+I+1911S0102000040P018P018New DPL World\r'
+        + 'FI-U+B-\r'
+        + '1911S0101400040P018P018New DPL WorldFU-B+\r'
+        + '1911S0100800040P018P018New DPL World\r'
+        + 'FB+I+U+1911S0100200040P018P018New DPL World\r'
+        + 'FB-U-I-\r'
+        + 'E\r';
+
+    it('draws every record in Figure 2 and none of the attribute text', () => {
+        // Before this, a line beginning with F was read as the command alone, so
+        // the record sharing its line vanished; and an attribute hanging off the
+        // END of a record was read as part of the printed string.
+        const lab = parseDPL(FIG2, PAGE);
+        expect(lab.elements, 'five records, one per visible line').toHaveLength(5);
+        for (const el of lab.elements) {
+            expect((el as any).source.data, 'the attributes are not part of the label').toBe('New DPL World');
+        }
+    });
+
+    it('names the attributes instead of drawing them', () => {
+        // The IR's text element has no bold/italic/underline and the manual
+        // limits these to scalable fonts, so they are reported, not applied —
+        // the same choice Mirror Mode makes.
+        const codes = parseDPL(FIG2, PAGE).issues.map(i => i.code);
+        expect(codes).toContain('dpl-advanced-attributes');
+    });
+
+    it('reports an attribute that Table 8-16 does not define', () => {
+        // `FA+` is written in the manual's own Figure 2 and appears in NO
+        // manual's Table 8-16 — checked in all three. It is named rather than
+        // accepted, because an attribute this parser guessed at would look like
+        // it had done something.
+        const lab = parseDPL('\x02L\rD11FA+FB+\r141100001000100HI\rE\r', PAGE);
+        expect(lab.issues.map(i => i.code)).toContain('dpl-attribute-unknown');
+        expect(lab.issues.find(i => i.code === 'dpl-attribute-unknown')?.message).toContain('FA+');
+    });
+
+    it('accepts the F-less spelling the manual also writes', () => {
+        // Table 8-16 lists only the F-prefixed forms, but the examples use
+        // `FU+I+`, `FB+I+U+` and `FB-U-I-` — one F establishing the prefix for
+        // the pairs that follow it. Both spellings must be consumed, because
+        // left in they become part of the record's text.
+        for (const attrs of ['FB+I+U+', 'FB-U-I-', 'FI-U+B-']) {
+            const lab = parseDPL(`\x02L\r${attrs}\r121100001000100HI\rE\r`, PAGE);
+            expect((lab.elements[0] as any).source.data, `${attrs} must be consumed`).toBe('HI');
+        }
+    });
 });
 
 describe('DPL tables are complete against the manual', () => {

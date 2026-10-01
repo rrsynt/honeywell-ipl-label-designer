@@ -154,6 +154,9 @@ export const tokenizeDpl = (source: string, now: Date = new Date()): DplCommand[
         // with "ABC" and " DEF" carried through untouched.
         let markerText: string | null = null;
         let trailing = '';
+        /** Set once a bare <STX> has ended the time string; the rest of the
+         *  line is data from there on. */
+        let closed = false;
         for (let i = 1; i < parts.length; i++) {
             const seg = parts[i];
             const last = i === parts.length - 1;
@@ -171,10 +174,31 @@ export const tokenizeDpl = (source: string, now: Date = new Date()): DplCommand[
                 continue;
             }
 
-            if (markerText !== null && !/^[A-Za-z]/.test(stx)) {
-                // An attention-getter that is not followed by a command letter
-                // CLOSES the time string, and the rest of the line is data
-                // again. The whole segment is kept, leading space included.
+            // The NEXT attention-getter after <STX>T is what terminates the
+            // string, whatever follows it — the manual's rule is that the
+            // string "may now be terminated by an <STX> command and then
+            // followed by more data terminated by a <CR>" (p. 126). So the
+            // decision is `markerText !== null`, NOT what this segment starts
+            // with: testing the first character sent every segment beginning
+            // with a letter down the command path instead.
+            //
+            // That is the difference between data and a command name, and it
+            // matters most exactly where spaces are not allowed. A barcode's
+            // data has no separator, so `<STX>TBCD<STX>SUFFIX` is how a date
+            // followed by a literal is written — and reading `S` as a command
+            // produced `S:"UFFIX"` with no issue at all, while `UFFIX`
+            // disappeared from the label. `<STX>TCD<STX>MORE` was worse: `M`
+            // is Mirror Mode, so the label would have been silently flipped.
+            //
+            // Everything from the closing sigil on is DATA, the sigil's own
+            // character included — it was consumed by the split, not by a
+            // command, so the whole segment is kept.
+            if (closed || markerText !== null) {
+                if (markerText !== null && record) {
+                    record.params += substituteDplDateTime(markerText, now);
+                    markerText = null;
+                }
+                closed = true;
                 trailing += seg;
                 continue;
             }
@@ -247,6 +271,72 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
 
     const issue = (level: ViewerIssue['level'], code_: string, message: string, command?: string) =>
         issues.push({ level, code: code_, message, command });
+    /**
+     * Advanced format attributes, from Table 8-16. All three manuals in
+     * docs/manuals/ agree on the same six: FB, FI and FU toggle bold, italic
+     * and underline with +/-; FPn and FSn set the vertical and horizontal point
+     * size; FR[+/-]ndegrees rotates the baseline.
+     *
+     * They are written on the SAME line as the command they follow — the
+     * manual's Figure 2 stream is `D11FA+FB+` (p. 144) — and they are only
+     * valid for scalable fonts. Nothing here draws them, because the IR's text
+     * element has no bold/italic/underline and inventing one would be a
+     * rendering change that cannot be checked against a printer.
+     */
+    // The F-less forms are not a guess: the manual's own Figure 2 stream uses
+    // them, writing `FU+I+`, `FB+I+U+` and `FB-U-I-` — one F establishing the
+    // prefix and the following pairs sharing it. Table 8-16 lists only the
+    // F-prefixed spellings, so the examples are the wider usage of the two.
+    const ATTR_SPEC = /^(?:F(?:[BIU][+-]|[PS]\d+|R[+-]?\d+)|[BIU][+-])/;
+    /** Anything shaped like an attribute but not in Table 8-16. */
+    const ATTR_SHAPED = /^(?:F[A-Za-z]{1,2}[+-]?\d*|[A-Za-z]{1,2}[+-])/;
+    /** The same set, anchored at the end, for attributes written AFTER a
+     *  record on one line: `…P018P018New DPL WorldFU-B+` (p. 144). */
+    const ATTR_TAIL = /(?:F[BIU][+-]|F[PS]\d+|FR[+-]?\d+|[BIU][+-])$/;
+    /**
+     * Consumes `F…` attributes from the END of a label command's parameter
+     * string and returns the undrawn prefix, which is either empty or the start
+     * of a record the line is sharing.
+     *
+     * `head` is the text BEFORE the attributes and `tail` the text after them,
+     * because the manual writes them in both positions: appended to a command
+     * (`D11FA+FB+`) and in front of a record
+     * (`FA+1911S0105000020P018P018DPL allows …`).
+     */
+    const consumeAttributes = (head: string, tail: string): string => {
+        let t = tail;
+        let seen = 0;
+        const unknown: string[] = [];
+        for (;;) {
+            const known = ATTR_SPEC.exec(t);
+            if (known) { t = t.slice(known[0].length); seen++; continue; }
+            const other = ATTR_SHAPED.exec(t);
+            if (other) {
+                // Terse forms share an F that the command's own sigil may
+                // already have supplied — `FB+I+U+` is FB+, FI+ and FU+ — so
+                // the reported name is completed only when it lacks one, rather
+                // than being taken as written.
+                unknown.push(other[0][0] === 'F' ? other[0] : `F${other[0]}`);
+                t = t.slice(other[0].length);
+                continue;
+            }
+            break;
+        }
+        if (seen > 0) {
+            once('attrs', 'info', 'dpl-advanced-attributes',
+                'F selects advanced format attributes (bold, italic, underline, point size, baseline rotation) for scalable fonts. They cannot be drawn in this preview, so this text may differ from the print.', 'F');
+        }
+        if (unknown.length > 0) {
+            // `FA+` is written in the manual's OWN Figure 2 stream and appears
+            // in no manual's Table 8-16, so it is named rather than accepted:
+            // an attribute this parser guessed at would look like it did
+            // something.
+            once(`attrs-unknown-${unknown.join(',')}`, 'info', 'dpl-attribute-unknown',
+                `"${unknown.join('", "')}" is written as a format attribute but is not in Table 8-16 (FB, FI, FU, FPn, FSn, FR[+/-]n); nothing is drawn for it.`, 'F');
+        }
+        return head + t;
+    };
+
     const seenOnce = new Set<string>();
     /** Reports a condition once per parse — a stream that sets the same global
      *  state on every record would otherwise bury the panel in duplicates. */
@@ -324,8 +414,15 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
      * pairing is a lookahead over the token list, and it is the PRECEDING
      * RECORD that identifies the special command rather than the System-Level
      * `<STX>S` (Set Feed Speed) the manual warns not to confuse it with
-     * (p. 125) — a record can only exist inside a label format, so a record
-     * immediately before the sigil settles it with no state to thread.
+     * (p. 125) — a record can only exist inside a label format, so a preceding
+     * record settles it with no state to thread.
+     *
+     * The record is the nearest one BEFORE the sigil, not necessarily the token
+     * immediately before it: a label command may sit between the two, and the
+     * manual's `J`/`R`/`C` commands are toggles commonly written on a line of
+     * their own. Requiring strict adjacency silently fell through to the
+     * system-level Set Feed Speed reading whenever anything intervened, so the
+     * record printed its placeholder with no recall issue and no warning.
      *
      * Values are deliberately NOT read here: a register is filled by an earlier
      * `G`, so it can only be resolved when the main loop reaches the record.
@@ -334,8 +431,13 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
     for (let i = 1; i < cmds.length; i++) {
         const c = cmds[i];
         if (c.name !== 'S' || !/^[A-P]$/.test(c.params)) continue;
-        const prev = cmds[i - 1];
-        if (prev.name === '' && /^\d/.test(prev.params)) recallFor.set(i - 1, c.params);
+        for (let k = i - 1; k >= 0; k--) {
+            const p = cmds[k];
+            if (p.name === '' && /^\d/.test(p.params)) { recallFor.set(k, c.params); break; }
+            // A special command always fills the RECORD it follows, so stop at
+            // another one rather than reaching past it to an older record.
+            if ((p.name === 'S' || p.name === 'T') && k > 0) break;
+        }
     }
 
     for (let ci = 0; ci < cmds.length; ci++) {
@@ -353,10 +455,35 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                 // `Q` command read below; STX Q takes no parameters.
                 if (cmd.params === '') continue;
             }
+            // Named, never dropped in silence — the same contract the label
+            // commands keep. Without this the whole `<STX>x` surface disappears
+            // without a word: a mistyped attention-getter command reported
+            // NOTHING at all, and DPL's system-level set is large. The four
+            // handled above are the ones the preview acts on; the rest —
+            // immediate commands, extended system-level setup, print-quality and
+            // memory tests — cannot change the image, so they are named and
+            // passed over rather than interpreted.
+            issue('info', 'dpl-system-command',
+                `DPL system-level command "${letter}" is not part of the supported subset; it has no effect on the preview.`, letter);
             continue;
         }
 
-        const line = cmd.params;
+        let line = cmd.params;
+        // Advanced format attributes can also trail a record on its own line —
+        // the manual's Figure 2 has `1911S0101400040P018P018New DPL WorldFU-B+`
+        // (p. 144) — and left on, they are read as part of the printed text
+        // ("New DPL WorldFU-B" instead of "New DPL World"). Stripped only for
+        // a line that IS a record; a label command may legitimately end in the
+        // same letters, and `D11FA+FB+` is stripped by its own case.
+        if (/^\d/.test(line) && ATTR_TAIL.test(line)) {
+            const stripped = line.replace(/(?:F[BIU][+-]|F[PS]\d+|FR[+-]?\d+|[BIU][+-])+$/, '');
+            const dropped = line.slice(stripped.length);
+            if (dropped !== '') {
+                once('attrs', 'info', 'dpl-advanced-attributes',
+                    'Advanced format attributes (bold, italic, underline, point size, baseline rotation) cannot be drawn in this preview, so this text may differ from the print.', 'F');
+                line = stripped;
+            }
+        }
         if (line === '') continue;
 
         // ---- Label-formatting commands (a leading letter, no digits) ----
@@ -372,6 +499,11 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                     // Dwh, dot width and height multipliers of 1 or 2.
                     dotWidth = Math.max(1, Math.trunc(num(rest.slice(0, 1), 1)));
                     dotHeight = Math.max(1, Math.trunc(num(rest.slice(1, 2), 1)));
+                    // The manual appends attributes to this very command —
+                    // Figure 2's first line is `D11FA+FB+` (p. 144) — and
+                    // reading only the two digits silently dropped everything
+                    // after them.
+                    consumeAttributes('', rest.slice(2));
                     break;
                 }
                 case 'J': {
@@ -409,6 +541,29 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                     issue('info', 'dpl-mirror',
                         `M turns Mirror Mode ${mirror ? 'ON' : 'OFF'}: records after it print transposed as if seen in a mirror. This preview draws the label as laid out, so the mirroring is not applied.`, 'M');
                     break;
+                }
+                case 'F': {
+                    // "F Advanced Format Attributes ... These commands extend
+                    // the text presentation capabilities for Scalable Fonts"
+                    // (p. 113). The manual's OWN example puts a record
+                    // immediately after the attributes, on the same line, with
+                    // no glyph-less record in between:
+                    //
+                    //   FA+1911S0105000020P018P018DPL allows \<FP36FS36>FONT
+                    //
+                    // so a line beginning with F was previously read as the
+                    // command alone and the record that followed it vanished
+                    // with no element and no issue. Whatever is not an attribute
+                    // belongs to a record, which is re-read from that point.
+                    // The leading `F` is the command's own sigil — the same
+                    // letter the attribute names start with — so the attribute
+                    // text is the whole parameter, `rest`.
+                    const leftover = consumeAttributes('', rest);
+                    if (leftover === '') break;
+                    cmd.name = '';
+                    cmd.params = leftover;
+                    ci--;
+                    continue;
                 }
                 // The label-level metric/inch pair. The same letters do the same
                 // job at the system level (`<STX>m` / `<STX>n`), and every
