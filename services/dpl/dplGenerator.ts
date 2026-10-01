@@ -150,6 +150,60 @@ export const generateDPL = (design: Design): DplGenerateResult => {
     const colFor = (mmFromLeft: number): number =>
         Math.max(0, Math.min(9999, Math.round((mmFromLeft / 25.4) * 100)));
 
+    // ---- Image downloads ------------------------------------------------
+    // An image is not a label record; it is DOWNLOADED first and then printed
+    // by name, so every image gets a `<STX>I` block ahead of `<STX>L` and a
+    // `Y` record in the label (Table 8-11). The PARSER has drawn images since
+    // it read `<STX>I` (dplParser, "Image (b = Y)"); this side had nothing, so
+    // the designer's Image tool exported "DPL output does not support yet"
+    // about a shape the same language's reader already understood.
+    //
+    // The Datamax 7-bit ASCII file (Appendix O) is a list of dot-row records
+    // `80nndd...d`, nn being the byte count in ASCII hex, terminated by
+    // `FFFF`. It is the ONLY format whose bytes are printable characters, so
+    // it needs no `<SOH>D` — "If any of the 8-bit input formats are to be used,
+    // it is necessary to disable the Immediate Command interpreter" (p. 20),
+    // and 7-bit ASCII is not one of them.
+    const imageName = new Map<number, string>();
+    const imageSkipReason = new Map<number, string>();
+    let imageSeq = 0;
+    for (const field of design.fields) {
+        if (field.type !== 'image') continue;
+        const rows = field.bitmap;
+        if (rows.length === 0 || !rows[0]) {
+            imageSkipReason.set(field.id, `"${field.name}" is an image with no bitmap data, so there is nothing to print.`);
+            continue;
+        }
+        // A dot-row record counts its bytes in one hex byte, so it carries at
+        // most 255 of them — 2040 dots. Wider than that has no record form.
+        const bytesPerRow = Math.ceil(rows[0].length / 8);
+        if (bytesPerRow > 255) {
+            imageSkipReason.set(field.id, `"${field.name}" is ${bytesPerRow * 8} dots wide, but a DPL dot-row record carries at most 2040 dots, so the image was left off the label.`);
+            continue;
+        }
+        const name = `IMG${imageSeq++}`;
+        imageName.set(field.id, name);
+        // a = bank (D, the manual's own <STX>IDpTest), b omitted, f = F (7-bit
+        // Datamax image file), then the name up to <CR>.
+        lines.push(`\x02I1F${name}`);
+        for (const row of rows) {
+            // MSB-first, one set bit is ink, each row padded to whole bytes —
+            // the same convention the parser reads back (`imageRowToBytes`),
+            // and a row that is not a multiple of 8 wide does not spill.
+            let hex = '';
+            for (let b = 0; b < bytesPerRow; b++) {
+                let byte = 0;
+                for (let k = 0; k < 8; k++) {
+                    const x = b * 8 + k;
+                    if (x < row.length && row[x] === '1') byte |= 0x80 >> k;
+                }
+                hex += byte.toString(16).toUpperCase().padStart(2, '0');
+            }
+            lines.push(`80${bytesPerRow.toString(16).toUpperCase().padStart(2, '0')}${hex}`);
+        }
+        lines.push('FFFF');
+    }
+
     lines.push(`\x02L`);
     // Density and speed are printer commands with the same letters as the
     // label-level ones; D11 is the dot-size multiplier every example uses.
@@ -288,7 +342,31 @@ export const generateDPL = (design: Design): DplGenerateResult => {
             continue;
         }
 
-        warnings.push(`"${field.name}" is a ${field.type}, which DPL output does not support yet. It was left off the label.`);
+        if (field.type === 'image') {
+            const skip = imageSkipReason.get(field.id);
+            if (skip) { warnings.push(skip); continue; }
+            // Table 8-11: `a b c d eee ffff gggg jj...j` where a=1 fixed,
+            // b=Y the image record, c/d the width/height multipliers, eee=000
+            // fixed, ffff/gggg the Row/Column of the image's LOWER-LEFT corner,
+            // jj...j the downloaded name. "Images can be printed only in
+            // Rotation 1" — a DPL image record has no rotation of its own, so
+            // the digit is always 1 and a rotated image is named rather than
+            // silently mis-placed.
+            if (field.rotation % 360 !== 0) {
+                warnings.push(`"${field.name}" is rotated, but a DPL image prints in Rotation 1 only, so it prints upright.`);
+            }
+            // The bitmap is one dot per cell, so a 1x1 multiplier prints it at
+            // its own grid size. rowFor/colFor state where the bitmap's bottom
+            // edge sits, which is what the record's Row names.
+            const name = imageName.get(field.id) ?? '';
+            lines.push(`1Y11000${rowStr}${colStr}${name}`);
+            continue;
+        }
+
+        // Unreachable today — every FieldType is handled above — but kept so
+        // a future field type is NAMED rather than silently dropped.
+        const leftover = field as Field;
+        warnings.push(`"${leftover.name}" is a ${leftover.type}, which DPL output does not support yet. It was left off the label.`);
     }
 
     // Q is the label count, E terminates and prints (manual pp. 118, 113).

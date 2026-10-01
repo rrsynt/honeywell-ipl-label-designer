@@ -891,6 +891,29 @@ describe('DPL images (<STX>I p.20 and Table 8-11)', () => {
         expect(lab.issues.map(i => i.code)).toContain('dpl-image-loaded');
     });
 
+    it('reads the header a b f name, with b optional and the bank free', () => {
+        // Syntax is <STX>I a b f nn...n (p. 20): a = bank, b = data type
+        // ('A' or omitted), f = format designator (F/B/b/I/i/P/p), then the
+        // name. The old reader stripped a leading 'A' from the whole spec — the
+        // BANK — and then took the format one slot early, so only a stream
+        // whose bank was not 'A' and whose type was omitted (the manual's own
+        // `<STX>IDpTest`) came out right. These four forms pin the parse: the
+        // loaded name is read back from the info issue, which names it.
+        const nameOf = (head: string) => {
+            const lab = parseDPL(`\x01D\r\x02${head}\r` + IMG_ROWS.join('\r') + '\rFFFF\r', PAGE);
+            const info = lab.issues.find(i => i.code === 'dpl-image-loaded');
+            return /image "([^"]*)"/.exec(info?.message ?? '')?.[1];
+        };
+        // bank D, type omitted, format F.
+        expect(nameOf('IDFTest')).toBe('Test');
+        // bank D, type A, format F — the optional slot must not shift the name.
+        expect(nameOf('IDAFTest')).toBe('Test');
+        // bank A (a legal bank), type omitted, format F.
+        expect(nameOf('IAFTest')).toBe('Test');
+        // the manual's own sample: bank D, format p, name Test.
+        expect(nameOf('IDpTest')).toBe('Test');
+    });
+
     it('never prints the image DATA as text', () => {
         // The failure this replaces: a dot row begins with a digit, so it was
         // read as a label record and every row came out as a text field
@@ -1585,5 +1608,84 @@ describe('DPL generator: the circle the parser already understood', () => {
                 expect(warn!.message, `${caption} -> pattern number`).toContain(`pattern ${expected} `);
             }
         }
+    });
+});
+
+describe('DPL generator: images, which the parser already drew', () => {
+    // The parser has drawn DPL images since it read `<STX>I` (its "Image
+    // (b = Y)" branch, Table 8-11) — dot rows decoded, printed by name, the
+    // width/height multipliers honoured. The GENERATOR had no image branch at
+    // all, so the designer's Image tool exported "DPL output does not support
+    // yet" about a shape the same language's reader already understood, the
+    // same one-sided gap the circle and polygon above had.
+    const one = (f: Record<string, unknown>): Design => ({
+        name: 'P', labelSettings: { width: 80, height: 50, columns: 1, rows: 1, unit: 'mm', orientation: 'portrait' },
+        printerSettings: { model: 'PD43', dpi: 203, quantity: 1, mediaType: 'direct-thermal', mediaSenseMode: 'gap', printSpeed: 6, darkness: 10 },
+        fields: [f as never], dataSources: [], nextId: 2, guides: { horizontal: [], vertical: [] },
+    });
+    // A 4-point downward triangle, 8 dots wide so a row is exactly one byte.
+    const bitmap = ['10000000', '11000000', '11100000', '11110000'];
+    const image = (over: Record<string, unknown> = {}) => ({
+        id: 1, type: 'image', name: 'Logo', x: 10, y: 10, rotation: 0, threshold: 128,
+        bitmap, width: bitmap[0].length / (203 / 25.4), height: bitmap.length / (203 / 25.4),
+        visible: true, ...over,
+    });
+
+    it('downloads the image before the label and prints it by name', () => {
+        const { dpl, warnings } = generateDPL(one(image()));
+        expect(warnings.join(' '), 'no longer unsupported').not.toMatch(/does not support/);
+        // The download must precede the label: an image is not a label record,
+        // so `<STX>I` comes first and the `Y` record prints it.
+        expect(dpl.indexOf('\x02I1F'), 'a download block is emitted').toBeGreaterThanOrEqual(0);
+        expect(dpl.indexOf('\x02I1F'), 'the download precedes <STX>L').toBeLessThan(dpl.indexOf('\x02L'));
+        // Appendix O: `80nndd...d`, nn = byte count in ASCII hex. One byte per
+        // row -> 01; the triangle's rows are 0x80, 0xC0, 0xE0, 0xF0.
+        expect(dpl).toContain('800180');
+        expect(dpl).toContain('8001C0');
+        expect(dpl).toContain('8001E0');
+        expect(dpl).toContain('8001F0');
+        expect(dpl, 'the download is terminated').toContain('FFFF');
+        // Table 8-11 record: 1 Y 11 000 rrrr cccc name.
+        const rec = dpl.split('\r').find(l => l.startsWith('1Y11'));
+        expect(rec, 'an image record is emitted').toBeDefined();
+        expect(rec!.slice(15), 'it names the downloaded image').toBe('IMG0');
+    });
+
+    it('round-trips: the parser draws the bitmap back dot for dot', () => {
+        // What catches a transposed or bit-reversed row — which "did it emit a
+        // download" would never see. This is the generator↔parser agreement
+        // that keeps the two sides of one language from drifting apart.
+        const back = parseDPL(generateDPL(one(image())).dpl, 406);
+        const g = back.elements.find(e => e.kind === 'graphic') as
+            { widthDots: number; heightDots: number; rows: string[] } | undefined;
+        expect(g, 'the record draws the image it downloaded').toBeDefined();
+        expect(g!.widthDots).toBe(8);
+        expect(g!.heightDots).toBe(4);
+        expect(back.issues.map(i => i.code), 'nothing goes missing').not.toContain('dpl-image-missing');
+        const bits = (row: string) => [...row].map(c => c.charCodeAt(0).toString(2).padStart(8, '0')).join('');
+        expect(bits(g!.rows[0]).slice(0, 8)).toBe('10000000');
+        expect(bits(g!.rows[3]).slice(0, 8)).toBe('11110000');
+    });
+
+    it('names an image wider than a dot-row record can carry', () => {
+        // A record counts its bytes in one hex byte, so 2040 dots is the
+        // widest an image can be. Wider has no form; dropping it silently is
+        // exactly the failure this project names instead.
+        const wide = image({ bitmap: ['1'.repeat(2048)], width: 2048 / (203 / 25.4), height: 1 / (203 / 25.4) });
+        const { dpl, warnings } = generateDPL(one(wide));
+        expect(warnings.some(w => w.includes('Logo') && w.includes('2040'))).toBe(true);
+        expect(dpl).not.toContain('\x02I');
+    });
+
+    it('says so when an image has no bitmap, rather than an empty download', () => {
+        const { dpl, warnings } = generateDPL(one(image({ bitmap: [] })));
+        expect(warnings.join(' ')).toMatch(/no bitmap data/);
+        expect(dpl).not.toContain('\x02I');
+    });
+
+    it('names a rotated image, because a DPL image prints in Rotation 1 only', () => {
+        const { dpl, warnings } = generateDPL(one(image({ rotation: 90 })));
+        expect(warnings.some(w => w.includes('Logo') && /Rotation 1/.test(w))).toBe(true);
+        expect(dpl).toContain('1Y11');
     });
 });

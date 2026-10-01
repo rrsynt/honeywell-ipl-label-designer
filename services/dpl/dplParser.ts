@@ -678,12 +678,25 @@ export const parseDPL = (
             // text, putting the hex digits of a logo on the label.
             if (letter === 'I') {
                 const spec = cmd.params;
-                // a = module bank, b = data type (optional 'A'), f = format,
-                // then up to 16 characters of name.
-                let body = spec;
-                if (body[0] === 'A') body = body.slice(1);
-                const fmt = body.slice(1, 2);
-                const rawName = body.slice(2).trim();
+                // Syntax: <STX>I a b f nn...n <CR> (p. 20).
+                //   a = Memory Module Bank Select   (one character, Appendix K)
+                //   b = Data Type, OPTIONAL: 'A' or omitted
+                //   f = Format Designator: F/B/b/I/i/P/p
+                //   nn...n = up to 16 characters of name
+                //
+                // The format designator set does not contain 'A' and the data
+                // type is only ever 'A', so one character after the bank tells
+                // the two apart with no state to thread: a second 'A' is the
+                // type, anything else is already the format. The old code
+                // stripped a leading 'A' from the WHOLE spec — i.e. from the
+                // BANK, which is a legal value — and then read the format one
+                // slot too early: the manual's own `<STX>IDpTest` (bank D,
+                // format p, name Test) survived, but an explicit data type
+                // (`<STX>IDAFTest` -> name "FTest") and an 'A' bank
+                // (`<STX>IAFTest` -> name "est") both misread the name.
+                const hasType = spec.slice(1, 2) === 'A';
+                const fmt = spec.slice(hasType ? 2 : 1, hasType ? 3 : 2);
+                const rawName = spec.slice(hasType ? 3 : 2).trim();
                 // "j: ASCII string, up to 16 characters followed by a termination
                 // character" (Table 8-11) — the name is space padded in the
                 // manual's own sample (`<STX>IDpTest `).
