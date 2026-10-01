@@ -209,4 +209,59 @@ describe('generateZPL', () => {
         const iplEl = parseViewerIPL(await generateIPL(d)).elements[0];
         expect(elementVisualBox(zplEl, 203)).toEqual(elementVisualBox(iplEl, 203));
     });
+
+    // ^GF: the parser has drawn it since a1a49fa, where the parameters were
+    // settled against the Labelary oracle and the render came out
+    // PIXEL-IDENTICAL — the strongest verification in this project. The
+    // generator still had no image branch, so the designer's Image tool
+    // exported "ZPL output does not support yet" about the one command whose
+    // reading we had proved exactly. The payload asserted below was confirmed
+    // against Labelary: it drew ink bbox (40,40)-(47,47) with per-row counts
+    // 1,2,3,4,5,6,7,8 — the same shape our own renderer produced.
+    const image = (over: Partial<Field> = {}): Field => {
+        const bitmap = [
+            '1000000000000000', '1100000000000000', '1110000000000000', '1111000000000000',
+            '1111100000000000', '1111110000000000', '1111111000000000', '1111111100000000',
+        ];
+        return {
+            id: 3, type: 'image', name: 'Logo', x: 5, y: 5, rotation: 0, threshold: 128,
+            bitmap, width: bitmap[0].length / (203 / 25.4), height: bitmap.length / (203 / 25.4),
+            ...over,
+        } as unknown as Field;
+    };
+
+    it('emits ^GF with the bitmap packed MSB-first, bytes-per-row fixing the shape', () => {
+        const { zpl, warnings } = generateZPL(design([image()]));
+        expect(warnings.join(' '), 'images are no longer unsupported').not.toMatch(/does not support/);
+        // 16 dots wide = 2 bytes per row, 8 rows = 16 bytes. A row that is not
+        // a whole number of bytes is padded, so the shape never spills over.
+        const m = /\^GFA,(\d+),(\d+),(\d+),([0-9A-F]+)\^FS/.exec(zpl);
+        expect(m, 'a ^GF record is emitted').not.toBeNull();
+        expect(m![3], 'bytes per row').toBe('2');
+        expect(m![1], 'total bytes counted').toBe(String(2 * 8));
+        // The diagonal: each row adds one ink dot from the left, so the high
+        // byte goes 0x80, 0xC0, 0xE0 … A bit order reversed in the byte would
+        // come out mirrored and this pins it.
+        expect(m![4]).toBe('8000C000E000F000F800FC00FE00FF00');
+    });
+
+    it('round-trips: the parser reads the bitmap back dot for dot', () => {
+        // What catches a transposed read or a reversed bit order — neither of
+        // which a "does it emit ^GF" assertion would ever see.
+        const back = parseZPL(generateZPL(design([image()])).zpl);
+        const el = back.elements[0] as unknown as { kind: string; rows: string[]; widthDots: number; heightDots: number };
+        expect(el.kind).toBe('graphic');
+        expect(el.widthDots).toBe(16);
+        expect(el.heightDots).toBe(8);
+        expect(back.issues, 'and nothing is complained about').toEqual([]);
+        const bits = el.rows.map(r => [...r].map(c => c.charCodeAt(0).toString(2).padStart(8, '0')).join(''));
+        expect(bits[0].slice(0, 16)).toBe('1000000000000000');
+        expect(bits[7].slice(0, 16)).toBe('1111111100000000');
+    });
+
+    it('says so when an image has no bitmap, rather than emitting an empty ^GF', () => {
+        const { zpl, warnings } = generateZPL(design([image({ bitmap: [] } as Partial<Field>)]));
+        expect(warnings.join(' ')).toMatch(/no bitmap data/);
+        expect(zpl).not.toContain('^GF');
+    });
 });

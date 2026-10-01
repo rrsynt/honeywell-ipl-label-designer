@@ -189,6 +189,49 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
             continue;
         }
 
+        if (field.type === 'image') {
+            // ^GFa,totalBytes,bytesTotal,bytesPerRow,<data>.
+            //
+            // The PARSER has drawn ^GF since a1a49fa, where the parameters were
+            // settled by probing the Labelary oracle and the result rendered
+            // PIXEL-IDENTICAL to it — the strongest verification this project
+            // has. The generator had no image branch at all, so the designer's
+            // Image tool exported "ZPL output does not support yet" about the
+            // one command here we had proved we understood exactly.
+            //
+            // From the parser's measured table (zplParser.ts case 'GF'):
+            //   p1 is IGNORED by the printer   -> send the byte count anyway
+            //   p2 CAPS the data drawn         -> the whole payload
+            //   p3 fixes the SHAPE: bytes per row -> ceil(width / 8)
+            // and dots run from the HIGH bit of each byte.
+            const rows = field.bitmap;
+            if (rows.length === 0 || !rows[0]) {
+                warnings.push(`"${field.name}" is an image with no bitmap data, so there is nothing to print.`);
+                continue;
+            }
+            const w = rows[0].length;
+            const h = rows.length;
+            const bytesPerRow = Math.ceil(w / 8);
+            // Each row is padded to a whole number of bytes, and a set bit is
+            // INK. The padding bits are paper, so a row that is not a multiple
+            // of 8 wide does not spill into the byte after it.
+            let hex = '';
+            for (const row of rows) {
+                for (let b = 0; b < bytesPerRow; b++) {
+                    let byte = 0;
+                    for (let k = 0; k < 8; k++) {
+                        const x = b * 8 + k;
+                        // Past the row's own width is paper; '1' is ink.
+                        if (x < w && row[x] === '1') byte |= 0x80 >> k;
+                    }
+                    hex += byte.toString(16).toUpperCase().padStart(2, '0');
+                }
+            }
+            const totalBytes = bytesPerRow * h;
+            lines.push(`^FO${origin.x},${origin.y}`, `^GFA,${totalBytes},${totalBytes},${bytesPerRow},${hex}^FS`);
+            continue;
+        }
+
         warnings.push(`"${field.name}" is a ${field.type}, which ZPL output does not support yet. It was left off the label.`);
     }
 
