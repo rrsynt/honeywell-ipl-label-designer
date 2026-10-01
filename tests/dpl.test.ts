@@ -860,6 +860,74 @@ describe('DPL bar code fields (Table 8-3 and Appendix G)', () => {
     });
 });
 
+describe('DPL images (<STX>I p.20 and Table 8-11)', () => {
+    // Appendix O's 7-bit ASCII image format: each row is `80nndd…d`, nn being
+    // the number of character pairs in ASCII hex, and `FFFF` terminates the
+    // download. The rows below are the manual's own, and the structure was
+    // checked against them — nn = 0x30 = 48 pairs, and 48 bytes is 384 dots.
+    const IMG_ROWS = [
+        '8030FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0000',
+        '8030FFC00000007FFC0003FFFFC001FC0001FC0003FFFFC0018000FFC001FF8000C0003FFFFE000000FFFFE0001FFFFF0000',
+        '8030FFC00000000FFC0003FFFFC001FC0001FC0003FFFFC0018000FFC001FF800040001FFFFE0000007FFFC0001FFFFF0000',
+    ];
+    // a = module, b omitted, f = p (.IMG as received), then the name.
+    const load = (name: string) => `\x01D\r\x02I1p${name}\r` + IMG_ROWS.join('\r') + '\rFFFF\r';
+    const print = (name: string, mult = '11') => `\x02L\r1Y${mult}00000150100${name}\rE\r`;
+
+    it('draws the bitmap the stream loaded', () => {
+        const lab = parseDPL(load('LOGO') + print('LOGO'), PAGE);
+        const g = lab.elements.find(e => e.kind === 'graphic') as any;
+        expect(g, 'the record must draw the image it names').toBeDefined();
+        expect(g.name).toBe('LOGO');
+        expect(g.widthDots, '48 bytes per row is 384 dots').toBe(384);
+        expect(g.heightDots, 'three dot rows').toBe(3);
+        expect(g.rows).toHaveLength(3);
+        expect(lab.issues.map(i => i.code)).toContain('dpl-image-loaded');
+    });
+
+    it('never prints the image DATA as text', () => {
+        // The failure this replaces: a dot row begins with a digit, so it was
+        // read as a label record and every row came out as a text field
+        // printing the hex of the bitmap. The label showed the image's DATA
+        // instead of the image — the worst shape of the silent-drop class.
+        const lab = parseDPL(load('LOGO') + print('LOGO'), PAGE);
+        const texts = lab.elements.filter(e => e.kind === 'text') as any[];
+        expect(texts, 'not one hex row may become text').toHaveLength(0);
+        for (const el of lab.elements as any[]) {
+            expect(String(el.source?.data ?? ''), 'no element may carry hex data').not.toMatch(/^[0-9A-F]{20,}$/);
+        }
+    });
+
+    it('honours the width and height multipliers', () => {
+        // Table 8-11: c is the width multiplier, d the height multiplier, and
+        // they scale the stored bitmap — so 2x1 doubles the width and leaves
+        // the row count alone.
+        const lab = parseDPL(load('LOGO') + print('LOGO', '21'), PAGE);
+        const g = lab.elements.find(e => e.kind === 'graphic') as any;
+        expect(g.widthDots).toBe(768);
+        expect(g.heightDots).toBe(3);
+    });
+
+    it('draws orphan dot rows as nothing rather than as text', () => {
+        // The rows normally follow an <STX>I that consumes them. With no such
+        // command they belong to no image, and the count field is what tells a
+        // real dot row from an ordinary record that happens to begin with 8.
+        const lab = parseDPL(`\x02L\r${IMG_ROWS.join('\r')}\rFFFF\r\x02L\r141100001000100HI\rE\r`, PAGE);
+        expect(lab.elements.filter(e => e.kind === 'text')).toHaveLength(1);
+        expect((lab.elements.find(e => e.kind === 'text') as any).source.data).toBe('HI');
+        expect(lab.issues.map(i => i.code)).toContain('dpl-image-row-orphan');
+    });
+
+    it('says when the image is not in the stream', () => {
+        // An image lives in a printer memory module, so a label can print one
+        // this stream never carried. That is named rather than drawn as an
+        // empty space.
+        const lab = parseDPL(print('MISSING'), PAGE);
+        expect(lab.elements.find(e => e.kind === 'graphic')).toBeUndefined();
+        expect(lab.issues.map(i => i.code)).toContain('dpl-image-missing');
+    });
+});
+
 describe('DPL tables are complete against the manual', () => {
     it('every letter the manual lists is present', () => {
         // Appendix F Table F-1 lists these single-letter ids; a gap would make

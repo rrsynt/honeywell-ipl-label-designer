@@ -24,7 +24,7 @@
 
 import type {
     ViewerLabel, ViewerElement, ViewerIssue, TextElement, BarcodeElement,
-    BoxElement, LineElement, EllipseElement, PolygonElement,
+    BoxElement, LineElement, EllipseElement, PolygonElement, GraphicElement, UnknownElement,
 } from '../ipl/types';
 import { estimateElementSize } from '../ipl/renderer';
 import { DPL_FONTS, DPL_SMOOTH_FONT, dplMultiplierValue, dplDefaultHeightDots } from './dplFonts';
@@ -364,6 +364,25 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
         return head + t;
     };
 
+    /**
+     * One dot row of a Datamax 7-bit ASCII image as the IR carries it.
+     *
+     * `rows` is one character per BYTE, leftmost dot in the HIGH bit (bit 7) —
+     * the same convention the renderer already reads for ZPL's `^GF`, and the
+     * one Appendix O's own example confirms: a full-width 384-dot row is 48
+     * bytes and both `80nndd…` and the byte-count agree on "F" pairs for the
+     * rows it shows.
+     */
+    const imageRowToBytes = (data: string): string => {
+        let out = '';
+        for (let k = 0; k + 1 < data.length; k += 2) {
+            const v = parseInt(data.slice(k, k + 2), 16);
+            if (Number.isNaN(v)) break;
+            out += String.fromCharCode(v);
+        }
+        return out;
+    };
+
     const seenOnce = new Set<string>();
     /** Reports a condition once per parse — a stream that sets the same global
      *  state on every record would otherwise bury the panel in duplicates. */
@@ -413,6 +432,21 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
     let mirror = false;
     /** The data field of the record just read, for `G` to store. */
     let lastRecordData = '';
+    /**
+     * Images downloaded by `<STX>I`, by name.
+     *
+     * "Syntax: <STX>Iabfnn...n<CR>data" (p. 20) — the data that follows the
+     * command is the image, so it belongs to the command rather than to any
+     * record. Only the Datamax 7-bit ASCII form is decoded: Appendix O defines
+     * it as "a set of records with identical formats, each representing a dot
+     * row of the image; a terminator follows the last of these records", each
+     * row being `80nndd…d` with nn the number of character pairs in ASCII hex
+     * and a `FFFF` terminator. The BMP/IMG/PCX forms are binary raster files
+     * carried inside the token stream, which no parser here can decode — those
+     * names are remembered so a record using one can say so instead of drawing
+     * nothing.
+     */
+    const images = new Map<string, { rows: string[]; widthDots: number; heightDots: number } | null>();
 
     // A graphics record (b = X) describes its object in the DATA field rather
     // than in the header, so it is built when the record is read.
@@ -472,6 +506,64 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
         // ---- System-level commands ----
         if (cmd.name !== '') {
             const letter = cmd.name;
+            // <STX>I swallows the image that follows it, so it is handled before
+            // the format state is even consulted: "the data that immediately
+            // follows the command string will be image data" (p. 20), and that
+            // data is written as dot-row lines starting with `80nn` — which the
+            // record reader would otherwise take for label records and print as
+            // text, putting the hex digits of a logo on the label.
+            if (letter === 'I') {
+                const spec = cmd.params;
+                // a = module bank, b = data type (optional 'A'), f = format,
+                // then up to 16 characters of name.
+                let body = spec;
+                if (body[0] === 'A') body = body.slice(1);
+                const fmt = body.slice(1, 2);
+                const rawName = body.slice(2).trim();
+                // "j: ASCII string, up to 16 characters followed by a termination
+                // character" (Table 8-11) — the name is space padded in the
+                // manual's own sample (`<STX>IDpTest `).
+                const name = rawName.split(/\s+/)[0] ?? '';
+                const rows: string[] = [];
+                let cursor = ci + 1;
+                for (; cursor < cmds.length; cursor++) {
+                    const next = cmds[cursor];
+                    if (next.name !== '') break;
+                    const line = next.params.trim().toUpperCase();
+                    if (line === 'FFFF') break;
+                    // `80nndd…d` — the leading 80 is fixed, nn is the pair count.
+                    if (!/^80[0-9A-F]{2}/.test(line)) break;
+                    const hex = line.slice(4);
+                    if (hex.length % 2 !== 0 || /[^0-9A-F]/.test(hex)) break;
+                    // A repeat record (0000FFnn) is not part of the manual's
+                    // own example, so it is not guessed at here; anything that
+                    // does not decode ends the data rather than being silently
+                    // swallowed.
+                    rows.push(imageRowToBytes(hex));
+                }
+                if (rows.length > 0) {
+                    // The manual's rows are all the same width, so the first
+                    // decides it; a shorter one is padded rather than shifting
+                    // every dot after it.
+                    const bytesPerRow = Math.max(...rows.map(r => r.length));
+                    const padded = rows.map(r => r.padEnd(bytesPerRow, '\0'));
+                    images.set(name, { rows: padded, widthDots: bytesPerRow * 8, heightDots: padded.length });
+                    issue('info', 'dpl-image-loaded',
+                        `<STX>I loads the image "${name}" (${bytesPerRow * 8} x ${padded.length} dots); a record that prints it draws that bitmap.`, 'I');
+                } else {
+                    // BMP, IMG and PCX arrive as binary raster files, which
+                    // this parser cannot decode — so the name is remembered to
+                    // say exactly that when a record asks for it.
+                    images.set(name, null);
+                    issue('info', 'dpl-image-undecodable',
+                        fmt.toLowerCase() === 'f'
+                            ? `<STX>I names the image "${name}" but no dot-row data followed it, so there is nothing to draw.`
+                            : `<STX>I loads "${name}" as a ${fmt.toUpperCase()} file — a binary raster format this preview cannot decode, so a label printing it will show a placeholder instead.`,
+                        'I');
+                }
+                ci = cursor - 1;
+                continue;
+            }
             if (letter === 'L') { inFormat = true; continue; }
             if (letter === 'm') { metric = true; continue; }
             if (letter === 'n') { metric = false; continue; }
@@ -677,6 +769,34 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
         //   a b c d eee ffff gggg [hhhh iiii] jj...j
         // a is one digit, b one letter (or W + two chars), c and d one char
         // each, then three 3-digit and two 4-digit fields.
+        // A Dotamax 7-bit ASCII image row — `80nndd…d` (Appendix O) — carries
+        // NO rotation digit, so it is not a record at all. Read as one it came
+        // out as a text field printing the hex digits of the bitmap, which is
+        // the worst possible failure: the label shows the image's DATA instead
+        // of the image. The rows normally follow an `<STX>I` that consumes
+        // them; this catches the ones that do not, and the first digit being
+        // outside the manual's 1-4 rotation range is what identifies them.
+        if (/^8[0-9A-Fa-f]/.test(line) && line.length > 4) {
+            // ... but only when the rest of the line really is a dot row: the
+            // count field must agree with the data that follows it, or this is
+            // an ordinary record beginning with an 8.
+            const declared = parseInt(line.slice(2, 4), 16);
+            const data = line.slice(4);
+            if (Number.isFinite(declared) && declared * 2 === data.length && /^[0-9A-Fa-f]+$/.test(data)) {
+                issue('info', 'dpl-image-row-orphan',
+                    'This line is a row of dot data from an image download — the 80nn prefix is Appendix O\'s 7-bit ASCII image format, not a label record. No <STX>I in this stream introduces it, so the image it belongs to was never loaded and nothing is drawn.', 'I');
+                continue;
+            }
+        }
+        // The image terminator, "FFFF<CR>" (Appendix O). Left to the record
+        // reader it was matched by the attribute shape and reported as an
+        // unknown format attribute, which names a defect that is not there.
+        if (line.toUpperCase() === 'FFFF') {
+            issue('info', 'dpl-image-row-orphan',
+                'FFFF terminates a Datamax image download. No <STX>I in this stream introduces one, so nothing is drawn for it.', 'I');
+            continue;
+        }
+
         const rotationDigit = line[0];
         let cursor = 1;
         const bChar = line[cursor] ?? '';
@@ -1008,6 +1128,59 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                 wMag: Math.max(1, Math.round(wMult * (metric.width / cell.w))),
                 source: { type: 'fixed', data: text },
             } as TextElement);
+            continue;
+        }
+
+        // --- Image (b = Y), Table 8-11, p. 139 -------------------------------
+        // "a = 1 Fixed Value; b = Y Image; c = 1 to 9, A to Z, and a to z Width
+        // Multiplier; d = ... Height Multiplier; eee = 000 Fixed Value;
+        // ffff = Row; gggg = Column; jj...j = ASCII string, up to 16 characters
+        // followed by a termination character" — the image's name. "Images can
+        // be printed only in Rotation 1."
+        if (bChar === 'Y') {
+            const name = payload.trim().split(/\s+/)[0] ?? '';
+            const wMult = dplMultiplierValue(cChar);
+            const hMult = dplMultiplierValue(dChar);
+            const img = images.get(name);
+            if (img) {
+                // "Width Multiplier" and "Height Multiplier" scale the stored
+                // bitmap, so each SOURCE dot becomes a wMult x hMult block —
+                // the rows are therefore expanded rather than the destination
+                // scaled, which keeps the dots square.
+                const expanded: string[] = [];
+                for (const row of img.rows) {
+                    const line2 = Array.from({ length: img.widthDots }, (_, x) => {
+                        const bit = (row.charCodeAt(x >> 3) >> (7 - (x & 7))) & 1;
+                        return '0'.repeat(wMult - 1) + (bit ? '1' : '0');
+                    }).join('');
+                    // pack the expanded 1/0 string back into bytes
+                    let packed = '';
+                    for (let k = 0; k < line2.length; k += 8) {
+                        packed += String.fromCharCode(parseInt(line2.slice(k, k + 8).padEnd(8, '0'), 2));
+                    }
+                    for (let rep = 0; rep < hMult; rep++) expanded.push(packed);
+                }
+                elements.push({
+                    kind: 'graphic', id: nextId++, ox: col, oy: row, f: rot,
+                    graphicId: nextId++,
+                    widthDots: img.widthDots * wMult,
+                    heightDots: expanded.length,
+                    rows: expanded,
+                    name,
+                } as GraphicElement);
+                continue;
+            }
+            issue('info', images.has(name) ? 'dpl-image-undecodable' : 'dpl-image-missing',
+                images.has(name)
+                    ? `The record prints the image "${name}", which was loaded as a binary raster file this preview cannot decode; a placeholder is drawn in its place.`
+                    : `The record prints the image "${name}", but no <STX>I command in this stream loads it — the image lives in a printer memory module, which this preview does not have.`,
+                bChar);
+            // A named placeholder, so the label shows WHERE the image goes
+            // rather than silently leaving the space empty.
+            elements.push({
+                kind: 'unknown', id: nextId++, ox: col, oy: row, f: rot,
+                command: bChar, raw: payload.trim(), prefix: bChar,
+            } as UnknownElement);
             continue;
         }
 
