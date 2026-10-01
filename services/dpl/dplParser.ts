@@ -60,20 +60,75 @@ const closestIrFont = (heightDots: number): string => {
 };
 
 /**
- * The point size of a smooth-font record.
+ * The point size of a scalable-font record (b = 9).
  *
- * Font 9 is sized through `eee`: "000-999, A04-A72" (Table 8-5). The A-form
- * states POINTS directly, and the manual is explicit that points are the
- * portable choice ("To ensure that the data stream is portable to different
- * Datamax printers, specify the font size in points"). The numeric form is
- * the font's I.D. number, not a size, so a numeric eee falls back to the
- * default rather than inventing a point size from an id.
+ * THE SIZE IS NOT IN `eee` for the coded forms. Table 8-5 gives that field two
+ * jobs at once — "Font height; Font selection" — over the range `000-999,
+ * A04-A72, S00-S9z`, and the `S` forms select a FONT rather than a size: `SA0`
+ * is CG Times, `S00` a CG Triumvirate size, `UK1` a Kanji Gothic. The size for
+ * those lives in the OPTIONAL SCALABLE FONT HEIGHT field `hhhh`, which the same
+ * chapter says "must be specified for scalable fonts" and which this parser was
+ * discarding without reading.
+ *
+ * `hhhh` states points or dots by its first character: "To specify the height in
+ * points the first character of the field is a `P' followed by the number of
+ * points, 004 to 999. To specify the size in dots, all four characters must be
+ * numeric."
+ *
+ * The `A04`-`A72` form states points directly in `eee` and leaves `hhhh` unused,
+ * so it is still read from there. Anything else has no size to read and falls
+ * back to the default rather than inventing one from a font id.
  */
-const smoothPointFromSize = (eee: string, _payload: string): number => {
-    const m = /^[Aa](\d{2})$/.exec(eee.trim());
-    if (m) return Math.max(1, parseInt(m[1], 10));
+const smoothPointFromSize = (eee: string, heightField: string): number => {
+    // The optional scalable height wins: it is the field the manual says must
+    // carry the size for a scalable font.
+    const h = (heightField ?? '').trim();
+    if (h.length >= 4) {
+        const points = /^[Pp](\d{3})/.exec(h);
+        if (points) return Math.max(1, parseInt(points[1], 10));
+        if (/^\d{4}$/.test(h)) {
+            // Dots, not points: "There are 72.307 points per 1 inch (2.847 mm)"
+            // and the manual notes a dot size "will output differently on
+            // printers with different DPI/MMPI resolutions". The preview works
+            // at 203 dpi.
+            const dots = parseInt(h, 10);
+            if (dots > 0) return Math.max(1, Math.round((dots / 203) * 72.307));
+        }
+    }
+    const a = /^[Aa](\d{2})$/.exec(eee.trim());
+    if (a) return Math.max(1, parseInt(a[1], 10));
     return 12;
 };
+
+/**
+ * The scalable font options Appendix Q adds, by their `eee` code.
+ *
+ * "Scalable CG TIMES Font Code (`eee' field): SA0 -CG TIMES, SA1 - CG TIMES
+ * ITALIC, SA2 - CG TIMES BOLD, SA3 - CG TIMES BOLD ITALIC"; the double-byte
+ * options are the KANJI, CHINESE and KOREAN tables, where the code is `U`/`u`
+ * plus the font's own name (`U40`, `UK1`, `UC0`, `UGB`).
+ *
+ * The CASE IS THE ADDRESSING, which is why this is looked up case-sensitively
+ * before the upper-case name is taken: each table lists a code twice, e.g.
+ * `UC0` marked binary and `uc0` marked hex ASCII, and both print the same font.
+ * Lower-case codes are the hex-ASCII spelling and the payload is hex pairs; a
+ * table whose name is not known still has its hex spelling recognised, because
+ * the case carries that on its own.
+ */
+const ILPC_FONT_NAMES: Record<string, { name: string }> = {
+    SA0: { name: 'CG Times' },
+    SA1: { name: 'CG Times Italic' },
+    SA2: { name: 'CG Times Bold' },
+    SA3: { name: 'CG Times Bold Italic' },
+    U40: { name: 'Kanji Gothic' },
+    UK1: { name: 'Kanji Gothic' },
+    UC0: { name: 'Simplified Chinese GB' },
+    UGB: { name: 'Simplified Chinese GB' },
+};
+
+/** True when a double-byte code is written in its lower-case hex-ASCII form. */
+const isHexAddressedCode = (code: string): boolean =>
+    /^u[A-Za-z0-9]{2}$/.test(code);
 
 export interface DplCommand {
     name: string;
@@ -876,13 +931,25 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
         // hhhh/iiii exist ONLY for the scalable-font form (b = 9 with an S/u
         // specifier in eee). Their presence is decided by the header, not by
         // guessing at the payload — a wrong guess eats 8 characters of data.
-        const scalable = bChar === DPL_SMOOTH_FONT && /^[SUu]/.test(eee);
-        if (scalable && payload.length >= 8) {
-            payload = payload.slice(8);
-        } else if (bChar === DPL_SMOOTH_FONT && payload.length >= 8 && /^\d{4}/.test(payload)) {
-            // A smooth font sized in dots: the manual's second form, where
-            // hhhh and iiii are numeric. Same eight characters either way.
-            payload = payload.slice(8);
+        // The two optional fields are kept, not just skipped: `hhhh` is where a
+        // scalable font's SIZE lives whenever `eee` is selecting a font rather
+        // than stating a height.
+        //
+        // They are consumed for EVERY font-9 record whose data begins with a
+        // well-formed pair, not only for the `S00`/`A04` forms. "The height of a
+        // scalable font can be specified in two ways: ... To specify the height
+        // in points the first character of the field is a `P' followed by the
+        // number of points, 004 to 999. To specify the size in dots, all four
+        // characters must be numeric", and the fields "must be specified for
+        // scalable fonts" — so an `A36` record carrying them had them printed
+        // as DATA ("P036P020Text"), because only the coded forms consumed them.
+        let fontHeightField = '';
+        if (bChar === DPL_SMOOTH_FONT) {
+            const pair = /^([Pp]\d{3}|\d{4})([Pp]\d{3}|\d{4})/.exec(payload);
+            if (pair) {
+                fontHeightField = pair[1];
+                payload = payload.slice(8);
+            }
         }
 
         const row = positionToDots(num(ffff, 0) + rowOffset, 203);
@@ -1170,16 +1237,47 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
             const wMult = dplMultiplierValue(cChar) * dotWidth;
             const hMult = dplMultiplierValue(dChar) * dotHeight;
             if (isSmooth) {
+                const code = eee.slice(0, 3);
+                const ilpc = ILPC_FONT_NAMES[code.toUpperCase()];
+                // The case is the addressing, so it is read from the code
+                // itself rather than from the table — an option this build does
+                // not know by name still has its hex spelling recognised.
+                const hexAddressing = isHexAddressedCode(code);
                 elements.push({
                     kind: 'text', id: nextId++, ox: col, oy: row, f: rot,
-                    // Font 9 is the AGFA smooth/scalable face, drawn through the
+                    // Font 9 is the AGILE smooth/scalable face, drawn through the
                     // IR's outline path (c25) so the point size can be honoured.
                     font: '25', hMag: hMult, wMag: wMult,
-                    pointSize: smoothPointFromSize(eee, payload),
+                    pointSize: smoothPointFromSize(eee, fontHeightField),
                     source: { type: 'fixed', data: text },
                 } as TextElement);
-                issue('info', 'dpl-smooth-font',
-                    'DPL font 9 is the scalable CG Triumvirate; the preview draws it with the outline face, so glyph shapes differ from the printer\'s.', bChar);
+                if (hexAddressing) {
+                    // Appendix Q's tables give each scalable option both a
+                    // BINARY and a HEX-ASCII addressing, and the letter case is
+                    // the switch: "U40" sends the bytes themselves while "u40"
+                    // sends them as hex pairs. Both carry the same font code, so
+                    // a case-sensitive lookup is what tells them apart.
+                    issue('info', 'dpl-ilpc-hex-addressing',
+                        `This ${ilpc.name} record addresses its characters in HEX ASCII (Appendix Q), so the preview shows the hex as written rather than the glyphs — the printer converts each pair into one double-byte character.`, bChar);
+                } else if (/<[0-9A-Fa-f]{2}>/.test(payload)) {
+                    // The manual writes its double-byte samples in a notation it
+                    // explains in its own note: "The notation '<xx>' in this DPL
+                    // file should be interpreted by the READER as representing
+                    // the hexadecimal value of the byte sent to the printer." It
+                    // is addressed to a person converting the sample, not to the
+                    // printer, so it is NOT decoded here — the printer would
+                    // print the notation as literally as this preview does. What
+                    // it gets is the explanation, because a pasted sample whose
+                    // glyphs come out as "<4D><3F>" is otherwise baffling.
+                    issue('info', 'dpl-hex-notation',
+                        'This data uses the "<xx>" notation from Appendix Q, which the manual asks the READER to convert into the byte it names — the printer would print these characters literally. Replace each <xx> with that byte to see the glyphs.', bChar);
+                } else if (ilpc) {
+                    issue('info', 'dpl-ilpc-font',
+                        `This is the ${ilpc.name} option (Appendix Q), not the resident CG Triumvirate; the preview draws it with the outline face, so the glyphs will differ from the printer's.`, bChar);
+                } else {
+                    issue('info', 'dpl-smooth-font',
+                        'DPL font 9 is the scalable CG Triumvirate; the preview draws it with the outline face, so glyph shapes differ from the printer\'s.', bChar);
+                }
                 continue;
             }
             const metric = DPL_FONTS[bChar] ?? FALLBACK_DPI_FONT;

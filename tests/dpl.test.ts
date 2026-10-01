@@ -929,6 +929,116 @@ describe('DPL images (<STX>I p.20 and Table 8-11)', () => {
     });
 });
 
+describe('DPL ILPC font options (Appendix Q, p. 257)', () => {
+    // Layout: a b c d (4) + eee (3) + ffff (4) + gggg (4) + hhhh (4) + iiii (4)
+    // = 23 characters before the data. Built rather than written out, because a
+    // hand-counted header that is a character short shifts every field and
+    // looks exactly like a parser bug.
+    const smoothRec = (eee: string, h: string, i: string, data: string) =>
+        `1911${eee}0020` + '0200' + h + i + data;
+    const issuesOf = (eee: string, data: string, h = 'P036', i = 'P020') =>
+        parseDPL(`\x02L\r${smoothRec(eee, h, i, data)}\rE\r`, PAGE).issues.map(x => x.code);
+    const dataOf = (eee: string, data: string, h = 'P036', i = 'P020') =>
+        (parseDPL(`\x02L\r${smoothRec(eee, h, i, data)}\rE\r`, PAGE).elements[0] as any).source.data;
+
+    it('names the CG Times option instead of calling it CG Triumvirate', () => {
+        // "Scalable CG TIMES Font Code (`eee' field): SA0 -CG TIMES, SA1 - CG
+        // TIMES ITALIC, SA2 - CG TIMES BOLD, SA3 - CG TIMES BOLD ITALIC". All
+        // four were reported as the resident CG Triumvirate, which names the
+        // wrong face for a field that is explicitly an option.
+        for (const code of ['SA0', 'SA1', 'SA2', 'SA3']) {
+            const codes = issuesOf(code, 'Greek text');
+            expect(codes, code).toContain('dpl-ilpc-font');
+            expect(codes, code).not.toContain('dpl-smooth-font');
+        }
+        // and the plain scalable font is still reported as itself
+        const plain = issuesOf('S00', 'Normal text');
+        expect(plain).toContain('dpl-smooth-font');
+        expect(plain).not.toContain('dpl-ilpc-font');
+    });
+
+    it('recognises the double-byte options by their code', () => {
+        for (const code of ['U40', 'UK1', 'UC0']) {
+            expect(issuesOf(code, 'x'), code).toContain('dpl-ilpc-font');
+        }
+    });
+
+    it('reads the letter case as the addressing, per the Appendix Q tables', () => {
+        // Each double-byte table lists its code twice — "UC0" against Binary
+        // Addressing and "uc0" against Hex ASCII Addressing — and both select
+        // the same font. So the case carries the addressing on its own, which
+        // is why it is read from the code rather than from a name table.
+        const bin = issuesOf('U40', 'x');
+        expect(bin).toContain('dpl-ilpc-font');
+        expect(bin).not.toContain('dpl-ilpc-hex-addressing');
+
+        const hex = issuesOf('uK1', '4D3F2121');
+        expect(hex).toContain('dpl-ilpc-hex-addressing');
+        expect(hex, 'a code table this build does not know still carries it').not.toContain('dpl-ilpc-font');
+
+        // and the payload of a hex-addressed record is the hex as written,
+        // since each pair is one double-byte character
+        expect(dataOf('uK1', '4D3F2121')).toBe('4D3F2121');
+    });
+
+    it('explains the "<xx>" notation rather than decoding it', () => {
+        // The manual's samples are written `1911U4002650150P012P012<4D><3F>`
+        // and explained in a note: "The notation '<xx>' in this DPL file should
+        // be interpreted by the READER as representing the hexadecimal value of
+        // the byte sent to the printer." It is addressed to a person converting
+        // the sample, not to the printer — so it is NOT decoded here, and the
+        // reader is told why their glyphs came out as hex instead.
+        const codes = issuesOf('U40', '<4D><3F><00><00>');
+        expect(codes).toContain('dpl-hex-notation');
+        expect(dataOf('U40', '<4D><3F><00><00>'), 'the notation is not silently converted').toBe('<4D><3F><00><00>');
+        // raw bytes, which IS what the printer receives, take the normal path
+        expect(issuesOf('U40', '\x4d\x3f\x00\x00')).not.toContain('dpl-hex-notation');
+    });
+
+    it('reads the manual\'s own ILPC sample lines intact', () => {
+        // Appendix Q's CG Times sample, verbatim. Its first data field begins
+        // with a parenthesised code — part of the DATA, not a parameter.
+        const el = parseDPL('\x02L\r1911SA003600020P020P020(WG) Greek Characters from\rE\r', PAGE)
+            .elements[0] as any;
+        expect(el.source.data).toBe('(WG) Greek Characters from');
+    });
+
+    it('takes a scalable font\'s size from the field that carries it', () => {
+        // THE SIZE IS NOT IN `eee` for the coded forms. Table 8-5 gives that
+        // field two jobs — "Font height; Font selection" over the range
+        // `000-999, A04-A72, S00-S9z` — and the `S` forms select a FONT (SA0 is
+        // CG Times, S00 a CG Triumvirate size, UK1 a Kanji Gothic). The size
+        // lives in the OPTIONAL SCALABLE FONT HEIGHT field `hhhh`, which the
+        // same chapter says "must be specified for scalable fonts" and which
+        // this parser was discarding unread: every scalable record was drawn at
+        // the same 12pt whatever it asked for.
+        expect((parseDPL(`\x02L\r${smoothRec('SA0', 'P036', 'P020', 'Greek')}\rE\r`, PAGE).elements[0] as any).pointSize)
+            .toBe(36);
+        expect((parseDPL(`\x02L\r${smoothRec('SA0', 'P072', 'P020', 'Greek')}\rE\r`, PAGE).elements[0] as any).pointSize)
+            .toBe(72);
+        // "To specify the size in dots, all four characters must be numeric" —
+        // 200 dots at 203 dpi is about 71 points, not 200.
+        const dots = (parseDPL(`\x02L\r${smoothRec('SA0', '0200', '0200', 'Greek')}\rE\r`, PAGE).elements[0] as any).pointSize;
+        expect(dots, 'dots are converted, not read as points').toBeGreaterThan(60);
+        expect(dots).toBeLessThan(80);
+        // and the A-form states points in `eee` itself
+        expect((parseDPL(`\x02L\r${smoothRec('A36', 'P036', 'P020', 'Text')}\rE\r`, PAGE).elements[0] as any).pointSize)
+            .toBe(36);
+    });
+
+    it('consumes the optional size fields for EVERY scalable form', () => {
+        // They belong to the record, not to one spelling of it. Consuming them
+        // only for the coded forms printed them as DATA on an `A36` record —
+        // measured: "P036P020Text".
+        expect(dataOf('A36', 'Text')).toBe('Text');
+        expect(dataOf('S00', 'Text')).toBe('Text');
+        expect(dataOf('U40', '\x4d\x3f')).toBe('M?');
+        // and a font-9 record that carries none is left alone
+        const plain = parseDPL('\x02L\r1911A360020' + '0200' + 'PlainText\rE\r', PAGE).elements[0] as any;
+        expect(plain.source.data).toBe('PlainText');
+    });
+});
+
 describe('DPL EAN/UPC variants and the price checksum (Appendix F/G/P)', () => {
     // The header is positional — a b c d eee ffff gggg is 1+1+1+1+3+4+4 = 15
     // characters — so records are BUILT from parts here. A hand-written one a
