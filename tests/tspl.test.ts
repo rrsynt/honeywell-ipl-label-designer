@@ -1043,7 +1043,7 @@ describe('MicroPDF417 works in TSPL (2026-09-30)', () => {
         expect(block.wrapDots, 'the box width is what wraps it').toBe(200);
         expect(block.boxHeightDots).toBe(140);
         expect(block.spaceDots, 'the leading between lines').toBe(20);
-        expect(block.align).toBe(2);
+        expect(block.align).toBe('center');
         expect(block.hMag).toBe(2);
 
         // A TEXT field of the same characters has NO box, so it must not wrap.
@@ -1062,12 +1062,12 @@ describe('MicroPDF417 works in TSPL (2026-09-30)', () => {
         // omitted from the END, so a two-value tail is NOT "align + fit".
         const two = parseTSPL(`CLS\nBLOCK 15,15,200,140,"0",0,1,1,20,2,"${para}"`).elements[0] as any;
         expect(two.spaceDots, 'two values are space + align').toBe(20);
-        expect(two.align).toBe(2);
+        expect(two.align).toBe('center');
         expect(two.fit).toBeUndefined();
         // all three, including the fit flag
         const three = parseTSPL(`CLS\nBLOCK 15,15,200,140,"0",0,1,1,20,2,1,"${para}"`).elements[0] as any;
         expect(three.spaceDots).toBe(20);
-        expect(three.align).toBe(2);
+        expect(three.align).toBe('center');
         expect(three.fit).toBe(true);
     });
 

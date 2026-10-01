@@ -82,18 +82,31 @@ export interface TextElement extends ElementBase {
      * its default anchor was derived from that barcode's rendered box. */
     interpretiveOf?: number;
     /**
-     * TSPL BLOCK (manual p. 80): a paragraph laid out inside a width/height
-     * box, wrapped at the box width. Absent for an ordinary single-line TEXT
-     * field, whose content is drawn as written — the two must not be confused,
-     * because wrapping text that has no box would reflow a label that prints
-     * exactly as authored.
+     * A paragraph laid out inside a width/height box, wrapped at the box width
+     * — TSPL's BLOCK (manual p. 80) and ZPL's ^FB. Absent for an ordinary
+     * single-line TEXT field, whose content is drawn as written: the two must
+     * not be confused, because wrapping text that has no box would reflow a
+     * label that prints exactly as authored.
      */
     wrapDots?: number;
-    /** BLOCK's box height, and the extra leading between lines in dots. */
+    /** The box height, and how many wrapped lines are drawn before the rest is
+     *  CUT OFF — the behaviour measured from ZPL's ^FB, where a 2-line box
+     *  drops the continuation rather than overflowing. */
     boxHeightDots?: number;
+    maxLines?: number;
+    /** Extra leading between lines in dots, ADDED to the normal line pitch —
+     *  "Add or delete the space between lines" (TSPL), which ^FB's third
+     *  parameter behaves like too. Measured, not assumed: see the renderer. */
     spaceDots?: number;
-    /** BLOCK's align: 0/1 left, 2 centre, 3 right. */
-    align?: number;
+    /**
+     * Per-line alignment inside the box, as a NAME rather than a number.
+     *
+     * A number would be a live trap: TSPL's BLOCK numbers it 0/1 left, 2
+     * centre, 3 right, while TSPL's own TEXT command numbers 0 left, 1 centre,
+     * 2 right, and ZPL's ^FB uses letters L/C/R/J. The same digit therefore
+     * means two different things across these three commands.
+     */
+    align?: 'left' | 'center' | 'right' | 'justify';
     /** BLOCK's fit flag — shrink the text so the paragraph fits the box. */
     fit?: boolean;
     source: FieldSource;

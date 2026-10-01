@@ -155,6 +155,57 @@ describe('parseZPL', () => {
         expect(lost.issues.map(i => i.code)).toContain('zpl-shape-no-origin');
     });
 
+    it('draws ^FB as a wrapped paragraph, with every parameter oracle-checked', () => {
+        // No ZPL manual is in this repo, so each parameter of
+        // ^FB width,maxLines,lineSpacing,align was settled by PROBING the
+        // oracle and measuring the ink:
+        //   ^FB300,3,4,L -> 2 lines, extent 284 | ^FB150,3,4,L -> 3 lines, 131
+        //     so p1 is the BOX WIDTH in dots — narrower wraps sooner;
+        //   ^FB150,n for n = 1..4 drew exactly n lines (5 at n=6, where the
+        //   text ran out), so p2 is a CAP that CUTS the continuation;
+        //   spacing 0/2/10/30 -> ink height 39/41/49/69, so p3 is dots ADDED
+        //   to the line pitch, not a replacement;
+        //   L/C/R left the lines at x104/109/113 and J widened to the box edge,
+        //   so p4 is per-line alignment.
+        const para = (fb: string) =>
+            parseZPL(`^XA^FO100,30${fb}^A0N,20,20^FDthe quick brown fox jumps over the lazy dog^FS^XZ`)
+                .elements[0] as any;
+
+        const wrapped = para('^FB300,3,4,L');
+        expect(wrapped.wrapDots, 'p1 is the wrap width').toBe(300);
+        expect(wrapped.maxLines).toBe(3);
+        expect(wrapped.spaceDots, 'p3 is extra leading').toBe(4);
+        expect(wrapped.align, 'p4 L is left, so it stays unset').toBeUndefined();
+
+        // A paragraph's size IS its box: without this it would measure one
+        // long line running off the label.
+        expect(estimateElementSize(wrapped, DPI).lengthDots).toBe(300);
+
+        // Alignment is carried as a NAME, because TSPL's BLOCK numbers it
+        // 0/1 left, 2 centre, 3 right while its own TEXT uses 0 left, 1 centre,
+        // 2 right — the same digit means different things across the commands.
+        expect(para('^FB300,3,4,C').align).toBe('center');
+        expect(para('^FB300,3,4,R').align).toBe('right');
+        expect(para('^FB300,3,4,J').align).toBe('justify');
+        expect(para('^FB300,3,4,L').align).toBeUndefined();
+
+        // The line cap CUTS: the layout must not reserve height for lines that
+        // are never drawn.
+        const two = para('^FB150,2,4,L');
+        const six = para('^FB150,6,4,L');
+        expect(estimateElementSize(two, DPI).crossDots)
+            .toBeLessThan(estimateElementSize(six, DPI).crossDots);
+
+        // A field with no ^FB is NOT a paragraph and must never wrap.
+        const plain = parseZPL('^XA^FO100,30^A0N,20,20^FDthe quick brown fox^FS^XZ').elements[0] as any;
+        expect(plain.wrapDots).toBeUndefined();
+        expect(plain.maxLines).toBeUndefined();
+
+        // The hanging indent is named rather than silently dropped.
+        const indented = parseZPL('^XA^FO100,30^FB300,3,4,L,20^A0N,20,20^FDtext^FS^XZ');
+        expect(indented.issues.map(i => i.code)).toContain('zpl-fb-indent');
+    });
+
     it('reads a matrix barcode\'s magnification from its own parameter, not ^BY', () => {
         // ^BQ and ^BX put the MAGNIFICATION where the 1D commands put the
         // human-readable flag, and ^BY does not apply to them at all. Measured

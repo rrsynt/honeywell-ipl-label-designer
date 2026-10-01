@@ -136,6 +136,10 @@ const TSPL_KNOWN_UNENCODED: Record<string, string> = {
 /** TSPL's QR error-correction letters onto the IR's c18,m2 values. */
 const TSPL_QR_ECL: Record<string, string> = { L: 'L', M: 'M', Q: 'Q', H: 'H' };
 
+/** BLOCK's alignment numbers (manual p. 80): 0/1 left, 2 centre, 3 right. */
+const BLOCK_ALIGN: Record<number, 'left' | 'center' | 'right'> =
+    { 0: 'left', 1: 'left', 2: 'center', 3: 'right' };
+
 /**
  * The `RSS` command's symbology names onto the IR's c20,m1 version numbers
  * (TSC manual p. 71). The IR's '20' is the GS1 DataBar family the encoder
@@ -769,7 +773,11 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     wrapDots: Math.max(1, Math.trunc(num(p[2], 100))),
                     boxHeightDots: Math.max(1, Math.trunc(num(p[3], 20))),
                     ...(spaceDots !== undefined ? { spaceDots } : {}),
-                    ...(align !== undefined ? { align } : {}),
+                    // BLOCK numbers the alignments 0/1 left, 2 centre, 3 right
+                    // (manual p. 80) — NOT the 0 left, 1 centre, 2 right its own
+                    // TEXT command uses. Carried as a NAME so the two cannot be
+                    // confused for one another.
+                    ...(align !== undefined ? { align: BLOCK_ALIGN[align] } : {}),
                     ...(fit === true ? { fit: true } : {}),
                 } as TextElement));
                 if (fit === true) {

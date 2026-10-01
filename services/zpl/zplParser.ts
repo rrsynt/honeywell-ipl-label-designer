@@ -142,6 +142,11 @@ export const parseZPL = (code: string): ViewerLabel => {
     let data: string | null = null;
     /** ^FR — the field is printed white on a black box ("Field Reverse Print"). */
     let reverseField = false;
+    /** ^FB — the field is a paragraph laid out inside a box. */
+    let fbWidth: number | null = null;
+    let fbMaxLines: number | null = null;
+    let fbSpacing: number | null = null;
+    let fbAlign: 'left' | 'center' | 'right' | 'justify' | null = null;
     let nextId = 1;
 
     const issue = (level: ViewerIssue['level'], code_: string, message: string, command?: string) =>
@@ -150,6 +155,7 @@ export const parseZPL = (code: string): ViewerLabel => {
     const resetField = () => {
         origin = null; font = null; pendingBarcode = null; data = null; fieldRotation = null;
         reverseField = false;
+        fbWidth = null; fbMaxLines = null; fbSpacing = null; fbAlign = null;
     };
 
     /** IR anchor for a field whose visual top-left is (x, y). See elementVisualBox. */
@@ -195,6 +201,13 @@ export const parseZPL = (code: string): ViewerLabel => {
                 // so it would fall back to a bitmap cell and ignore the size.
                 font: '25', hMag: 1, wMag: 1, pointSize,
                 source: { type: 'fixed', data },
+                // ^FB made this field a PARAGRAPH: it wraps at the box width and
+                // is cut off after the line cap, and this is what keeps it from
+                // being drawn as one long line running off the label.
+                ...(fbWidth !== null && fbWidth > 0 ? { wrapDots: fbWidth } : {}),
+                ...(fbMaxLines !== null && fbMaxLines > 0 ? { maxLines: fbMaxLines } : {}),
+                ...(fbSpacing !== null ? { spaceDots: fbSpacing } : {}),
+                ...(fbAlign !== null && fbAlign !== 'left' ? { align: fbAlign } : {}),
             };
             const sz = estimateElementSize(el, 203);
             Object.assign(el, anchor(origin.x, origin.y, f, sz.lengthDots, sz.crossDots));
@@ -226,6 +239,31 @@ export const parseZPL = (code: string): ViewerLabel => {
             // draw, so it gets its own message rather than sharing the generic
             // "no effect here" line with settings that genuinely change nothing
             // visible.
+            case 'FB': {
+                // ^FB width,maxLines,lineSpacing,align[,hangingIndent].
+                // No ZPL manual is in this repo, so every parameter was settled
+                // by PROBING the oracle and measuring the ink:
+                //   ^FB300,3,4,L  on one long string -> 2 lines, extent 284
+                //   ^FB150,3,4,L                     -> 3 lines, extent 131
+                // so p1 is the BOX WIDTH in dots (narrower wraps sooner);
+                //   ^FB300,2,4,L  -> only 2 lines, ^FB300,6 -> 2 lines as well
+                // so p2 is NOT a wrap limit to fill but a CAP: the continuation
+                // is CUT OFF;
+                //   spacing 0/2/10/30 -> ink height 39/41/49/69
+                // so p3 is dots ADDED to the line pitch, not a replacement;
+                //   L/C/R left the lines at x104/109/113 and J widened to the
+                // box edge, so p4 is per-line alignment.
+                fbWidth = num(p[0], 0);
+                fbMaxLines = num(p[1], 0);
+                fbSpacing = num(p[2], 0);
+                const a = (p[3] ?? '').trim().toUpperCase();
+                fbAlign = a === 'C' ? 'center' : a === 'R' ? 'right' : a === 'J' ? 'justify' : 'left';
+                if (p[4] !== undefined && p[4] !== '' && num(p[4], 0) !== 0) {
+                    issue('info', 'zpl-fb-indent',
+                        '^FB\'s hanging indent applies to every line after the first; this preview wraps at the box width without it.', '^FB');
+                }
+                break;
+            }
             case 'FR':
                 // "Field Reverse Print" — the printer lays a black box behind the
                 // field and knocks the glyphs out white. That is exactly a
@@ -477,9 +515,6 @@ export const parseZPL = (code: string): ViewerLabel => {
                 } else if (cmd.name === 'GS') {
                     issue('info', 'zpl-gs-unsupported',
                         '^GS draws a named SYMBOL (check box, copyright mark, ...) from the printer\'s own font, and the glyph is not in the stream. Labelary refuses these too, so the shapes cannot be checked against a reference here.', '^GS');
-                } else if (cmd.name === 'FB') {
-                    issue('info', 'zpl-fb-unsupported',
-                        '^FB lays a paragraph out inside a width, wrapping it and aligning each line. This preview draws text as written, without a layout box.', '^FB');
                 } else if (cmd.name === 'SN') {
                     issue('info', 'zpl-sn-unsupported',
                         '^SN makes the PRINTER serialise this field, advancing it once per label. This preview draws the data as sent; the counter advance happens on the printer, not here.', '^SN');

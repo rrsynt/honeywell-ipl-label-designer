@@ -144,9 +144,16 @@ export const estimateElementSize = (
                     }
                     wrapped.push(rest);
                 }
+                // The line cap CUTS the paragraph, so the box does not grow past
+                // it — the same slice the painter applies, or the layout would
+                // reserve height for lines that are never drawn.
+                const drawn = el.maxLines !== undefined && el.maxLines > 0
+                    ? Math.min(wrapped.length, el.maxLines)
+                    : wrapped.length;
+                const pitch = el.spaceDots !== undefined ? cellH + el.spaceDots : cellH;
                 return {
                     lengthDots: Math.max(1, el.wrapDots),
-                    crossDots: Math.max(1, el.boxHeightDots ?? wrapped.length * cellH),
+                    crossDots: Math.max(1, el.boxHeightDots ?? drawn * pitch),
                 };
             }
             const maxChars = Math.max(1, ...lines.map(l => l.length));
@@ -393,9 +400,22 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
                     wrapped.push(rest);
                 }
                 lines = wrapped.length > 0 ? wrapped : [''];
-                // "Add or delete the space between lines (in dots)" — so a
-                // BLOCK's own leading REPLACES the line pitch for this field.
-                if (el.spaceDots !== undefined) lineH = Math.max(1, el.spaceDots * s);
+                // A line limit CUTS the paragraph: the printers drop the
+                // continuation rather than overflowing the box, which is what
+                // the ^FB probe showed (a 2-line box drew 2 of 6 possible
+                // lines). Dropping this would draw text the label will not have.
+                if (el.maxLines !== undefined && el.maxLines > 0) {
+                    lines = lines.slice(0, el.maxLines);
+                }
+                // "Add or delete the space between lines (in dots)" — the value
+                // is ADDED to the normal line pitch, not a replacement for it.
+                // It reads as a replacement, and that is how this was first
+                // written; the ZPL oracle settled it by measuring, since ^FB's
+                // third parameter is the same idea: raising it by 10 raised the
+                // paragraph's ink height by exactly 10 (39 -> 49), and by 30 by
+                // exactly 30 (39 -> 69). A replacement would have moved the
+                // height by a multiple of no such thing.
+                if (el.spaceDots !== undefined) lineH = Math.max(1, lineH + el.spaceDots * s);
             }
             ctx.fillStyle = '#000000';
             ctx.textBaseline = 'top';
@@ -404,8 +424,8 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
             // applied only when an alignment was asked for.
             const lineX = (line: string): number => {
                 if (el.align === undefined || el.wrapDots === undefined) return 0;
-                if (el.align === 2) return Math.max(0, (el.wrapDots - line.length * charW) / 2);
-                if (el.align === 3) return Math.max(0, el.wrapDots - line.length * charW);
+                if (el.align === 'center') return Math.max(0, (el.wrapDots - line.length * charW) / 2);
+                if (el.align === 'right') return Math.max(0, el.wrapDots - line.length * charW);
                 return 0;
             };
             if (el.borderDots && el.borderDots > 0) {
