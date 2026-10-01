@@ -118,6 +118,43 @@ describe('parseZPL', () => {
         expect(box.radiusDots).toBe(Math.round(40 * (4 / 8)));
     });
 
+    it('draws ^GC, ^GE and ^GD — and the oracle pins WHICH parameter is which', () => {
+        // No ZPL manual is in this repo, so the parameter meanings were settled
+        // by PROBING Labelary (the real ZPL printer) and measuring the ink box:
+        //   ^GC 100,4  -> 100x100      ^GC 200,4  -> 200x200   (p1 = DIAMETER)
+        //   ^GC 100,20 -> 100x100                              (p2 changes nothing)
+        //   ^GE 200,100,4 -> 200x100   ^GE 100,200,4 -> 100x200 (p1,p2 = AXES)
+        //   ^GD 200,100,4 -> 202x100   ^GD 200,100,20 -> 218x100
+        // The last pair is the evidence ^GD is a DIAGONAL and not a box: its
+        // thickness EXPANDS the ink, where ^GB's border does not.
+        const el = (zpl: string) => parseZPL(`^XA^FO50,50${zpl}^FS^XZ`).elements[0] as any;
+
+        const gc = el('^GC100,4');
+        expect(gc.kind).toBe('ellipse');
+        expect([gc.widthDots, gc.heightDots], 'a circle is equal axes').toEqual([100, 100]);
+        expect(gc.thicknessDots).toBe(4);
+        const gc2 = el('^GC200,4');
+        expect(gc2.widthDots, 'the first value IS the diameter').toBe(200);
+
+        const ge = el('^GE200,100,4');
+        expect(ge.kind).toBe('ellipse');
+        expect([ge.widthDots, ge.heightDots], 'the axes are read in order').toEqual([200, 100]);
+        const ge2 = el('^GE100,200,4');
+        expect([ge2.widthDots, ge2.heightDots]).toEqual([100, 200]);
+
+        const gd = el('^GD200,100,4');
+        expect(gd.kind).toBe('diagonal');
+        expect(gd.thicknessDots).toBe(4);
+        // The line runs corner to corner of the w x h box.
+        expect(Math.abs(gd.ex - gd.ox)).toBe(200);
+        expect(Math.abs(gd.ey - gd.oy)).toBe(100);
+
+        // A shape with no ^FO has nowhere to go, and says so.
+        const lost = parseZPL('^XA^GC100,4^FS^XZ');
+        expect(lost.elements).toHaveLength(0);
+        expect(lost.issues.map(i => i.code)).toContain('zpl-shape-no-origin');
+    });
+
     it('reads a matrix barcode\'s magnification from its own parameter, not ^BY', () => {
         // ^BQ and ^BX put the MAGNIFICATION where the 1D commands put the
         // human-readable flag, and ^BY does not apply to them at all. Measured
@@ -185,10 +222,31 @@ describe('parseZPL', () => {
         expect(label.issues.map(i => i.code)).not.toContain('zpl-image-shifted');
     });
 
-    it('names a reversed field rather than sharing the harmless message', () => {
+    it('DRAWS a reversed field instead of only naming it', () => {
+        // ^FR ("Field Reverse Print") lays a black box behind the field and
+        // knocks the glyphs out white — a reversal of the field's own box,
+        // which the IR expresses. This used to be reported as a thing the
+        // preview could not do.
         const label = parseZPL('^XA^FO0,0^FR^A0N,20,20^FDHi^FS^XZ');
-        expect(label.issues.map(i => i.code)).toContain('zpl-field-reverse');
+        expect((label.elements[0] as TextElement).kind, 'the field still draws').toBe('text');
+        const rev = label.elements[1] as { kind: string; widthDots: number; heightDots: number };
+        expect(rev.kind, 'and an inversion follows it').toBe('reverse');
+        expect(rev.widthDots).toBeGreaterThan(0);
+        expect(rev.heightDots).toBeGreaterThan(0);
+        expect(label.issues.map(i => i.code), 'nothing to complain about').not.toContain('zpl-field-reverse');
         expect(label.issues.map(i => i.code)).not.toContain('zpl-unsupported');
+
+        // The control: without ^FR there is no inversion at all.
+        const plain = parseZPL('^XA^FO0,0^A0N,20,20^FDHi^FS^XZ');
+        expect(plain.elements.map(e => e.kind)).toEqual(['text']);
+    });
+
+    it('a ^FR field that draws NOTHING must not invert the field before it', () => {
+        // commitField bails when there is no data or no origin. Inverting
+        // "the last element" unconditionally would then reach back and reverse
+        // whatever was drawn before — which a field that prints nothing cannot do.
+        const label = parseZPL('^XA^FO10,10^GB100,50,3^FS^FO99,99^FR^FD^FS^XZ');
+        expect(label.elements.map(e => e.kind), 'the box survives un-inverted').toEqual(['box']);
     });
 
     it('parses only the first label of a multi-label stream and says so', () => {

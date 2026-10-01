@@ -17,8 +17,8 @@
 //    top-left back from it — so this parser converts one into the other.
 //  - ^A0 is font 0, the printer's scalable font. Its height/width are in dots.
 
-import type { ViewerLabel, ViewerElement, TextElement, BarcodeElement, LineElement, BoxElement, ViewerIssue } from '../ipl/types';
-import { estimateElementSize } from '../ipl/renderer';
+import type { ViewerLabel, ViewerElement, TextElement, BarcodeElement, LineElement, BoxElement, ViewerIssue, EllipseElement, DiagonalElement } from '../ipl/types';
+import { estimateElementSize, elementVisualBox } from '../ipl/renderer';
 
 const ROT: Record<string, number> = { N: 0, R: 1, I: 2, B: 3 };
 
@@ -140,6 +140,8 @@ export const parseZPL = (code: string): ViewerLabel => {
     let byRatio = 3;           // ^BY wide:narrow, default 3.0
     let byHeight = 10;
     let data: string | null = null;
+    /** ^FR — the field is printed white on a black box ("Field Reverse Print"). */
+    let reverseField = false;
     let nextId = 1;
 
     const issue = (level: ViewerIssue['level'], code_: string, message: string, command?: string) =>
@@ -147,6 +149,7 @@ export const parseZPL = (code: string): ViewerLabel => {
 
     const resetField = () => {
         origin = null; font = null; pendingBarcode = null; data = null; fieldRotation = null;
+        reverseField = false;
     };
 
     /** IR anchor for a field whose visual top-left is (x, y). See elementVisualBox. */
@@ -161,6 +164,9 @@ export const parseZPL = (code: string): ViewerLabel => {
 
     const commitField = () => {
         if (data === null || origin === null) { resetField(); return; }
+        // Which element this field produces, so ^FR inverts THAT one — a field
+        // that draws nothing must not invert whatever came before it.
+        const before = elements.length;
         const f = fieldRotation ?? rotation;
         if (pendingBarcode) {
             const el: BarcodeElement = {
@@ -194,6 +200,19 @@ export const parseZPL = (code: string): ViewerLabel => {
             Object.assign(el, anchor(origin.x, origin.y, f, sz.lengthDots, sz.crossDots));
             elements.push(el);
         }
+        // ^FR ("Field Reverse Print") inverts this field's own box, so it goes
+        // in AFTER the field, the same order the printer lays them down: black
+        // box, then the glyphs knocked out of it. The box is the field's VISUAL
+        // extent, taken from the element just pushed rather than recomputed, so
+        // a rotated field is inverted where it actually landed.
+        if (reverseField && elements.length > before) {
+            const box = elementVisualBox(elements[elements.length - 1], 203);
+            elements.push({
+                kind: 'reverse', id: nextId++, ox: box.x, oy: box.y, f: 0,
+                widthDots: Math.max(1, Math.round(box.w)),
+                heightDots: Math.max(1, Math.round(box.h)),
+            } as ViewerElement);
+        }
         resetField();
     };
 
@@ -208,9 +227,12 @@ export const parseZPL = (code: string): ViewerLabel => {
             // "no effect here" line with settings that genuinely change nothing
             // visible.
             case 'FR':
-                issue('info', 'zpl-field-reverse',
-                    '^FR prints this field white on a black background; this preview draws it as ordinary black-on-white.',
-                    '^FR');
+                // "Field Reverse Print" — the printer lays a black box behind the
+                // field and knocks the glyphs out white. That is exactly a
+                // reversal of the field's own area, so it is DRAWN by pushing a
+                // ReverseElement over the field's box after it commits, rather
+                // than reported as something the preview cannot do.
+                reverseField = true;
                 break;
             // ^LH ^LT ^LS move the WHOLE image on the media, so they belong
             // with the picture-changing commands, not with the printer
@@ -360,6 +382,71 @@ export const parseZPL = (code: string): ViewerLabel => {
                 resetField();
                 break;
             }
+            case 'GC':
+            case 'GE': {
+                // ^GC d,t and ^GE w,h,t. The parameter meanings were settled by
+                // PROBING THE ORACLE rather than from memory — no ZPL manual is
+                // in this repo. Labelary renders ^GC 100,4 as a 100x100 ink box
+                // and ^GC 200,4 as 200x200, so the first value is the diameter
+                // and the second does NOT change the extent (a border drawn
+                // inside it). For ^GE, 200,100 gives 200x100 and swapping the
+                // axes swaps the box, so those two are the axes.
+                if (origin === null) {
+                    issue('warning', 'zpl-shape-no-origin', `^${cmd.name} has no ^FO before it, so it has nowhere to go. Skipped.`, `^${cmd.name}`);
+                    break;
+                }
+                const a = num(p[0], 0);
+                const b = cmd.name === 'GC' ? a : num(p[1], 0);
+                const thickness = Math.max(1, num(p[cmd.name === 'GC' ? 1 : 2], 1));
+                if (a <= 0 || b <= 0) {
+                    issue('info', 'zpl-shape-empty', `^${cmd.name} with no size draws nothing.`, `^${cmd.name}`);
+                    resetField();
+                    break;
+                }
+                const { ox, oy } = anchor(origin.x, origin.y, rotation, a, b);
+                // ^GC is exactly the case where both axes are equal — which is
+                // how the IR already expresses a circle.
+                elements.push({
+                    kind: 'ellipse', id: nextId++, ox, oy, f: rotation,
+                    widthDots: a, heightDots: b, thicknessDots: thickness,
+                } as EllipseElement);
+                resetField();
+                break;
+            }
+            case 'GD': {
+                // ^GD w,h,t[,color[,orientation]] — a diagonal line. The oracle
+                // shows its thickness EXPANDS the ink box (202x100 at t=4,
+                // 218x100 at t=20) where ^GB's border does not, which is what a
+                // diagonal stroke does; that is also the evidence it really is a
+                // slanted line rather than a box.
+                if (origin === null) {
+                    issue('warning', 'zpl-shape-no-origin', '^GD has no ^FO before it, so it has nowhere to go. Skipped.', '^GD');
+                    break;
+                }
+                const w = num(p[0], 0);
+                const h = num(p[1], 0);
+                const thickness = Math.max(1, num(p[2], 1));
+                if (w <= 0 && h <= 0) {
+                    issue('info', 'zpl-shape-empty', '^GD with no size draws nothing.', '^GD');
+                    resetField();
+                    break;
+                }
+                // The line runs corner to corner of the w x h box. Which pair of
+                // corners is the documented selector: "R" is the rising (bottom
+                // left to top right) diagonal, and the default is the other.
+                const rising = /^R$/i.test((p[3] ?? '').trim());
+                const { ox, oy } = anchor(origin.x, origin.y, rotation, w, h);
+                elements.push({
+                    kind: 'diagonal', id: nextId++, f: 0,
+                    ox,
+                    oy: rising ? oy + h : oy,
+                    ex: ox + w,
+                    ey: rising ? oy : oy + h,
+                    thicknessDots: thickness,
+                } as DiagonalElement);
+                resetField();
+                break;
+            }
             case 'FH': break; // hex indicator — \_xx is always decoded, so this is a no-op here
             case 'CI': {
                 // ^CI n selects the encoding. The viewer assumes UTF-8 (^CI28),
@@ -377,8 +464,25 @@ export const parseZPL = (code: string): ViewerLabel => {
             case 'PQ': break; // print quantity — a job concern, not a label concern
             case 'XZ': break;
             default:
+                // Each of these says WHAT the command is and WHY it cannot be
+                // drawn. A generic "not part of the supported subset" reads as
+                // a choice this app made, and that reading was wrong for ^GC,
+                // ^GE, ^GD and ^FR in turn — every one of them turned out to be
+                // drawable. The ones left are outside what this subset expresses.
                 if (cmd.name.startsWith('B')) {
                     issue('warning', 'zpl-barcode-unsupported', `^${cmd.name} is a barcode this viewer does not draw yet. Its data is kept in the issues but nothing is rendered for it.`, `^${cmd.name}`);
+                } else if (cmd.name === 'GF') {
+                    issue('info', 'zpl-gf-unsupported',
+                        '^GF carries a bitmap as hexadecimal rows in the stream, 8 bits per byte across the row. This viewer draws graphics from the IPL column form (6 bits per character), so the payload is not decoded.', '^GF');
+                } else if (cmd.name === 'GS') {
+                    issue('info', 'zpl-gs-unsupported',
+                        '^GS draws a named SYMBOL (check box, copyright mark, ...) from the printer\'s own font, and the glyph is not in the stream. Labelary refuses these too, so the shapes cannot be checked against a reference here.', '^GS');
+                } else if (cmd.name === 'FB') {
+                    issue('info', 'zpl-fb-unsupported',
+                        '^FB lays a paragraph out inside a width, wrapping it and aligning each line. This preview draws text as written, without a layout box.', '^FB');
+                } else if (cmd.name === 'SN') {
+                    issue('info', 'zpl-sn-unsupported',
+                        '^SN makes the PRINTER serialise this field, advancing it once per label. This preview draws the data as sent; the counter advance happens on the printer, not here.', '^SN');
                 } else {
                     issue('info', 'zpl-unsupported', `^${cmd.name} is not part of the supported ZPL subset, so it has no effect here.`, `^${cmd.name}`);
                 }
