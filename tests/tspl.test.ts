@@ -24,7 +24,8 @@ import { join } from 'node:path';
 import { parseTSPL, tokenizeTspl, unescapeTspl, TSPL_FONT_SIZES } from '../services/tspl/tsplParser';
 import { generateTSPL, escapeTsplData } from '../services/tspl/tsplGenerator';
 import { buildBwipSpec, measureBarcode, ensureBarcodesReady } from '../services/ipl/barcodes';
-import { estimateElementSize, elementVisualBox } from '../services/ipl/renderer';
+import { estimateElementSize, elementVisualBox, renderLabel, computeLabelExtent } from '../services/ipl/renderer';
+import { newRealCanvas } from './golden/setup';
 import { jobSendabilityError, renderJobChunk, type PrintJob } from '../services/printQueue';
 import { validateTarget } from '../services/printTargets';
 import type { Design } from '../types';
@@ -304,13 +305,80 @@ describe('TSPL parser', () => {
             return hit?.message ?? '';
         };
         expect(why('PUTBMP 10,10,"a.bmp"'), 'a file, not a stream').toMatch(/FILE/i);
-        expect(why('BITMAP 200,200,2,16,0,0000'), 'raw hex rows').toMatch(/hexadecimal|raw/i);
         expect(why('TLC39 10,50,0,"123456,SN1,00601"'), 'a composite pairing').toMatch(/Code 39|composite/i);
         // BLOCK is now DRAWN, so it no longer reaches this list at all.
         expect(parseTSPL('CLS\nBLOCK 10,10,100,60,"3",0,1,1,"text"').elements).toHaveLength(1);
         // and the family each message names is right — TLC39 is its own code,
         // not the generic bitmap one.
         expect(parseTSPL('CLS\nTLC39 10,50,0,"x"').issues.map(i => i.code)).toContain('tspl-tlc39-unsupported');
+    });
+
+    it('draws BITMAP, which the tokenizer had carried all along', () => {
+        // BITMAP x,y,width,height,mode,<data> (TSC manual p. 45). The parser
+        // used to say "the tokenizer reads parameters, not binary tails, so
+        // the bitmap is not captured" — which was FALSE: tokenizeTspl keeps
+        // the whole line up to the newline, so the raw bytes were present and
+        // the parser simply never read them. The manual's own example (p. 46)
+        // is the oracle: width 2 bytes, height 16 dots, these 32 bytes.
+        const bytes = [0x00,0x00,0x00,0x00,0x00,0x07,0xFF,0x03,0xFF,0x11,0xFF,0x18,0xFF,0x1C,0x7F,0x1E,0x3F,0x1F,0x1F,0x1F,0x8F,0x1F,0xC7,0x1F,0xE3,0x1F,0xE7,0x1F,0xFF,0x1F,0xFF];
+        const bin = Buffer.from(bytes).toString('latin1');
+        const r = parseTSPL(`SIZE 4,2\nGAP 0,0\nCLS\nBITMAP 200,200,2,16,0,${bin}\nPRINT 1,1`);
+        const g = r.elements.find(e => e.kind === 'graphic') as any;
+        expect(g, 'BITMAP is now drawn, not warned').toBeDefined();
+        expect(r.issues.map(i => i.code), 'no unsupported claim remains').not.toContain('tspl-bitmap-unsupported');
+        // width is in BYTES -> 16 dots; height is in DOTS.
+        expect(g.widthDots).toBe(16);
+        expect(g.heightDots).toBe(16);
+        expect([g.ox, g.oy]).toEqual([200, 200]);
+        // The parser reproduces the stream bytes EXACTLY — row r is bytes
+        // [2r, 2r+1], MSB (bit 7) leftmost. (The manual's own hex dump and its
+        // result table disagree by one leading byte — dump row 3 is `00 07`
+        // where the table's row 4 is `07 FF` — so the byte-faithful read of the
+        // stream is the thing worth pinning, not the table's prose.)
+        expect(g.rows[0].charCodeAt(0)).toBe(0x00);
+        expect(g.rows[2].charCodeAt(0)).toBe(0x00);
+        expect(g.rows[2].charCodeAt(1)).toBe(0x07);
+        expect(g.rows[3].charCodeAt(0)).toBe(0xFF);
+        expect(g.rows[3].charCodeAt(1)).toBe(0x03);
+        // Ink is present and grows downward, and a bit-0-first read would
+        // differ — so this catches a reversed bit order.
+        const ink = (y: number) => {
+            let n = 0;
+            for (let x = 0; x < g.widthDots; x++) n += (g.rows[y].charCodeAt(x >> 3) >> (7 - (x & 7))) & 1;
+            return n;
+        };
+        expect([ink(0), ink(1)]).toEqual([0, 0]);
+        expect(ink(3)).toBeGreaterThan(ink(2));
+        expect(g.rows[3].charCodeAt(0) >>> 7, 'leftmost dot is the high bit').toBe(1);
+
+        // And it RENDERS: a 1-byte x 4-row bitmap with the high bit set in
+        // every row puts exactly one ink dot per row, in the LEFT column, at
+        // the element's own origin — the round trip is not just a parse.
+        const one = Buffer.from([0x80, 0x80, 0x80, 0x80]).toString('latin1');
+        const small = parseTSPL(`SIZE 40 mm,30 mm\nCLS\nBITMAP 100,50,1,4,0,${one}\nPRINT 1,1`);
+        const extent = computeLabelExtent(small, 203);
+        const canvas = newRealCanvas(extent.widthDots, extent.heightDots);
+        renderLabel(canvas as unknown as HTMLCanvasElement, small, extent,
+            { dpi: 203, pxPerDot: 1, quality: 1, rotation: 0 });
+        const px = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+        const inked: [number, number][] = [];
+        for (let yy = 0; yy < canvas.height; yy++) {
+            for (let xx = 0; xx < canvas.width; xx++) {
+                const o = (yy * canvas.width + xx) * 4;
+                if (px[o + 3] > 0 && px[o] < 128) inked.push([xx, yy]);
+            }
+        }
+        expect(inked, 'four dots, one per row, in the left column').toEqual([[100, 50], [100, 51], [100, 52], [100, 53]]);
+    });
+
+    it('a BITMAP byte equal to a comma survives, because the tail is read raw', () => {
+        // 0x2C is ','. splitParams cuts on every comma, so a bitmap read
+        // through the split list would lose this byte — the parser reads the
+        // RAW line instead for exactly this reason.
+        const bin = Buffer.from([0x2C, 0xFF]).toString('latin1');
+        const g = parseTSPL(`CLS\nBITMAP 10,10,2,1,0,${bin}`).elements.find(e => e.kind === 'graphic') as any;
+        expect(g.rows[0].charCodeAt(0)).toBe(0x2C);
+        expect(g.rows[0].charCodeAt(1)).toBe(0xFF);
     });
 
     it('says nothing about ordinary printer settings', () => {
@@ -471,10 +539,18 @@ describe('TSPL generator', () => {
         expect(v[3]).toBeGreaterThan(v[2]);
     });
 
-    it('names an unsupported field type instead of dropping it silently', () => {
+    it('names the reason an image is left off, not just that it is unsupported', () => {
+        // An image is the one field type TSPL genuinely cannot be sent from
+        // here: BITMAP carries RAW BINARY dots (manual p. 45), and every path
+        // this app sends on is UTF-8 text, which corrupts bytes ≥ 0x80. TSPL
+        // has no hex image form (unlike DPL's <STX>I F or ZPL's ^GF), so the
+        // image is named with that reason rather than a vague "not supported".
         const { tspl, warnings } = generateTSPL(design([{ id: 5, type: 'image', name: 'Logo', x: 1, y: 1, rotation: 0 as Rotation, width: 10, height: 10, data: '' }]));
-        expect(warnings.some(w => /Logo/.test(w))).toBe(true);
-        expect(tspl).toContain('PRINT 2,1'); // the rest of the label still prints
+        const w = warnings.find(x => /Logo/.test(x))!;
+        expect(w).toMatch(/binary/i);
+        expect(w, 'and says why: TSPL has no hex form').toMatch(/hex/i);
+        expect(tspl, 'the rest of the label still prints').toContain('PRINT 2,1');
+        expect(tspl, 'no corrupt BITMAP is emitted').not.toContain('BITMAP');
     });
 
     it('emits DMATRIX for a Data Matrix, and parses it back', () => {

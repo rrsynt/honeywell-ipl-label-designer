@@ -391,6 +391,20 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
             continue;
         }
 
+        if (field.type === 'image') {
+            // TSPL's BITMAP carries its dots as RAW BINARY bytes after the
+            // last comma (manual p. 45) — unlike DPL's `<STX>I F` and ZPL's
+            // `^GF`, which send the same pixels as ASCII hex. Every path this
+            // app sends on is UTF-8 text (the bridge posts text/plain, the
+            // server says charset=utf-8), and UTF-8 turns any byte ≥ 0x80 into
+            // more than one byte, so a raw-binary BITMAP would reach the
+            // printer corrupted — a logo that comes out as garbage, not an
+            // error. TSPL has no hex image form to fall back on, so the image
+            // is NAMED rather than sent wrong.
+            warnings.push(`"${field.name}" is an image, and TSPL's BITMAP sends its dots as raw binary, which the text transport to the printer would corrupt. TSPL has no hex image form, so the image was left off the label.`);
+            continue;
+        }
+
         warnings.push(`"${field.name}" is a ${field.type}, which TSPL output does not support yet. It was left off the label.`);
     }
 

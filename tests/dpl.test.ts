@@ -81,7 +81,11 @@ describe('DPL tokenizer', () => {
         // shares a line" with a command — and the tokenizer then took the first
         // <STX> on the line and discarded everything before it, so parsing
         // manual sample 1 gave 0 elements and 0 issues: total silence.
-        const cmds = tokenizeDpl('\x02L\r121100001000100<STX>TBCD GHI PQ, TU\rE\r');
+        // A fixed printer clock: the <STX>T formatter bakes the CURRENT date, so a
+        // test that leaves `now` at the system default passes only on the day
+        // it was written and breaks at the next rollover. Pinned here so the
+        // expected string below is stable.
+        const cmds = tokenizeDpl('\x02L\r121100001000100<STX>TBCD GHI PQ, TU\rE\r', new Date(2026, 9, 1, 12, 0, 0));
         expect(cmds.map(c => c.params)).toEqual([
             '',                                // the <STX>L entry, which has no params
             '121100001000100THU OCT 01, 26',   // the record, with its string baked

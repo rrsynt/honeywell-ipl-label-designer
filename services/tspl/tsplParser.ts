@@ -1392,6 +1392,60 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 break;
             }
 
+            case 'BITMAP': {
+                // BITMAP x,y,width,height,mode,<bitmap data> (TSC manual p. 45):
+                //   width  = image width IN BYTES  (so * 8 gives the dots)
+                //   height = image height IN DOTS  (the row count)
+                //   mode   = 0 OVERWRITE / 1 OR / 2 XOR — a compositing mode,
+                //            which this viewer does not model; the ink is drawn.
+                // The data is RAW BINARY, one byte per 8 dots, MSB (bit 7)
+                // leftmost and top row first. The manual's own hex dump (p. 46)
+                // is `00 00 00 00 00 07 FF 03 FF ...` and the 16 rows it lists
+                // read left-to-right from the high bit — the exact shape the
+                // renderer's `graphic` element already reads for ZPL's ^GF.
+                //
+                // This REPLACED a claim that was false: "the tokenizer reads
+                // parameters, not binary tails, so the bitmap is not captured."
+                // tokenizeTspl keeps the whole line up to the newline — the
+                // binary tail never goes through the quote/comment logic the
+                // message blamed — so the bytes were present all along and the
+                // parser simply never read them (PUTBMP, below, is the one that
+                // is genuinely a file name).
+                const wBytes = Math.max(0, Math.trunc(num(p[2], 0)));
+                const hDots = Math.max(0, Math.trunc(num(p[3], 0)));
+                if (wBytes === 0 || hDots === 0) {
+                    issue('info', 'tspl-bitmap-empty', 'BITMAP with no width or height draws nothing.', 'BITMAP');
+                    break;
+                }
+                // The tail is read from the RAW line, not from splitParams:
+                // splitParams cut the payload on every comma, and a bitmap byte
+                // CAN be 0x2C — rejoining would be lossy for that byte and the
+                // ';'/'"' handling would have mangled the run before we saw it.
+                // The raw line holds the bytes exactly as sent. Skip the name
+                // and the five parameters (the sixth comma field is the data).
+                const afterName = cmd.raw.slice(cmd.raw.search(/\s/) + 1);
+                let cut = -1;
+                for (let c = 0; c < 5; c++) cut = afterName.indexOf(',', cut + 1);
+                const tail = cut >= 0 ? afterName.slice(cut + 1) : '';
+                const rows: string[] = [];
+                for (let r = 0; r < hDots; r++) {
+                    let row = '';
+                    for (let b = 0; b < wBytes; b++) {
+                        // A short tail pads with paper; charCodeAt past the end
+                        // is NaN, and `NaN & 0xFF` is 0.
+                        row += String.fromCharCode(tail.charCodeAt(r * wBytes + b) & 0xFF);
+                    }
+                    rows.push(row);
+                }
+                elements.push({
+                    kind: 'graphic', id: nextId++, graphicId: nextId++,
+                    ox: num(p[0], 0), oy: num(p[1], 0), f: 0,
+                    widthDots: wBytes * 8, heightDots: hDots,
+                    rows,
+                } as ViewerElement);
+                break;
+            }
+
             default: {
                 if (PRINTER_SETTINGS.has(cmd.name)) break;
                 // Each of these says WHAT the command is and WHY it cannot be
@@ -1403,9 +1457,6 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 if (cmd.name === 'PUTBMP' || cmd.name === 'PUTPCX') {
                     issue('info', 'tspl-bitmap-unsupported',
                         `${cmd.name} tells the printer to load an image FILE by name from its own storage (manual pp. 61-63). The file is not in the stream, so there is nothing to draw.`, cmd.name);
-                } else if (cmd.name === 'BITMAP') {
-                    issue('info', 'tspl-bitmap-unsupported',
-                        'BITMAP carries the image as raw hexadecimal rows after the last comma (manual p. 45); the tokenizer reads parameters, not binary tails, so the bitmap is not captured.', 'BITMAP');
                 } else if (cmd.name === 'TLC39') {
                     issue('info', 'tspl-tlc39-unsupported',
                         'TLC39 is a composite symbol — Code 39 carrying a MicroPDF417 (manual p. 44) — and no encoder here produces that pairing, so it is not drawn.', 'TLC39');
