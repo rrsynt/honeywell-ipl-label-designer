@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import './golden/setup';
 import { parseZPL, unescapeFd } from '../services/zpl/zplParser';
+import { resolveLabelAtBatch } from '../services/ipl/odometer';
 import { elementVisualBox, estimateElementSize } from '../services/ipl/renderer';
 import type { TextElement, BarcodeElement, BoxElement, LineElement } from '../services/ipl/types';
 
@@ -153,6 +155,42 @@ describe('parseZPL', () => {
         const lost = parseZPL('^XA^GC100,4^FS^XZ');
         expect(lost.elements).toHaveLength(0);
         expect(lost.issues.map(i => i.code)).toContain('zpl-shape-no-origin');
+    });
+
+    it('^SN advances the counter per label instead of drawing a static number', () => {
+        // ^SN data,startIncrement,addLeadingZeros[,thenAddToYear] makes the
+        // PRINTER serialise the field. The oracle confirms the first label
+        // prints the data as given: ^SN001,1,Y and a plain ^FD001 rendered
+        // identically (39x23, 486 ink), while ^SN001,1,N came out narrower
+        // because it does not pad back to the data's width.
+        //
+        // The IR already models a printer-side counter: serialStep is the
+        // per-field odometer step and resolveLabelAtBatch advances a field whose
+        // data carries an <FS>/<GS> region. So the field's data is wrapped in
+        // one — what the printer does to it — and the preview then steps it.
+        const label = parseZPL('^XA^PW400^LL200^FO20,20^A0N,30,30^SN001,1,Y^FS^XZ');
+        const el = label.elements[0] as TextElement;
+        expect(el.kind).toBe('text');
+        expect(el.serialStep, 'the step rides on the element').toBe(1);
+
+        // The whole point: batch N shows N steps on, not a constant.
+        const at = (batch: number) =>
+            resolveLabelAtBatch(label, batch, DPI).elements[0] as TextElement;
+        const shown = (batch: number) => (at(batch).source as { data: string }).data;
+        expect(shown(0)).toBe('001');
+        expect(shown(1)).toBe('002');
+        expect(shown(2)).toBe('003');
+        expect(label.issues.map(i => i.code), 'nothing to complain about').toEqual([]);
+
+        // A plain ^FD field must NOT serialise — the step is ^SN's alone.
+        const plain = parseZPL('^XA^FO20,20^A0N,30,30^FD001^FS^XZ');
+        expect((plain.elements[0] as TextElement).serialStep).toBeUndefined();
+        expect((resolveLabelAtBatch(plain, 2, DPI).elements[0] as TextElement).source)
+            .toEqual({ type: 'fixed', data: '001' });
+
+        // The year parameter is named rather than silently ignored.
+        const year = parseZPL('^XA^FO20,20^A0N,30,30^SN001,1,Y,1^FS^XZ');
+        expect(year.issues.map(i => i.code)).toContain('zpl-sn-year');
     });
 
     it('draws ^GF, and the oracle pins the field order and the bit order', () => {

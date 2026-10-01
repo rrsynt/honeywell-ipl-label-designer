@@ -142,6 +142,8 @@ export const parseZPL = (code: string): ViewerLabel => {
     let data: string | null = null;
     /** ^FR — the field is printed white on a black box ("Field Reverse Print"). */
     let reverseField = false;
+    /** ^SN — the field is serialised by the printer, advancing per label. */
+    let serialStep: number | null = null;
     /** ^FB — the field is a paragraph laid out inside a box. */
     let fbWidth: number | null = null;
     let fbMaxLines: number | null = null;
@@ -155,6 +157,7 @@ export const parseZPL = (code: string): ViewerLabel => {
     const resetField = () => {
         origin = null; font = null; pendingBarcode = null; data = null; fieldRotation = null;
         reverseField = false;
+        serialStep = null;
         fbWidth = null; fbMaxLines = null; fbSpacing = null; fbAlign = null;
     };
 
@@ -211,6 +214,9 @@ export const parseZPL = (code: string): ViewerLabel => {
             };
             const sz = estimateElementSize(el, 203);
             Object.assign(el, anchor(origin.x, origin.y, f, sz.lengthDots, sz.crossDots));
+            // ^SN: the counter belongs to the printer, so the step rides on the
+            // element and resolveLabelAtBatch advances the <FS> region by it.
+            if (serialStep !== null) el.serialStep = serialStep;
             elements.push(el);
         }
         // ^FR ("Field Reverse Print") inverts this field's own box, so it goes
@@ -239,6 +245,29 @@ export const parseZPL = (code: string): ViewerLabel => {
             // draw, so it gets its own message rather than sharing the generic
             // "no effect here" line with settings that genuinely change nothing
             // visible.
+            case 'SN': {
+                // ^SN data,startIncrement,addLeadingZeros[,thenAddToYear] — it
+                // REPLACES ^FD, so its data is p[0] rather than the field's.
+                //
+                // The oracle confirms the FIRST label prints the data as given:
+                // ^SN001,1,Y and a plain ^FD001 rendered identically (39x23,
+                // 486 ink), where ^SN001,1,N came out narrower because it does
+                // NOT pad back to the data's width.
+                //
+                // The IR already models printer-side serialising: serialStep is
+                // the per-field odometer step, and resolveLabelAtBatch advances
+                // a field whose data carries an <FS>/<GS> region. So the data is
+                // wrapped in one — which is what the printer does to it — and
+                // the preview steps the counter the printer would.
+                data = `<FS>${p[0] ?? ''}<FS>`;
+                serialStep = num(p[1], 1);
+                if (p[3] !== undefined && p[3] !== '') {
+                    issue('info', 'zpl-sn-year',
+                        '^SN\'s fourth parameter adds the current year to the counter value; this preview advances the counter without folding in the year.', '^SN');
+                }
+                break;
+            }
+
             case 'GF': {
                 // ^GFa,totalBytes,bytesTotal,bytesPerRow,<data> — the tokenizer
                 // takes two letters, so the format letter is p[0].
@@ -589,11 +618,9 @@ export const parseZPL = (code: string): ViewerLabel => {
                 if (cmd.name.startsWith('B')) {
                     issue('warning', 'zpl-barcode-unsupported', `^${cmd.name} is a barcode this viewer does not draw yet. Its data is kept in the issues but nothing is rendered for it.`, `^${cmd.name}`);
                 } else if (cmd.name === 'GS') {
+                    const sel = (cmd.params.split(',')[0] ?? '').trim();
                     issue('info', 'zpl-gs-unsupported',
-                        '^GS draws a named SYMBOL (check box, copyright mark, ...) from the printer\'s own font, and the glyph is not in the stream. Labelary refuses these too, so the shapes cannot be checked against a reference here.', '^GS');
-                } else if (cmd.name === 'SN') {
-                    issue('info', 'zpl-sn-unsupported',
-                        '^SN makes the PRINTER serialise this field, advancing it once per label. This preview draws the data as sent; the counter advance happens on the printer, not here.', '^SN');
+                        `^GS draws a SYMBOL from the printer's own font, selected by a letter in its first parameter${sel ? ` ("${sel}")` : ''}, with the shapes in the field data. The glyph is in the printer, not the stream, so there is nothing to draw here — and the oracle's own shapes are not predictable from the parameters (probing ^GSN across A-E gave five different extents), so guessing them would be worse than naming it.`, '^GS');
                 } else {
                     issue('info', 'zpl-unsupported', `^${cmd.name} is not part of the supported ZPL subset, so it has no effect here.`, `^${cmd.name}`);
                 }
