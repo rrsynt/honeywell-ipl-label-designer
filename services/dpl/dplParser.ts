@@ -1120,12 +1120,32 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
             if ((bc.type.symbology === '6' || bc.type.symbology === '15') && /^[ABC]/.test(barcodeData)) {
                 barcodeData = barcodeData.slice(1);
             }
+            // Appendix P: "For the printer to generate this checksum, a `V' must
+            // be placed in the data stream in the position the checksum is
+            // requested ... a checksum will be generated using the next five
+            // digits" (p. 255). The V is a REQUEST, not data — it is replaced by
+            // a digit the printer computes, so a payload carrying one cannot be
+            // encoded as it stands.
+            //
+            // The checksum is computed "per the EAN/UPC bar code standard", and
+            // with no DPL stream to check a reading against, guessing its
+            // weighting would put a wrong digit into a price. So the V is named
+            // and left where it is: the field reports, and nothing pretends to
+            // have the value the printer would print.
+            if (/V/i.test(barcodeData)) {
+                issue('warning', 'dpl-price-checksum',
+                    `This record places a "V" in its data, which asks the printer to compute and insert the EAN/UPC price-or-weight checksum at that position (Appendix P). The preview cannot reproduce that digit, so it is left as written and the symbol will not encode until it is provided.`, bChar);
+            }
             elements.push({
                 kind: 'barcode', id: nextId++, ox: col, oy: row, f: rot,
                 symbology: bc.type.symbology,
                 heightDots,
                 moduleDots,
                 ratio,
+                // The letter names which EAN/UPC member this is, and the addenda
+                // are their own symbols. Without it the variant is guessed from
+                // the digit count, which fails on the manual's own records.
+                ...(bc.type.eanVariant !== undefined ? { eanUpcVersion: bc.type.eanVariant } : {}),
                 hri: bc.hri,
                 source: { type: 'fixed', data: barcodeData },
             } as BarcodeElement);

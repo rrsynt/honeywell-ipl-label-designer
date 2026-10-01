@@ -20,6 +20,7 @@ import { generateDPL } from '../services/dpl/dplGenerator';
 import { DPL_FONTS, dplMultiplier, dplMultiplierValue, nearestSmoothPoint } from '../services/dpl/dplFonts';
 import { dplBarcodeFor, DPL_BARCODES } from '../services/dpl/dplBarcodes';
 import { substituteDplDateTime, isDplDateMarker } from '../services/dpl/dplDateTime';
+import { buildBwipSpec } from '../services/ipl/barcodes';
 import { detectSourceLanguage } from '../components/IPLViewerModal';
 import { estimateElementSize } from '../services/ipl/renderer';
 import type { Design } from '../types';
@@ -925,6 +926,68 @@ describe('DPL images (<STX>I p.20 and Table 8-11)', () => {
         const lab = parseDPL(print('MISSING'), PAGE);
         expect(lab.elements.find(e => e.kind === 'graphic')).toBeUndefined();
         expect(lab.issues.map(i => i.code)).toContain('dpl-image-missing');
+    });
+});
+
+describe('DPL EAN/UPC variants and the price checksum (Appendix F/G/P)', () => {
+    // The header is positional — a b c d eee ffff gggg is 1+1+1+1+3+4+4 = 15
+    // characters — so records are BUILT from parts here. A hand-written one a
+    // digit short shifts every field, which produced three false alarms while
+    // this sweep was written.
+    const bcidFor = (b: string, data: string) => {
+        const record = `1${b}1100000` + '0020' + '0020' + data;
+        const lab = parseDPL(`\x02L\r${record}\rE\r`, PAGE);
+        const bc = lab.elements.find(e => e.kind === 'barcode') as any;
+        return {
+            bc,
+            bcid: bc
+                ? buildBwipSpec(bc.symbology, bc.source.data, { eanUpcVersion: bc.eanUpcVersion })?.main.bcid
+                : null,
+        };
+    };
+
+    it('draws each letter as its own symbol, not as whatever the digit count implies', () => {
+        // B, C, F and G all carry the IR's symbology '7', and the letter is what
+        // says which member of the family it is. Without that the encoder
+        // guesses from the digit count, which resolved a 7-digit UPC-E to a
+        // UPC-A, an 8-digit EAN-8 to a UPC-E, and the manual's own 11-digit
+        // UPC-A — "If the user provides 11 digits, the printer will compute the
+        // checksum" — to nothing at all.
+        expect(bcidFor('B', '123456789012').bcid, 'UPC-A').toBe('upca');
+        expect(bcidFor('B', '12345678901').bcid, 'UPC-A with the check to be computed').toBe('upca');
+        expect(bcidFor('C', '1234567').bcid, 'UPC-E').toBe('upce');
+        expect(bcidFor('C', '123456').bcid, 'UPC-E short form').toBe('upce');
+        expect(bcidFor('F', '1234567890123').bcid, 'EAN-13').toBe('ean13');
+        expect(bcidFor('G', '12345678').bcid, 'EAN-8').toBe('ean8');
+        expect(bcidFor('G', '1234567').bcid, 'EAN-8 short form').toBe('ean8');
+    });
+
+    it('carries the variant on the element, not just in the encoded symbol', () => {
+        // The renderer and the geometry pass both read `eanUpcVersion`, so a
+        // missing one shows up as a symbol of the wrong width as well as the
+        // wrong kind.
+        expect(bcidFor('B', '123456789012').bc.eanUpcVersion).toBe(3);
+        expect(bcidFor('C', '1234567').bc.eanUpcVersion).toBe(4);
+        expect(bcidFor('F', '1234567890123').bc.eanUpcVersion).toBe(2);
+        expect(bcidFor('G', '12345678').bc.eanUpcVersion).toBe(1);
+    });
+
+    it('names the V price checksum instead of encoding a broken symbol', () => {
+        // "For the printer to generate this checksum, a `V' must be placed in
+        // the data stream in the position the checksum is requested ... a
+        // checksum will be generated using the next five digits" (Appendix P,
+        // p. 255). The V is a REQUEST for a digit the printer computes, so the
+        // payload cannot encode as it stands — and the checksum "generated per
+        // the EAN/UPC bar code standard" has no DPL stream here to be checked
+        // against, so it is named rather than guessed at.
+        const lab = parseDPL('\x02L\r1B1100000' + '0020' + '0020' + '12345V01199\rE\r', PAGE);
+        expect(lab.issues.map(i => i.code)).toContain('dpl-price-checksum');
+        expect(lab.issues.find(i => i.code === 'dpl-price-checksum')?.message).toContain('Appendix P');
+    });
+
+    it('reports no price checksum when the data has no V', () => {
+        const lab = parseDPL('\x02L\r1B1100000' + '0020' + '0020' + '123456789012\rE\r', PAGE);
+        expect(lab.issues.map(i => i.code)).not.toContain('dpl-price-checksum');
     });
 });
 

@@ -32,6 +32,24 @@ export interface DplBarcodeType {
     lowerOnly?: boolean;
     /** True when the UPPER-case form is not valid either. */
     noHumanReadable?: boolean;
+    /**
+     * Which member of the EAN/UPC family this letter draws, as the IR's
+     * `eanUpcVersion` (see services/ipl/barcodes.ts).
+     *
+     * The LETTER is the variant, and without saying so the encoder has to guess
+     * it from the digit count — which it does by stripping every non-digit and
+     * counting, so the manual's own 11-digit UPC-A record ("If the user provides
+     * 11 digits, the printer will compute the checksum") resolved to nothing at
+     * all, and a 12-digit payload under `F` drew a UPC-A while claiming to be an
+     * EAN-13. B/C/F/G are four different symbols sharing one symbology id.
+     *
+     * M and N are the 2- and 5-digit addenda, which are symbols in their own
+     * right rather than members of that family; bwip-js encodes them as `ean2`
+     * and `ean5`.
+     */
+    eanVariant?: number;
+    /** A standalone EAN/UPC add-on, encoded as its own symbol. */
+    addon?: 'ean2' | 'ean5';
 }
 
 /**
@@ -41,19 +59,21 @@ export interface DplBarcodeType {
  */
 export const DPL_BARCODES: Record<string, DplBarcodeType> = {
     A: { symbology: '0', name: 'Code 39' },
-    B: { symbology: '7', name: 'UPC-A' },
-    C: { symbology: '7', name: 'UPC-E' },
+    // The EAN/UPC family all share the IR's symbology '7'; the variant is what
+    // tells them apart (see eanVariant above).
+    B: { symbology: '7', name: 'UPC-A', eanVariant: 3 },
+    C: { symbology: '7', name: 'UPC-E', eanVariant: 4 },
     D: { symbology: '2', name: 'Interleaved 2 of 5' },
     E: { symbology: '6', name: 'Code 128' },
-    F: { symbology: '7', name: 'EAN-13' },
-    G: { symbology: '7', name: 'EAN-8' },
+    F: { symbology: '7', name: 'EAN-13', eanVariant: 2 },
+    G: { symbology: '7', name: 'EAN-8', eanVariant: 1 },
     H: { symbology: '8', name: 'HIBC' },
     I: { symbology: '4', name: 'Codabar' },
     J: { symbology: '2', name: 'Interleaved 2 of 5, mod-10' },
     K: { symbology: '1', name: 'Plessey' },
     L: { symbology: '2', name: 'Interleaved 2 of 5, mod-10 + bearer bars' },
-    M: { symbology: '7', name: '2-digit UPC addendum' },
-    N: { symbology: '7', name: '5-digit UPC addendum' },
+    M: { symbology: '7', name: '2-digit UPC addendum', addon: 'ean2' },
+    N: { symbology: '7', name: '5-digit UPC addendum', addon: 'ean5' },
     O: { symbology: '1', name: 'Code 93' },
     P: { symbology: '11', name: 'Postnet', noHumanReadable: true },
     Q: { symbology: '6', name: 'UCC/EAN Code 128' },
