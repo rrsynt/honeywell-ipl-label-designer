@@ -79,6 +79,17 @@ const closestIrFont = (heightDots: number): string => {
  * so it is still read from there. Anything else has no size to read and falls
  * back to the default rather than inventing one from a font id.
  */
+/**
+ * Table H-1's point size for a bit-mapped font-9 code.
+ *
+ * "Font 9 Bit-Mapped Resident Fonts (E-Class and M-4206, only): CG Triumvirate,
+ * Single Byte, `000 - 010` — 5, 6, 8, 10, 12, 14, 18, 24, 30, 36, 48,
+ * respectively." The codes are INDICES into that list, not point sizes, so `006`
+ * is 18 points and not six — and the table is one of the few things in these
+ * appendices that extracts cleanly, because each row is a single line.
+ */
+const DPL_BITMAP_FONT9_POINTS = [5, 6, 8, 10, 12, 14, 18, 24, 30, 36, 48];
+
 const smoothPointFromSize = (eee: string, heightField: string): number => {
     // The optional scalable height wins: it is the field the manual says must
     // carry the size for a scalable font.
@@ -97,6 +108,15 @@ const smoothPointFromSize = (eee: string, heightField: string): number => {
     }
     const a = /^[Aa](\d{2})$/.exec(eee.trim());
     if (a) return Math.max(1, parseInt(a[1], 10));
+    // The bit-mapped resident codes are table INDICES, not sizes: "000 - 010 —
+    // 5, 6, 8, 10, 12, 14, 18, 24, 30, 36, 48, respectively" (Table H-1), so
+    // 006 is 18 points. Reading them as numbers gave every one of them the same
+    // default.
+    const idx = /^(\d{3})$/.exec(eee.trim());
+    if (idx) {
+        const n = parseInt(idx[1], 10);
+        if (n <= 10) return DPL_BITMAP_FONT9_POINTS[n];
+    }
     return 12;
 };
 
@@ -871,7 +891,23 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                     // either, and deliberately: each one changes what the label
                     // looks like or brings in fields this parse never saw, so
                     // they must report rather than be listed as harmless.
-                    if (!'cefpST'.includes(letter)) {
+                    // `y` is called out because the generic message is actively
+                    // WRONG for it. Appendix I's Symbol Set Selection picks the
+                    // code page the scalable fonts are mapped through — "in the
+                    // code page (CP), character code 0xE4 causes Φ to be
+                    // printed. In CP E7, the character code 0xE4 causes δ" — so
+                    // it changes what EVERY byte in every following record
+                    // means. The preview renders each byte by its Latin-1 value
+                    // regardless, which is a real difference from the print and
+                    // not "no effect".
+                    if (letter === 'y') {
+                        const id = /^S([0-9A-Za-z]{2})$/.exec(rest.trim().toUpperCase());
+                        issue('info', 'dpl-symbol-set',
+                            id
+                                ? `yS${id[1]} selects the "${id[1]}" symbol set (code page) for the scalable fonts, which remaps what every byte prints. The preview draws each byte by its Latin-1 value instead, so non-ASCII characters may differ from the print.`
+                                : `y selects a symbol set (code page) for the scalable fonts, which remaps what every byte prints. The preview draws each byte by its Latin-1 value instead, so non-ASCII characters may differ from the print.`,
+                            letter);
+                    } else if (!'cefpST'.includes(letter)) {
                         issue('info', 'dpl-command', `DPL label command "${letter}" is not part of the supported subset; it has no effect on the preview.`, letter);
                     }
                     break;
@@ -931,20 +967,23 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
         // hhhh/iiii exist ONLY for the scalable-font form (b = 9 with an S/u
         // specifier in eee). Their presence is decided by the header, not by
         // guessing at the payload — a wrong guess eats 8 characters of data.
-        // The two optional fields are kept, not just skipped: `hhhh` is where a
-        // scalable font's SIZE lives whenever `eee` is selecting a font rather
-        // than stating a height.
         //
-        // They are consumed for EVERY font-9 record whose data begins with a
-        // well-formed pair, not only for the `S00`/`A04` forms. "The height of a
-        // scalable font can be specified in two ways: ... To specify the height
-        // in points the first character of the field is a `P' followed by the
-        // number of points, 004 to 999. To specify the size in dots, all four
-        // characters must be numeric", and the fields "must be specified for
-        // scalable fonts" — so an `A36` record carrying them had them printed
-        // as DATA ("P036P020Text"), because only the coded forms consumed them.
+        // WHICH FONT-9 FORM THIS IS DECIDES WHETHER THERE ARE EXTRA FIELDS AT
+        // ALL, and the manual gives the two as SEPARATE record structures:
+        //
+        //   Table 8-7, Smooth Font:   eee `000-999, A04 to A72, x04 - x72`,
+        //                             and no hhhh/iiii — the size IS `eee`.
+        //   Table 8-8, Scalable Font: eee `S00 to Szz, U00-Uzz, u00-uzz`, with
+        //                             hhhh/iiii "Character height/width;
+        //                             points, dots" carrying the size.
+        //
+        // So `hhhh` is consumed only for the `S`/`U`/`u` forms. Consuming it on
+        // every font-9 record ate the first eight characters of an `A36`
+        // record's DATA, because that form has no such field — the manual's own
+        // `x04-x72` note says where its size lives, and it is in `eee`.
+        const scalableForm = /^[SUu]/.test(eee);
         let fontHeightField = '';
-        if (bChar === DPL_SMOOTH_FONT) {
+        if (bChar === DPL_SMOOTH_FONT && scalableForm) {
             const pair = /^([Pp]\d{3}|\d{4})([Pp]\d{3}|\d{4})/.exec(payload);
             if (pair) {
                 fontHeightField = pair[1];

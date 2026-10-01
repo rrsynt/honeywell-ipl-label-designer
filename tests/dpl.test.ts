@@ -365,10 +365,15 @@ describe('DPL label-formatting commands (manual Chapter 6)', () => {
         // The mirror image matters just as much: a real command that changes
         // the IMAGE must not be quieted. `y` (font symbol set) and `z` (zero
         // conversion) both do, so they report.
-        for (const mustReport of ['y1', 'z']) {
-            const lab = parseDPL(`\x02L\r${mustReport}\r141100001000100HI\rQ0001\rE\r`, PAGE);
-            expect(lab.issues.map(i => i.code), `"${mustReport}" changes the image`).toContain('dpl-command');
-        }
+        // `y` reports with its own code because the generic one is WRONG for it:
+        // a symbol set remaps what every byte prints, which is not "no effect".
+        const y = parseDPL('\x02L\ryS0U\r141100001000100HI\rQ0001\rE\r', PAGE);
+        expect(y.issues.map(i => i.code)).toContain('dpl-symbol-set');
+        expect(y.issues.map(i => i.code), 'and not the misleading generic one').not.toContain('dpl-command');
+        expect(y.issues[0].message).toContain('0U');
+        // `z` really has no reported meaning here, so it keeps the generic code
+        const z = parseDPL('\x02L\rz\r141100001000100HI\rQ0001\rE\r', PAGE);
+        expect(z.issues.map(i => i.code)).toContain('dpl-command');
         // and the handled ones are handled rather than silenced
         for (const [cmd, code] of [['J2', null], ['R0010', null], ['U', 'dpl-replacement-field']] as const) {
             const lab = parseDPL(`\x02L\r${cmd}\r141100001000100HI\rQ0001\rE\r`, PAGE);
@@ -1026,16 +1031,40 @@ describe('DPL ILPC font options (Appendix Q, p. 257)', () => {
             .toBe(36);
     });
 
-    it('consumes the optional size fields for EVERY scalable form', () => {
-        // They belong to the record, not to one spelling of it. Consuming them
-        // only for the coded forms printed them as DATA on an `A36` record —
-        // measured: "P036P020Text".
-        expect(dataOf('A36', 'Text')).toBe('Text');
-        expect(dataOf('S00', 'Text')).toBe('Text');
+    it('consumes the size fields only for the form that HAS them', () => {
+        // The manual gives the two font-9 forms as SEPARATE record structures,
+        // and only one of them carries the optional fields:
+        //
+        //   Table 8-7, Smooth Font:    eee `000-999, A04 to A72, x04 - x72`,
+        //                              no hhhh/iiii — the size IS `eee`.
+        //   Table 8-8, Scalable Font:  eee `S00 to Szz, U00-Uzz, u00-uzz`,
+        //                              with hhhh/iiii as "Character height/
+        //                              width; points, dots".
+        //
+        // So an earlier version that consumed them on EVERY font-9 record ate
+        // the first eight characters of an `A36` record's data — and, worse,
+        // did so only when that data happened to LOOK like a size pair, so the
+        // same record parsed differently depending on its text.
+        expect(dataOf('S00', 'Text'), 'the scalable form has them').toBe('Text');
         expect(dataOf('U40', '\x4d\x3f')).toBe('M?');
-        // and a font-9 record that carries none is left alone
-        const plain = parseDPL('\x02L\r1911A360020' + '0200' + 'PlainText\rE\r', PAGE).elements[0] as any;
-        expect(plain.source.data).toBe('PlainText');
+        // a smooth-font record whose data merely looks like a size pair keeps it
+        const a36 = parseDPL('\x02L\r1911A360020' + '0200' + '2024 Report\rE\r', PAGE).elements[0] as any;
+        expect(a36.source.data, 'the smooth form has no such field').toBe('2024 Report');
+        expect(a36.pointSize, 'its size comes from eee').toBe(36);
+    });
+
+    it('reads the bit-mapped font-9 codes as the INDICES they are', () => {
+        // Table H-1: "Font 9 Bit-Mapped Resident Fonts ... 000 - 010 — 5, 6, 8,
+        // 10, 12, 14, 18, 24, 30, 36, 48, respectively." The code is an index
+        // into that list, so 006 is 18 points, not six — and every one of them
+        // was being drawn at the same default.
+        const want = [5, 6, 8, 10, 12, 14, 18, 24, 30, 36, 48];
+        for (let i = 0; i <= 10; i++) {
+            const eee = String(i).padStart(3, '0');
+            const el = parseDPL(`\x02L\r1911${eee}0020` + '0200Text\rE\r', PAGE).elements[0] as any;
+            expect(el.pointSize, `eee ${eee}`).toBe(want[i]);
+            expect(el.source.data, `eee ${eee}`).toBe('Text');
+        }
     });
 });
 
