@@ -353,8 +353,16 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
             })),
         [debouncedCode, language, bwipReady, cjkReady, driverModel, dpi, pageOrientation, paperMm],
     );
-    // Importing a design back out of a stream is IPL-only.
-    const isZpl = language !== 'ipl';
+    // Importing a design back out of a stream is IPL-only: parseIPL is what the
+    // button calls, and it reads one language. The other four have VIEWERS, so
+    // the tab shows them — but a ZPL, EPL, TSPL or DPL stream put through the
+    // IPL importer yields zero fields, and the button would do nothing at all.
+    //
+    // The flag used to be called `isZpl` and the message said "ZPL", which was
+    // true when ZPL was the only other language. It now covers four, so both
+    // the name and the message have to say what they mean — a DPL stream was
+    // being told it was a ZPL one.
+    const importUnsupported = language !== 'ipl';
     const totalLabels = totalLabelCount(label);
     const batch = Math.min(previewBatch, Math.max(0, totalLabels - 1));
     const previewLabel = useMemo(() => resolveLabelAtBatch(label, batch, dpi), [label, batch, dpi]);
@@ -1147,8 +1155,10 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                             Confirm final output on the target printer or the Honeywell simulator
                             (docs/HONEYWELL-SIMULATOR.md); results vary by firmware and DPI.
                         </p>
-                        <button onClick={handleImport} disabled={!canImport || isZpl}
-                            title={isZpl ? 'ZPL preview only — importing a design back from ZPL is not supported yet' : undefined}
+                        <button onClick={handleImport} disabled={!canImport || importUnsupported}
+                            title={importUnsupported
+                                ? `${language.toUpperCase()} preview only — importing a design back is IPL-only, so a ${language.toUpperCase()} stream cannot be loaded onto the canvas. Use the IPL tab for that.`
+                                : undefined}
                             className="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded transition-colors">
                             Import into Designer
                         </button>
