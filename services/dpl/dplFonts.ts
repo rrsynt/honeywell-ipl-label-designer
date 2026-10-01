@@ -41,7 +41,8 @@ export const DPL_FONTS: Record<string, DplFontMetric> = {
 export const DPL_SMOOTH_FONT = '9';
 
 /**
- * The printed height of a bar code whose `eee` field is 0.
+ * Table F-2: "Bar Code Default Widths and Heights", the printed height in
+ * INCHES of each symbol at 203 dpi.
  *
  * Zero is not zero dots. "Unless otherwise noted all bar codes depicted here
  * were produced using the ratio/module values of 00 and height fields of 000 to
@@ -50,23 +51,41 @@ export const DPL_SMOOTH_FONT = '9';
  * is written, so a stream leaving the field at zero is the common case, not the
  * edge. Reading it as zero drew each of them as a one-dot line.
  *
- * Table F-2 gives a default per symbol, and they are NOT all one value — the
- * page shows 0.40 in for most symbols but 0.80, 0.90, 1.30 and 1.40 for others.
- * That table cannot be read reliably from this PDF: its symbol labels and its
- * numbers extract as separate text runs, and the numbers carry no x position,
- * so the columns cannot be paired with confidence. Rather than ship a per-symbol
- * table assembled from a guess at the alignment, one documented default is used
- * and the limitation is stated here.
+ * The table had to be read from the RENDERED page. Its symbol column and its
+ * number columns extract as separate text runs with no x positions, so pairing
+ * them from the text alone would have been a guess at the alignment — and a
+ * first attempt at exactly that produced heights that contradicted the page:
+ * it gave D and F 0.80 in where the table says 0.40.
  *
- * 0.40 in is the value the table shows against the most symbols, including
- * Code 39, Code 128 and UPC/EAN. A stream that needs an exact height states it
- * in `eee`, which is the field the manual provides for it.
+ * The 203 dpi column only. The other three resolutions give the same inches;
+ * what changes with dpi is the ratio/module column, which is a WIDTH and is not
+ * asked for here. `N/A` is a symbol with no default at that size, and is left
+ * out rather than invented.
  */
+export const DPL_BARCODE_DEFAULT_HEIGHT_IN: Record<string, number> = {
+    A: 0.40, B: 0.80, C: 0.80, D: 0.40, E: 0.40, F: 0.80, G: 0.80,
+    H: 0.40, I: 0.40, J: 0.40, K: 0.40, L: 1.30, M: 0.90, N: 0.80,
+    O: 0.40, P: 0.08, Q: 1.40, R: 1.40, S: 1.40, T: 0.80,
+    U: 1.00, v: 0.50,
+    W1I: 0.40, W1J: 0.40, W1G: 0.50, W1R: 1.40, W1T: 0.40,
+};
+/** The fallback when the table lists `N/A` or the symbol is not in it at all. */
 export const DPL_DEFAULT_BARCODE_HEIGHT_INCHES = 0.40;
 
-/** The printed height in dots of a bar code whose height field is 000. */
-export const dplDefaultHeightDots = (dpi = 203): number =>
-    Math.round(DPL_DEFAULT_BARCODE_HEIGHT_INCHES * dpi);
+/**
+ * The printed height in dots of a bar code whose height field is 000.
+ *
+ * `bField` is the record's font/bar-code field, so a `Wxx` expansion is looked
+ * up by its full three characters before the single letter is tried.
+ */
+export const dplDefaultHeightDots = (bField = '', dpi = 203): number => {
+    const key = bField.slice(0, 3).toUpperCase();
+    const inches = DPL_BARCODE_DEFAULT_HEIGHT_IN[bField]
+        ?? DPL_BARCODE_DEFAULT_HEIGHT_IN[bField.toUpperCase()]
+        ?? DPL_BARCODE_DEFAULT_HEIGHT_IN[key]
+        ?? DPL_DEFAULT_BARCODE_HEIGHT_INCHES;
+    return Math.round(inches * dpi);
+};
 
 /**
  * Appendix C Table C-6: the smooth font's fixed sizes, expressed as the `Axx`

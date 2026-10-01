@@ -28,7 +28,7 @@ import type {
 } from '../ipl/types';
 import { estimateElementSize } from '../ipl/renderer';
 import { DPL_FONTS, DPL_SMOOTH_FONT, dplMultiplierValue, dplDefaultHeightDots } from './dplFonts';
-import { dplBarcodeFor } from './dplBarcodes';
+import { dplBarcodeFor, DPL_CODE_PAGE_IDS, DPL_CHAR_MAP_IDS } from './dplBarcodes';
 import { substituteDplDateTime } from './dplDateTime';
 import { FONT_MAP } from '../../constants';
 
@@ -901,11 +901,25 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                     // regardless, which is a real difference from the print and
                     // not "no effect".
                     if (letter === 'y') {
-                        const id = /^S([0-9A-Za-z]{2})$/.exec(rest.trim().toUpperCase());
+                        // Two commands share this letter and the manual keeps
+                        // them apart: "<STX>ySxx" selects a SINGLE-byte code
+                        // page and "<STX>yUxx" a DOUBLE-byte character map, and
+                        // "each affects an independent database selection and
+                        // has no impact on the other" (Table I-2).
+                        const sel = /^([SU])([0-9A-Za-z]{2})$/.exec(rest.trim().toUpperCase());
+                        // sel[0] is the WHOLE match — the captures start at 1,
+                        // so sel[1] is the S/U that says which of the two
+                        // commands this is and sel[2] the two-character id.
+                        const kind = sel?.[1] === 'U' ? 'character map' : 'symbol set';
+                        const name = sel
+                            ? (sel[1] === 'U' ? DPL_CHAR_MAP_IDS[sel[2]] : DPL_CODE_PAGE_IDS[sel[2]])
+                            : undefined;
+                        const table = sel?.[1] === 'U' ? 2 : 1;
+                        const label = name ? `"${name}"` : `"${sel?.[2] ?? ''}" (not in Table I-${table})`;
                         issue('info', 'dpl-symbol-set',
-                            id
-                                ? `yS${id[1]} selects the "${id[1]}" symbol set (code page) for the scalable fonts, which remaps what every byte prints. The preview draws each byte by its Latin-1 value instead, so non-ASCII characters may differ from the print.`
-                                : `y selects a symbol set (code page) for the scalable fonts, which remaps what every byte prints. The preview draws each byte by its Latin-1 value instead, so non-ASCII characters may differ from the print.`,
+                            sel
+                                ? `y${sel[1]}${sel[2]} selects the ${kind} ${label}, which decides what every byte prints. The preview draws each byte by its Latin-1 value regardless, so non-ASCII characters may differ from the print.`
+                                : `y selects a ${kind} that decides what every byte prints. The preview draws each byte by its Latin-1 value regardless, so non-ASCII characters may differ from the print.`,
                             letter);
                     } else if (!'cefpST'.includes(letter)) {
                         issue('info', 'dpl-command', `DPL label command "${letter}" is not part of the supported subset; it has no effect on the preview.`, letter);
@@ -1206,7 +1220,7 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
             // one-dot line.
             const heightDots = (num(eee, 0) > 0
                 ? Math.max(1, Math.round(positionToDots(num(eee, 0), 203)))
-                : dplDefaultHeightDots()) * barMagnification;
+                : dplDefaultHeightDots(bField)) * barMagnification;
             const wideDots = dplMultiplierValue(cChar);
             const narrowDots = dplMultiplierValue(dChar);
             const moduleDots = Math.max(1, narrowDots) * dotWidth;

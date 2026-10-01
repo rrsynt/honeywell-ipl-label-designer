@@ -367,10 +367,10 @@ describe('DPL label-formatting commands (manual Chapter 6)', () => {
         // conversion) both do, so they report.
         // `y` reports with its own code because the generic one is WRONG for it:
         // a symbol set remaps what every byte prints, which is not "no effect".
-        const y = parseDPL('\x02L\ryS0U\r141100001000100HI\rQ0001\rE\r', PAGE);
+        const y = parseDPL('\x02L\rySWD\r141100001000100HI\rQ0001\rE\r', PAGE);
         expect(y.issues.map(i => i.code)).toContain('dpl-symbol-set');
         expect(y.issues.map(i => i.code), 'and not the misleading generic one').not.toContain('dpl-command');
-        expect(y.issues[0].message).toContain('0U');
+        expect(y.issues[0].message).toContain('Wingdings');
         // `z` really has no reported meaning here, so it keeps the generic code
         const z = parseDPL('\x02L\rz\r141100001000100HI\rQ0001\rE\r', PAGE);
         expect(z.issues.map(i => i.code)).toContain('dpl-command');
@@ -1111,6 +1111,25 @@ describe('DPL EAN/UPC variants and the price checksum (Appendix F/G/P)', () => {
         expect(bcidFor('G', '12345678').bc.eanUpcVersion).toBe(1);
     });
 
+    it('takes the default height from Table F-2, per symbol', () => {
+        // Read from the RENDERED page: the table's symbol column and its number
+        // columns extract as separate runs with no shared coordinate, and an
+        // earlier pairing built from the text alone gave D and F 0.80 in where
+        // the page says 0.40. The table is not one value — it runs from 0.08 in
+        // for Postnet to 1.40 for the UPC addenda and Postnet's cousins.
+        const h = (b: string) => {
+            const rec = `1${b}1100000` + '0020' + '0020' + 'X';
+            return (parseDPL(`\x02L\r${rec}\rE\r`, PAGE).elements.find(e => e.kind === 'barcode') as any).heightDots;
+        };
+        expect(h('A'), 'Code 39 is 0.40 in').toBe(81);
+        expect(h('B'), 'UPC-A is 0.80 in').toBe(162);
+        expect(h('L'), 'Telepen is 1.30 in').toBe(264);
+        expect(h('M'), 'the 2-digit addendum is 0.90 in').toBe(183);
+        expect(h('P'), 'Postnet is 0.08 in — the shortest in the table').toBe(16);
+        expect(h('Q'), 'the UPC addenda are 1.40 in').toBe(284);
+        expect(h('U'), 'MaxiCode is 1.00 in').toBe(203);
+    });
+
     it('names the V price checksum instead of encoding a broken symbol', () => {
         // "For the printer to generate this checksum, a `V' must be placed in
         // the data stream in the position the checksum is requested ... a
@@ -1127,6 +1146,39 @@ describe('DPL EAN/UPC variants and the price checksum (Appendix F/G/P)', () => {
     it('reports no price checksum when the data has no V', () => {
         const lab = parseDPL('\x02L\r1B1100000' + '0020' + '0020' + '123456789012\rE\r', PAGE);
         expect(lab.issues.map(i => i.code)).not.toContain('dpl-price-checksum');
+    });
+});
+
+describe('DPL symbol sets (Appendix I Tables I-1 and I-2)', () => {
+    const msgFor = (cmd: string) =>
+        parseDPL(`\x02L\r${cmd}\r141100001000100HI\rE\r`, PAGE).issues[0]?.message ?? '';
+
+    it('keeps the single-byte and double-byte selections apart', () => {
+        // "<STX>ySxx" selects a single-byte code page and "<STX>yUxx" a
+        // double-byte character map, and "each affects an independent database
+        // selection and has no impact on the other" (Table I-2). They are
+        // different tables, so the same two characters mean different things
+        // under each.
+        expect(msgFor('ySE7')).toContain('ISO 8859/7 Latin/Greek');
+        expect(msgFor('ySWD')).toContain('Wingdings');
+        expect(msgFor('yUUC')).toContain('Unicode (including Korean)');
+        expect(msgFor('yUB5')).toContain('BIG 5 (Taiwan) Encoded');
+        expect(msgFor('yUUC')).toContain('character map');
+        expect(msgFor('ySE7')).toContain('symbol set');
+    });
+
+    it('names an identifier it does not have, rather than passing it over', () => {
+        expect(msgFor('ySZZ')).toContain('Table I-1');
+        expect(msgFor('yUZZ')).toContain('Table I-2');
+    });
+
+    it('reads the identifiers from the Datamax column, not the PCL one', () => {
+        // Table I-1 gives each code page TWO identifiers — a Datamax one and an
+        // HP (PCL) one — and the command takes the Datamax one. `0U` is PC-8's
+        // PCL id and is not a Datamax id at all, so a stream using it is
+        // correctly reported as unknown; `PC` is the Datamax spelling.
+        expect(msgFor('ySPC')).toContain('PC-8, Code Page 437');
+        expect(msgFor('yS0U')).toContain('Table I-1');
     });
 });
 

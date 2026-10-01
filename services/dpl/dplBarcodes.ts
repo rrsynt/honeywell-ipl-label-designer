@@ -86,6 +86,59 @@ export const DPL_BARCODES: Record<string, DplBarcodeType> = {
 };
 
 /**
+ * Appendix I Table I-1: the single-byte code pages, by their Datamax identifier.
+ *
+ * Scalable fonts "are mapped through a symbol set sometimes referred to as a
+ * `code page`", and the mapping decides what every byte prints: "in the code
+ * page (CP), character code 0xE4 causes Φ to be printed. In CP E7, the
+ * character code 0xE4 causes δ."
+ *
+ * Read from the RENDERED page. The table's identifier column and its description
+ * column extract as separate text runs with no shared coordinate, so pairing
+ * them from the text alone would have been a guess — and the first attempt at
+ * exactly that mispaired every row in the lower half. The rendered page and the
+ * text runs then agreed row for row, which is what makes this table safe to ship.
+ */
+export const DPL_CODE_PAGE_IDS: Record<string, string> = {
+    AR: 'Arabic-8', CP: 'PC Cyrillic',
+    D1: 'ITC Zapf Dingbats/100', D2: 'ITC Zapf Dingbats/200', D3: 'ITC Zapf Dingbats/300',
+    DN: 'ISO 60 Danish / Norwegian', DS: 'PS ITC Zapf Dingbats', DT: 'DeskTop',
+    E1: 'ISO 8859/1 Latin 1', E2: 'ISO 8859/2 Latin 2', E5: 'ISO 8859/9 Latin 5',
+    E6: 'ISO 8859/10 Latin 6', E7: 'ISO 8859/7 Latin/Greek', E9: 'ISO 8859/15 Latin 9',
+    EG: 'ISO 8859/7 Latin/Greek', EH: 'ISO 8859/8 Latin/Hebrew',
+    ER: 'ISO 8859/5 Latin/Cyrillic', FR: 'ISO 69: French',
+    G8: 'Greek-8', GK: 'PC-8 Greek', GR: 'ISO 21: German',
+    H0: 'Hebrew-7', H8: 'Hebrew-8', IT: 'ISO 15: Italian',
+    'L$': 'HP4000 ITC Zapf Dingbats', LG: 'Legal',
+    M8: 'Math-8', MC: 'Macintosh', MS: 'PS Math',
+    P9: 'PC-858 Multilingual', PB: 'Microsoft Publishing', PC: 'PC-8, Code Page 437',
+    PD: 'PC-8 D/N, Code Page 437N', PE: 'PC-852 Latin 2', PG: 'PC-851 Latin/Greek',
+    PH: 'PC-862 Latin/Hebrew', PI: 'Pi Font', PM: 'PC-850 Multilingual',
+    PR: 'PC-864 Latin/Arabic', PT: 'PC-8 TK, Code Page 437T', PU: 'PC-1004',
+    PV: 'PC-775 Baltic', PX: 'PTXT3000', PY: 'Non-UGL, Generic Pi Font',
+    R8: 'Roman-8', R9: 'Roman-9', SP: 'ISO 17: Spanish', SW: 'ISO 11: Swedish',
+    SY: 'Symbol', TK: 'Turkish-8', TS: 'PS Text', UK: 'ISO 4: United Kingdom',
+    US: 'ISO 6: ASCII', VI: 'Ventura International', VM: 'Ventura Math',
+    VU: 'Ventura US', W1: 'Windows 3.1 Latin 1', WA: 'Windows Latin/Arabic',
+    WD: 'Wingdings', WE: 'Windows 3.1 Latin 2', WG: 'Windows Latin/Greek',
+    WI: 'Windows 3.1 Baltic (Latv, Lith)', WN: 'Windows', WO: 'Windows 3.0 Latin 1',
+    WR: 'Windows Latin/Cyrillic', WT: 'Windows 3.1 Latin 5',
+};
+
+/**
+ * Appendix I Table I-2: the DOUBLE-BYTE character maps, selected by a different
+ * command from the single-byte pages — `<STX>yUxx` against `<STX>ySxx` — which
+ * the manual notes "affects an independent database selection and has no impact
+ * on the other".
+ */
+export const DPL_CHAR_MAP_IDS: Record<string, string> = {
+    B5: 'BIG 5 (Taiwan) Encoded', EU: 'EUC (Extended UNIX Code)',
+    GB: 'Government Bureau Industry Standard; Chinese (PRC)',
+    JS: 'JIS (Japanese Industry Standard)', SJ: 'Shift JIS',
+    UC: 'Unicode (including Korean)',
+};
+
+/**
  * The two-character `Wxx` expansion IDs (manual p. 133: "Value W requires two
  * additional characters to specify the Bar Code/Font ID").
  */
