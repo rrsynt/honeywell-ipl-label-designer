@@ -14,6 +14,7 @@ import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
 import { dplMultiplier } from './dplFonts';
 import { DPL_BARCODES } from './dplBarcodes';
+import { charsetWarning } from '../charsetRisk';
 
 export interface DplGenerateResult {
     dpl: string;
@@ -187,5 +188,7 @@ export const generateDPL = (design: Design): DplGenerateResult => {
     lines.push(`Q${String(Math.max(1, design.printerSettings.quantity)).padStart(4, '0')}`);
     lines.push('E');
 
+    const charset = charsetWarning(design, 'dpl');
+    if (charset) warnings.push(charset);
     return { dpl: lines.join('\r') + '\r', warnings };
 };

@@ -19,6 +19,7 @@ import { getObjectBoundingBox } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
 import { parseMaxiCodeScm } from '../ipl/maxiCodeScm';
+import { charsetWarning } from '../charsetRisk';
 
 /**
  * Escape EPL print data (manual p. 3-5).
@@ -309,5 +310,7 @@ export const generateEPL = (design: Design): EplGenerateResult => {
     // P copies (manual p. 3-87). The copy count is a job concern, so it comes
     // from the printer settings exactly as the ZPL generator's ^PQ does.
     lines.push(`P${Math.max(1, design.printerSettings.quantity)}`);
+    const charset = charsetWarning(design, 'epl');
+    if (charset) warnings.push(charset);
     return { epl: lines.join('\n'), warnings };
 };

@@ -24,6 +24,7 @@ import { DPI_MAP, FONT_MAP } from '../../constants';
 import { getObjectBoundingBox } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
+import { charsetWarning } from '../charsetRisk';
 
 const ORIENTATION = ['N', 'R', 'I', 'B'] as const;
 
@@ -175,5 +176,7 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
     }
 
     lines.push(`^PQ${Math.max(1, design.printerSettings.quantity)}`, '^XZ');
+    const charset = charsetWarning(design, 'zpl');
+    if (charset) warnings.push(charset);
     return { zpl: lines.join('\n'), warnings };
 };

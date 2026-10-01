@@ -28,6 +28,7 @@ import { getObjectBoundingBox } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
 import { parseMaxiCodeScm } from '../ipl/maxiCodeScm';
+import { charsetWarning } from '../charsetRisk';
 
 /**
  * Escape TSPL print data (manual p. 77).
@@ -396,5 +397,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
     // PRINT copies,sets — the copies come from the printer settings, exactly as
     // the ZPL generator's ^PQ and the EPL one's P do.
     lines.push(`PRINT ${Math.max(1, design.printerSettings.quantity)},1`);
+    const charset = charsetWarning(design, 'tspl');
+    if (charset) warnings.push(charset);
     return { tspl: lines.join('\n'), warnings };
 };
