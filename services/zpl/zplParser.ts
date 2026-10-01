@@ -140,6 +140,14 @@ export const parseZPL = (code: string): ViewerLabel => {
     let byRatio = 3;           // ^BY wide:narrow, default 3.0
     let byHeight = 10;
     let data: string | null = null;
+    /**
+     * `^GS`'s own parameters, held until the field is committed.
+     *
+     * The command arrives BEFORE `^FD`, and the symbol it draws is chosen by the
+     * field's DATA — so it cannot be resolved where it is read. The same shape
+     * `^GB` and `^GB`-family shapes use: record the intent, act at `commitField`.
+     */
+    let gsParams: string | null = null;
     /** ^FR — the field is printed white on a black box ("Field Reverse Print"). */
     let reverseField = false;
     /** ^SN — the field is serialised by the printer, advancing per label. */
@@ -158,6 +166,7 @@ export const parseZPL = (code: string): ViewerLabel => {
         origin = null; font = null; pendingBarcode = null; data = null; fieldRotation = null;
         reverseField = false;
         serialStep = null;
+        gsParams = null;
         fbWidth = null; fbMaxLines = null; fbSpacing = null; fbAlign = null;
     };
 
@@ -177,6 +186,51 @@ export const parseZPL = (code: string): ViewerLabel => {
         // that draws nothing must not invert whatever came before it.
         const before = elements.length;
         const f = fieldRotation ?? rotation;
+        if (gsParams !== null) {
+            // ^GS o,h,w — the symbol comes from the field's DATA, not from a
+            // parameter. An earlier reading took the first parameter for a
+            // symbol selector, so it reported a "symbol letter" for what is
+            // only the ORIENTATION (N/R/I/B like every other field) and then
+            // concluded the shapes could not be predicted from it. They cannot
+            // — but they are perfectly predictable from the DATA.
+            //
+            // Probed against Labelary, one letter per request with a 1.1 s gap
+            // for its rate limit. A-E draw; every letter from F to Z returned
+            // the flat 793-byte empty label, so the set is exactly five:
+            //
+            //   A  ®  registered     D  UL certification mark
+            //   B  ©  copyright      E  CSA certification mark
+            //   C  ™  trademark
+            //
+            // The first three are ordinary Unicode characters every font has,
+            // so they are drawn as text. D and E are third-party certification
+            // LOGOS — trademarks of UL and CSA, in no font this app ships — and
+            // approximating a certification mark is worse than omitting it.
+            const gp = gsParams.split(',');
+            const symbol = (data ?? '').trim().charAt(0).toUpperCase();
+            const GLYPH: Record<string, string> = { A: '®', B: '©', C: '™' };
+            const glyph = GLYPH[symbol];
+            if (glyph) {
+                const rIdx = ['N', 'R', 'I', 'B'].indexOf((gp[0] ?? '').trim().toUpperCase());
+                elements.push({
+                    kind: 'text', id: nextId++, ox: origin.x, oy: origin.y,
+                    f: rIdx >= 0 ? rIdx : f,
+                    font: '25', hMag: 1, wMag: 1,
+                    pointSize: Math.max(1, Math.round((num(gp[1], 0) || 24) * 72 / 203)),
+                    source: { type: 'fixed', data: glyph },
+                } as ViewerElement);
+            } else if (symbol === 'D' || symbol === 'E') {
+                issue('info', 'zpl-gs-certification',
+                    `^GS draws the ${symbol === 'D' ? 'UL' : 'CSA'} certification MARK, which the printer holds in its firmware. It is a third party's logo rather than a character and is in no font this app has, so nothing is drawn for it.`, '^GS');
+            } else {
+                issue('info', 'zpl-gs-unsupported',
+                    symbol === ''
+                        ? '^GS draws a symbol, but the field carries no data to select one with, so nothing is drawn.'
+                        : `^GS draws symbol "${symbol}", which this printer does not offer — the set is A (®), B (©), C (™), D (UL) and E (CSA). Nothing is drawn for it.`, '^GS');
+            }
+            resetField();
+            return;
+        }
         if (pendingBarcode) {
             const el: BarcodeElement = {
                 kind: 'barcode', id: nextId++, ox: origin.x, oy: origin.y, f,
@@ -609,6 +663,11 @@ export const parseZPL = (code: string): ViewerLabel => {
             }
             case 'PQ': break; // print quantity — a job concern, not a label concern
             case 'XZ': break;
+            case 'GS':
+                // Recorded, not drawn: the symbol is chosen by the field DATA,
+                // and `^FD` has not arrived yet.
+                gsParams = cmd.params;
+                break;
             default:
                 // Each of these says WHAT the command is and WHY it cannot be
                 // drawn. A generic "not part of the supported subset" reads as
@@ -617,10 +676,6 @@ export const parseZPL = (code: string): ViewerLabel => {
                 // drawable. The ones left are outside what this subset expresses.
                 if (cmd.name.startsWith('B')) {
                     issue('warning', 'zpl-barcode-unsupported', `^${cmd.name} is a barcode this viewer does not draw yet. Its data is kept in the issues but nothing is rendered for it.`, `^${cmd.name}`);
-                } else if (cmd.name === 'GS') {
-                    const sel = (cmd.params.split(',')[0] ?? '').trim();
-                    issue('info', 'zpl-gs-unsupported',
-                        `^GS draws a SYMBOL from the printer's own font, selected by a letter in its first parameter${sel ? ` ("${sel}")` : ''}, with the shapes in the field data. The glyph is in the printer, not the stream, so there is nothing to draw here — and the oracle's own shapes are not predictable from the parameters (probing ^GSN across A-E gave five different extents), so guessing them would be worse than naming it.`, '^GS');
                 } else {
                     issue('info', 'zpl-unsupported', `^${cmd.name} is not part of the supported ZPL subset, so it has no effect here.`, `^${cmd.name}`);
                 }

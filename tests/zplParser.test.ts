@@ -471,3 +471,64 @@ describe('1D barcode slots differ per command, measured (2026-09-30)', () => {
         expect(label.issues.map(i => i.code)).not.toContain('zpl-barcode-unsupported');
     });
 });
+
+describe('^GS — the symbol comes from the DATA, not a parameter', () => {
+    // Probed against Labelary with ONE LETTER PER REQUEST (a 1.1 s gap for its
+    // rate limit): A-E draw, and every letter from F to Z returned the flat
+    // 793-byte empty label — so the set is exactly five. An earlier reading took
+    // the first PARAMETER for a symbol selector, which is only the orientation
+    // (N/R/I/B, like every other ZPL field), and concluded from that the shapes
+    // could not be predicted. They can; they are selected by ^FD.
+    const gs = (fd: string, params = 'N,80,80') =>
+        parseZPL(`^XA^FO50,50^GS${params}^FD${fd}^FS^XZ`);
+
+    it('draws the three that are ordinary Unicode characters', () => {
+        // ®, © and ™ are in every font, so they are drawn as text rather than
+        // approximated — which is what makes them worth doing at all.
+        const cases: Array<[string, string]> = [['A', '®'], ['B', '©'], ['C', '™']];
+        for (const [letter, glyph] of cases) {
+            const lab = gs(letter);
+            const text = lab.elements.find(e => e.kind === 'text') as TextElement | undefined;
+            expect(text, `^${letter}`).toBeDefined();
+            expect((text!.source as { data: string }).data, `^${letter}`).toBe(glyph);
+        }
+    });
+
+    it('draws nothing for the two certification marks, and says why', () => {
+        // D and E are the UL and CSA marks — third parties' logos held in the
+        // printer's firmware, in no font this app ships. Approximating a
+        // certification mark is worse than omitting it, so the difference is
+        // named rather than filled in.
+        for (const [letter, name] of [['D', 'UL'], ['E', 'CSA']] as const) {
+            const lab = gs(letter);
+            expect(lab.elements.filter(e => e.kind === 'text'), `^${letter}`).toHaveLength(0);
+            const issue = lab.issues.find(i => i.code === 'zpl-gs-certification');
+            expect(issue, `^${letter}`).toBeDefined();
+            expect(issue!.message).toContain(name);
+        }
+    });
+
+    it('ignores a letter the printer does not offer', () => {
+        const lab = gs('F');
+        expect(lab.elements.filter(e => e.kind === 'text')).toHaveLength(0);
+        expect(lab.issues.map(i => i.code)).toContain('zpl-gs-unsupported');
+        // and the message lists the real set rather than leaving it a mystery
+        expect(lab.issues.find(i => i.code === 'zpl-gs-unsupported')!.message).toContain('A (®)');
+    });
+
+    it('reads the first PARAMETER as the orientation, which it is', () => {
+        // The mistake this command's earlier reading made in reverse: taking a
+        // parameter for something other than what it says.
+        const r = gs('A', 'R,80,80');
+        const text = r.elements.find(e => e.kind === 'text') as TextElement;
+        expect(text.f, 'R rotates the field').toBe(1);
+        const i = gs('A', 'I,80,80').elements.find(e => e.kind === 'text') as TextElement;
+        expect(i.f).toBe(2);
+    });
+
+    it('sizes the glyph from the height parameter', () => {
+        const small = gs('A', 'N,24,24').elements.find(e => e.kind === 'text') as TextElement;
+        const big = gs('A', 'N,160,160').elements.find(e => e.kind === 'text') as TextElement;
+        expect(big.pointSize!).toBeGreaterThan(small.pointSize!);
+    });
+});
