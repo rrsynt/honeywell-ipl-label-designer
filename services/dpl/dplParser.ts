@@ -1269,25 +1269,31 @@ export const parseDPL = (
                     };
                 }
             } else if (head === 'P') {
-                // "1 X 11 ppp rrrr cccc P ppp bbbb rrrr cccc rrrr cccc …"
-                // (Table 8-13, p. 140). The first row/column pair is the
-                // record's own and is point 1; everything after the `P` is a
-                // fill pattern, a fixed `0001`, and then the remaining points as
-                // row/column pairs — so the manual's triangle sample
+                // "1 X 11 ppp rrrr cccc P 001 0001 rrrr cccc rrrr cccc …"
+                // (Table 8-13, p. 140). Point 1 is the record's OWN row/column
+                // (ffff/gggg) and the rest follow the `P` and its two fixed
+                // values, so the manual's triangle sample
                 //
                 //   1 X 11 000 0010 0010 P 001 0001 0040 0025 0010 0040
                 //
-                // is point 1 at (0010,0010), then `0040 0025` and `0010 0040`
-                // after the fill and the fixed value: exactly the three corners
-                // its figure shows. The fill and the fixed 0001 sit in the MIDDLE
-                // of the point list and have to be skipped, not read as a
-                // coordinate.
-                const body = shape.slice(1);
-                const fill = Math.trunc(num(body.slice(0, 3), 0));
-                // The fill is three characters and the fixed value four, so the
+                // is point 1 at (0010,0010), then `0040 0025` and `0010 0040`:
+                // exactly the three corners its figure shows.
+                //
+                // THE FILL PATTERN IS `ppp` IN THE HEADER — the table lists it
+                // beside `rrrr`/`cccc`, and `001` inside the data field is a
+                // FIXED VALUE like the `0001` after it. Reading the body's first
+                // three characters as the fill therefore read a constant: every
+                // polygon ever parsed reported pattern 1, whatever the record
+                // said. The manual's own four examples are the proof —
+                // patterns 0, 4, 0 and 9 — and the circle branch below already
+                // reads `eee`. Two branches of one file read the same field
+                // differently, which is what settled it.
+                const fill = Math.trunc(num(eee, 0));
+                // The two fixed values are three and four characters, so the
                 // points begin at 7. Reading from 6 worked only while the
                 // manual's readability spaces were still in the string, which
                 // silently re-grouped every coordinate once they were removed.
+                const body = shape.slice(1);
                 const afterFixed = body.slice(7);
                 const coords = (afterFixed.match(/\d{4}/g) ?? []).map(v => num(v, 0));
                 const points = [{ row: num(ffff, 0), col: num(gggg, 0) }];

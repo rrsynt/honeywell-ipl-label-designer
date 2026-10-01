@@ -7,7 +7,7 @@
 // label length the flip needs is the stock height — which the design knows and
 // a DPL stream cannot say (see dplParser).
 
-import type { Design, Field, TextField, BarcodeField } from '../../types';
+import type { Design, Field, TextField, BarcodeField, PolygonField, TriangleField } from '../../types';
 import { DPI_MAP } from '../../constants';
 import { getObjectBoundingBox } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
@@ -86,6 +86,45 @@ const fieldData = (field: TextField | BarcodeField, design: Design): string => {
         return ds.transform ? applyTransform(ds.transform, resolved, design).result : resolved;
     }
     return '';
+};
+
+/**
+ * The vertices of a designer shape, in MILLIMETRES relative to the field's
+ * own top-left corner — the same figure `traceShape` (canvasDrawer.ts) puts on
+ * screen and `shapeToIplGraphicData` (iplGenerator.ts) rasterizes. The three
+ * must agree or the label prints a shape the designer never showed.
+ */
+const shapeVertices = (field: PolygonField | TriangleField): { x: number; y: number }[] => {
+    const { width: w, height: h } = field;
+    if (field.type === 'triangle') {
+        return [{ x: w / 2, y: 0 }, { x: w, y: h }, { x: 0, y: h }];
+    }
+    // A regular polygon with one vertex straight up, so a square reads as a
+    // diamond — the arrangement the screen draws.
+    const sides = Math.max(3, Math.round(field.sides));
+    const out: { x: number; y: number }[] = [];
+    for (let i = 0; i < sides; i++) {
+        const a = -Math.PI / 2 + (i * 2 * Math.PI) / sides;
+        out.push({ x: w / 2 + (w / 2) * Math.cos(a), y: h / 2 + (h / 2) * Math.sin(a) });
+    }
+    return out;
+};
+
+/**
+ * A point in the field's own box -> absolute millimetres on the label.
+ *
+ * The rotation is applied the way the designer draws it: counterclockwise
+ * about the field's top-left corner (canvasDrawer's `ctx.rotate(-rotation)`),
+ * so the ink lands exactly where the screen showed it. A DPL polygon record
+ * states every vertex, so it can carry the rotation itself — and it must,
+ * because the record has no rotation of its own (Table 8-13: "must be 1").
+ */
+const rotateAbout = (field: Field, u: number, v: number): { x: number; y: number } => {
+    const theta = -field.rotation * Math.PI / 180;
+    return {
+        x: field.x + u * Math.cos(theta) - v * Math.sin(theta),
+        y: field.y + u * Math.sin(theta) + v * Math.cos(theta),
+    };
 };
 
 export const generateDPL = (design: Design): DplGenerateResult => {
@@ -188,13 +227,51 @@ export const generateDPL = (design: Design): DplGenerateResult => {
             // reads them that way, and every manual sample agrees.
             const cy = rowFor(field.y + field.height / 2);
             const cx = colFor(field.x + field.width / 2);
-            // Data field: `C` + fill pattern + a FIXED `0001` + the radius.
+            // The FILL PATTERN is `fff` IN THE HEADER — Table 8-14 lists it
+            // beside `rrrr`, and `001` inside the data field is a FIXED VALUE
+            // like the `0001` next to it. The manual's four graphic samples
+            // prove both halves: pattern 4's record carries `004` in the
+            // HEADER, and every one of them carries `001` after the letter
+            // whatever its fill.
+            //
+            // `thickness: 0` fills the shape on screen (canvasDrawer fills the
+            // path at zero line width), so it is pattern 1, "Solid Black";
+            // anything else is an outline, which is pattern 0, "No Pattern".
+            // Writing `000` unconditionally printed a solid ellipse as a hollow
+            // one and said nothing.
+            const fill = field.thickness <= 0 ? 1 : 0;
+            // Data field: `C` + the FIXED `001` + the FIXED `0001` + the radius.
             // The manual's own sample, spaces removed, is
             // `1X1100001000100C00100010025` — `C` `001` `0001` `0025` — and the
             // parser takes the radius as `body.slice(7, 11)` for exactly that
             // reason. Emitting `C000` + radius left the radius three characters
             // short, and a round-trip came back with none.
-            lines.push(`1X11000${String(cy).padStart(4, '0')}${String(cx).padStart(4, '0')}C0000001${String(r).padStart(4, '0')}`);
+            lines.push(`1X11${String(fill).padStart(3, '0')}${String(cy).padStart(4, '0')}${String(cx).padStart(4, '0')}C0010001${String(r).padStart(4, '0')}`);
+            continue;
+        }
+
+        if (field.type === 'polygon' || field.type === 'triangle') {
+            // "1 X 11 ppp rrrr cccc P 001 0001 rrrr cccc rrrr cccc …" (Table
+            // 8-13, p. 140): "Polygons are created by defining the positions of
+            // the corners… The points must be specified in the order to be
+            // drawn; the last point specified is automatically connected to the
+            // first." The first point is the RECORD'S OWN row/column, so it is
+            // emitted in the header and left out of the tail.
+            //
+            // This branch was missing while the PARSER drew P records and the
+            // manual defined them — the same asymmetry the ellipse above had:
+            // the language could print it, our export said it could not.
+            const vertices = shapeVertices(field).map(p => rotateAbout(field, p.x, p.y));
+            // The vertices are absolute millimetres; DPL wants hundredths of an
+            // inch counting UP from the bottom edge, which rowFor/colFor do.
+            const pts = vertices.map(p => ({ r: rowFor(p.y), c: colFor(p.x) }));
+            const fill = field.thickness <= 0 ? 1 : 0;
+            const first = pts[0];
+            const tail = pts.slice(1)
+                .map(p => `${String(p.r).padStart(4, '0')}${String(p.c).padStart(4, '0')}`)
+                .join('');
+            // Rotation "must be 1": the vertices carry the orientation instead.
+            lines.push(`1X11${String(fill).padStart(3, '0')}${String(first.r).padStart(4, '0')}${String(first.c).padStart(4, '0')}P0010001${tail}`);
             continue;
         }
 

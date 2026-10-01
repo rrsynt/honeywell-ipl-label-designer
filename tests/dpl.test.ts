@@ -1476,19 +1476,34 @@ describe('DPL generator: the circle the parser already understood', () => {
     const circle = { id: 1, type: 'ellipse', name: 'E', x: 10, y: 10, rotation: 0, width: 20, height: 20, thickness: 1, visible: true };
 
     it('emits a circle record shaped like the manual\'s own sample', () => {
-        // Manual Table 8-14: "1 X 11 fff rrrr cccc C ppp bbbb rrrr". With the
-        // spaces removed its example is `1X1100001000100C00100010025` — so the
-        // data field is `C` + fill(3) + a FIXED 0001(4) + radius(4). Emitting
-        // `C000` + radius left the radius three characters short and the record
-        // would not read back.
-        const rec = generateDPL(one(circle)).dpl.split('\r').find(l => l.includes('C000'));
+        // Table 8-14: "1 X 11 fff rrrr cccc C 001 0001 rrrr", and the manual's
+        // own example is `1X1100001000100C00100010025`. So the slots are
+        //   eee  = FILL PATTERN NUMBER (the table lists it beside rrrr)
+        //   001  = Fixed Value      <- NOT the fill
+        //   0001 = Fixed Value
+        //   rrrr = radius
+        // The record this generator used to write put `000` where the manual
+        // fixes `001`, which is the one slot the PRINTER ignores — so the fill
+        // could never be expressed and a solid ellipse printed hollow.
+        const rec = generateDPL(one(circle)).dpl.split('\r').find(l => l.includes('C001'));
         expect(rec, 'a circle record is emitted').toBeDefined();
         expect(rec).toHaveLength(27);
+        // thickness 1 is an OUTLINE on screen, which is pattern 0, "No Pattern".
+        expect(rec!.slice(4, 7), 'the fill pattern lives in the header').toBe('000');
         expect(rec!.slice(15, 16), 'the data field starts with C').toBe('C');
-        expect(rec!.slice(16, 19), 'fill pattern').toBe('000');
+        expect(rec!.slice(16, 19), 'the fixed 001').toBe('001');
         expect(rec!.slice(19, 23), 'the fixed 0001').toBe('0001');
         // radius = half of 20 mm, in hundredths of an inch
         expect(rec!.slice(23)).toBe('0040');
+    });
+
+    it('fills the circle when the shape is solid, which thickness 0 means', () => {
+        // canvasDrawer fills the path at zero line width, and Table 8-15's
+        // pattern 1 is "Solid Black" — so the fill pattern has to follow the
+        // shape, or every solid ellipse prints as an outline.
+        const solid = generateDPL(one({ ...circle, thickness: 0 })).dpl;
+        const rec = solid.split('\r').find(l => l.includes('C001'));
+        expect(rec!.slice(4, 7), 'pattern 1 is Solid Black').toBe('001');
     });
 
     it('round-trips: the parser reads back an equal-sided ellipse', () => {
@@ -1497,6 +1512,9 @@ describe('DPL generator: the circle the parser already understood', () => {
         expect(el, 'DPL sends a circle, the parser draws one').toBeDefined();
         expect(el!.widthDots).toBe(el!.heightDots);
         expect(el!.widthDots).toBeGreaterThan(100);
+        // A hollow shape must NOT come back asking for a fill pattern: the
+        // parser warns when the record's pattern is non-zero.
+        expect(back.issues.map(i => i.code), 'no fill claimed for an outline').not.toContain('dpl-fill-pattern');
     });
 
     it('prints an ellipse as a circle of the smaller axis, and says so', () => {
@@ -1505,5 +1523,67 @@ describe('DPL generator: the circle the parser already understood', () => {
         // without comment; printing nothing would be a silent drop.
         const r = generateDPL(one({ ...circle, width: 20, height: 10 }));
         expect(r.warnings.some(w => w.includes('ellipse') && w.includes('smaller axis'))).toBe(true);
+    });
+
+    it('emits a POLYGON record, which the parser already drew', () => {
+        // Table 8-13: "1 X 11 ppp rrrr cccc P 001 0001 rrrr cccc …", rotation
+        // "must be 1" and the vertices in the data field. The generator had no
+        // polygon branch at all, so a six-sided shape exported as the warning
+        // "DPL output does not support yet" about a record DPL defines.
+        const hex = { id: 1, type: 'polygon', name: 'P', x: 10, y: 10, rotation: 0, width: 20, height: 20, thickness: 1, sides: 6, visible: true };
+        const { dpl, warnings } = generateDPL(one(hex));
+        expect(warnings.join(' '), 'no longer unsupported').not.toMatch(/does not support/);
+        const rec = dpl.split('\r').find(l => l.includes('P001'))!;
+        expect(rec[0], 'rotation must be 1').toBe('1');
+        expect(rec.slice(15, 16), 'polygon id').toBe('P');
+        // Six vertices: the first rides in the header, five row/column pairs
+        // follow the two fixed values. A record that dropped one would print a
+        // pentagon, and the round trip below counts them back.
+        expect(rec.slice(23), 'five more points, 8 characters each').toHaveLength(5 * 8);
+    });
+
+    it('only writes pattern 0 for an outlined polygon', () => {
+        // The parser read the body's first three characters as the fill, which
+        // are the manual's FIXED `001` — so every polygon reported pattern 1
+        // whatever the record said. Reading the header instead is what makes
+        // this assertion meaningful: a hollow shape must round-trip as hollow.
+        const hex = { id: 1, type: 'polygon', name: 'P', x: 10, y: 10, rotation: 0, width: 20, height: 20, thickness: 1, sides: 6, visible: true };
+        const back = parseDPL(generateDPL(one(hex)).dpl, 1200);
+        expect(back.issues.map(i => i.code), 'an outline is not filled').not.toContain('dpl-fill-pattern');
+        const solidBack = parseDPL(generateDPL(one({ ...hex, thickness: 0 })).dpl, 1200);
+        expect(solidBack.issues.map(i => i.code), 'a solid shape does ask for a fill').toContain('dpl-fill-pattern');
+    });
+
+    it('reads the FILL PATTERN the way the manual\'s four examples say', () => {
+        // The strongest check available for this family, because the numbers
+        // come off the page rather than out of our own code: manual p. 142
+        // gives four records and names each one's fill in the caption, so the
+        // caption is the oracle. "spaces have been added for readability", so
+        // these are the same records with the spaces taken out.
+        //
+        // The fill is `ppp`/`fff` IN THE HEADER. Reading the body's first three
+        // characters read the FIXED `001` instead, and every one of these four
+        // came back as pattern 1.
+        const samples: [string, string, number][] = [
+            ['1X1100000100010P00100010040002500100040', 'triangle, "no fill pattern"', 0],
+            ['1X1100400100010P001000100500010005002000100200', 'rectangle, "filled with pattern 4"', 4],
+            ['1X1100001000100C00100010025', 'circle, "no fill pattern"', 0],
+            ['1X1100901000100C00100010025', 'circle, "filled with pattern 9"', 9],
+        ];
+        for (const [rec, caption, expected] of samples) {
+            const parsed = parseDPL(`\x02L\rD11\r${rec}\rQ0001\rE\r`, 1200);
+            expect(parsed.elements[0], caption).toBeDefined();
+            // The fill pattern does NOT reach the IR — the renderer has no fill
+            // model, so it is reported instead of drawn. The report is the
+            // observable, and it names the number, which is what makes this a
+            // check on the NUMBER rather than on "a warning appeared".
+            const warn = parsed.issues.find(i => i.code === 'dpl-fill-pattern');
+            if (expected === 0) {
+                expect(warn, `${caption} is unfilled, so nothing is reported`).toBeUndefined();
+            } else {
+                expect(warn, `${caption} names pattern ${expected}`).toBeDefined();
+                expect(warn!.message, `${caption} -> pattern number`).toContain(`pattern ${expected} `);
+            }
+        }
     });
 });
