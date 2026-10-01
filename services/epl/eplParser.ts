@@ -900,14 +900,62 @@ export const parseEPL = (code: string): ViewerLabel => {
                 break;
             }
 
+            case 'GW': {
+                // GW p1,p2,p3,p4DATA — "Direct Graphic Write" (manual p. 3-62):
+                //   p1 = X in dots, p2 = Y in dots,
+                //   p3 = width IN BYTES (8 dots = 1 byte),
+                //   p4 = length IN DOTS (the row count),
+                //   DATA = raw binary, p3 * p4 bytes, GLUED to p4 with no comma.
+                // Because the data is glued to the fourth parameter, the line
+                // must be read from the RAW text, not from the comma split: the
+                // bytes would otherwise run into p4 (a data byte that happens to
+                // be a digit would corrupt the height) and a byte equal to a
+                // comma would be treated as a separator.
+                //
+                // The row form is the same as TSPL's BITMAP and the renderer's
+                // `graphic`: one byte per 8 dots, MSB (bit 7) leftmost, top row
+                // first. "Binary graphics are not part of this viewer yet" was
+                // the old message — a not-yet claim, and the parser now does it.
+                // (A stream whose binary contains 0x0A/0x0D still cannot be
+                // split here, because EPL is tokenized by LINE; that is a
+                // property of the stream, not of this command, and the reader
+                // sees a second, unreadable command rather than silence.)
+                const raw = cmd.raw;
+                let ci = raw.indexOf(',') + 1;                 // -> p2
+                ci = raw.indexOf(',', ci) + 1;                 // -> p3
+                ci = raw.indexOf(',', ci) + 1;                 // -> p4 (glued to data)
+                const digits = /^\d+/.exec(raw.slice(ci));
+                const wBytes = Math.max(0, Math.trunc(num(p[2], 0)));
+                const hDots = digits ? Number(digits[0]) : 0;
+                const tail = raw.slice(ci + (digits ? digits[0].length : 0));
+                if (wBytes === 0 || hDots === 0 || tail.length === 0) {
+                    issue('info', 'epl-gw-empty', 'GW with no width, height or data draws nothing.', 'GW');
+                    break;
+                }
+                const rows: string[] = [];
+                for (let r = 0; r < hDots; r++) {
+                    let row = '';
+                    for (let b = 0; b < wBytes; b++) {
+                        // Past the end is paper; `NaN & 0xFF` is 0.
+                        row += String.fromCharCode(tail.charCodeAt(r * wBytes + b) & 0xFF);
+                    }
+                    rows.push(row);
+                }
+                elements.push({
+                    kind: 'graphic', id: nextId++, graphicId: nextId++,
+                    ox: num(p[0], 0) + refX, oy: num(p[1], 0) + refY, f: 0,
+                    widthDots: wBytes * 8, heightDots: hDots,
+                    rows,
+                } as ViewerElement);
+                break;
+            }
+
             default: {
                 if (PRINTER_SETTINGS.has(cmd.name)) break;
                 // Everything else is a real EPL command this subset does not
                 // draw. Naming it is the difference between "not supported" and
                 // a field silently missing from the label.
-                if (cmd.name === 'GW') {
-                    issue('info', 'epl-gw-unsupported', 'Binary graphics (GW) are not part of this viewer yet.', 'GW');
-                } else if (cmd.name === 'GG') {
+                if (cmd.name === 'GG') {
                     // GG is Print Graphics (manual p. 3-57): it prints a PCX
                     // image by NAME from the printer's own memory. It draws, so
                     // it must not be silent — but it cannot be drawn here either,

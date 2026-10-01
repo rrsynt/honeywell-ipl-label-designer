@@ -304,6 +304,17 @@ export const generateEPL = (design: Design): EplGenerateResult => {
             continue;
         }
 
+        if (field.type === 'image') {
+            // EPL's GW sends its dots as RAW BINARY glued to the fourth
+            // parameter (manual p. 3-62) — the same shape as TSPL's BITMAP,
+            // and unlike DPL's `<STX>I F` or ZPL's `^GF`, which send hex ASCII.
+            // Every path this app sends on is UTF-8 text, which corrupts any
+            // byte >= 0x80; EPL has no hex image form, so the image is NAMED
+            // rather than sent wrong.
+            warnings.push(`"${field.name}" is an image, and EPL's GW sends its dots as raw binary, which the text transport to the printer would corrupt. EPL has no hex image form, so the image was left off the label.`);
+            continue;
+        }
+
         warnings.push(`"${field.name}" is a ${field.type}, which EPL output does not support yet. It was left off the label.`);
     }
 

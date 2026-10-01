@@ -259,9 +259,65 @@ b10,20,${letter},"DATA"`).elements[0] as any)?.symbology;
     });
 
     it('reports the commands outside the subset by name', () => {
-        const label = parseEPL('N\nGW10,10,20,5\nb10,10,Q,"x"');
-        expect(label.issues.some(i => i.code === 'epl-gw-unsupported')).toBe(true);
+        // GG names a stored graphic; the barcode type Q does not exist. GW no
+        // longer reaches this list — it DRAWS now (see the test below).
+        const label = parseEPL('N\nGG10,10,"LOGO"\nb10,10,Q,"x"');
+        expect(label.issues.some(i => i.code === 'epl-gg-stored-graphic')).toBe(true);
         expect(label.issues.some(i => i.code === 'epl-2d-unsupported')).toBe(true);
+    });
+
+    it('draws GW, which used to be called "not part of this viewer yet"', () => {
+        // GW p1,p2,p3,p4DATA — "Direct Graphic Write" (manual p. 3-62). p1/p2
+        // are X/Y dots, p3 the width IN BYTES, p4 the length IN DOTS, and DATA
+        // raw binary GLUED to p4 with no comma. The old message was a not-yet
+        // claim, and the parser now draws it into the same `graphic` element
+        // the renderer reads for TSPL BITMAP and ZPL ^GF.
+        //
+        // A raw-byte tail is spliced in because a bitmap is binary; the bytes
+        // avoid 0x0A/0x0D so the line tokenizer keeps them together.
+        const bytes = Buffer.from([0x80, 0xC0, 0xE0, 0xF0, 0x00, 0x07, 0xFF, 0x03]).toString('latin1');
+        const label = parseEPL(`N\nQ203,26\nGW10,20,4,2${bytes}\nP1\n`);
+        const g = label.elements.find(e => e.kind === 'graphic') as any;
+        expect(g, 'GW is now drawn').toBeDefined();
+        expect(label.issues.map(i => i.code), 'no unsupported claim remains').not.toContain('epl-gw-unsupported');
+        // width is BYTES -> 32 dots; height is DOTS.
+        expect(g.widthDots).toBe(32);
+        expect(g.heightDots).toBe(2);
+        expect([g.ox, g.oy]).toEqual([10, 20]);
+        // The two rows are the eight bytes, MSB-first, top row first.
+        expect([...g.rows[0]].map((c: string) => c.charCodeAt(0))).toEqual([0x80, 0xC0, 0xE0, 0xF0]);
+        expect([...g.rows[1]].map((c: string) => c.charCodeAt(0))).toEqual([0x00, 0x07, 0xFF, 0x03]);
+
+        // And it RENDERS: a 1-byte, 4-dot bitmap with the high bit set per row
+        // puts one ink dot in the left column at the element's origin.
+        const one = Buffer.from([0x80, 0x80, 0x80, 0x80]).toString('latin1');
+        const small = parseEPL(`N\nQ203,26\nGW100,50,1,4${one}\nP1\n`);
+        const extent = computeLabelExtent(small, 203);
+        const canvas = newRealCanvas(extent.widthDots, extent.heightDots);
+        renderLabel(canvas as unknown as HTMLCanvasElement, small, extent,
+            { dpi: 203, pxPerDot: 1, quality: 1, rotation: 0 });
+        const px = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+        const inked: [number, number][] = [];
+        for (let yy = 0; yy < canvas.height; yy++) {
+            for (let xx = 0; xx < canvas.width; xx++) {
+                const o = (yy * canvas.width + xx) * 4;
+                if (px[o + 3] > 0 && px[o] < 128) inked.push([xx, yy]);
+            }
+        }
+        expect(inked, 'four dots, one per row, in the left column').toEqual([[100, 50], [100, 51], [100, 52], [100, 53]]);
+    });
+
+    it('takes the GW tail after the digits, even when a data byte is a digit', () => {
+        // The data is glued to p4, so a stream whose FIRST data byte is a digit
+        // reads as a longer p4 — the same greedy parse the printer does for a
+        // glued number. What must NOT happen is the whole remainder being
+        // swallowed as height with no data left; the tail is taken after the
+        // digits. Here p4 reads 12 (its "1" plus the data's leading "2") and
+        // height is 12, with the remaining bytes as the two-wide rows.
+        const bytes = Buffer.from([0x32, 0x80, 0xFF, 0x03]).toString('latin1'); // 0x32 = '2'
+        const g = parseEPL(`N\nGW0,0,2,1${bytes}\nP1\n`).elements.find(e => e.kind === 'graphic') as any;
+        expect(g.heightDots).toBe(12);
+        expect([...g.rows[0]].map((c: string) => c.charCodeAt(0))).toEqual([0x80, 0xFF]);
     });
 
     it('LE draws an INVERSION, the same operation TSPL calls REVERSE', () => {
@@ -617,10 +673,18 @@ describe('EPL generator', () => {
         expect(warnings.some(w => /QR/.test(w) && /does not have/.test(w))).toBe(true);
     });
 
-    it('names an unsupported field type instead of dropping it silently', () => {
+    it('names the reason an image is left off, not just that it is unsupported', () => {
+        // An image is the one field type EPL cannot be sent from here: GW
+        // carries RAW BINARY dots glued to its fourth parameter (manual
+        // p. 3-62), and every send path is UTF-8 text, which corrupts bytes
+        // >= 0x80. EPL has no hex image form, so the image is named with that
+        // reason rather than a vague "not supported yet".
         const { epl, warnings } = generateEPL(withFields([{ id: 5, type: 'image', name: 'Logo', x: 1, y: 1, rotation: 0, width: 10, height: 10, data: '' }]));
-        expect(warnings.some(w => /Logo/.test(w) && /image/.test(w))).toBe(true);
-        expect(epl).toContain('P2'); // the rest of the label still prints
+        const w = warnings.find(x => /Logo/.test(x) && /image/.test(x))!;
+        expect(w).toMatch(/binary/i);
+        expect(w, 'and says why: EPL has no hex form').toMatch(/hex/i);
+        expect(epl, 'the rest of the label still prints').toContain('P2');
+        expect(epl, 'no corrupt GW is emitted').not.toContain('GW');
     });
 
     it('names an unsupported symbology', () => {
