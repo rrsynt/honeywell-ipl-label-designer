@@ -29,6 +29,7 @@ import type {
 import { estimateElementSize } from '../ipl/renderer';
 import { DPL_FONTS, DPL_SMOOTH_FONT, dplMultiplierValue } from './dplFonts';
 import { dplBarcodeFor } from './dplBarcodes';
+import { substituteDplDateTime } from './dplDateTime';
 import { FONT_MAP } from '../../constants';
 
 /**
@@ -89,8 +90,29 @@ export interface DplCommand {
  * terminated but carry no sigil at all — they are positionally identified by
  * their leading digit. So a record line is kept verbatim and told apart from a
  * command by whether it starts with 1-4 (a rotation) rather than a letter.
+ *
+ * A LINE IS NOT THE SAME THING AS A COMMAND, and that is the whole reason this
+ * function is not a split-and-indexOf. A record and the commands that fill its
+ * data field share one line, exactly as the manual writes them:
+ *
+ *   `121100001000100<STX>TBCD GHI PQ, TU`   (sample 1 of the <STX>T entry, p. 126)
+ *   `1A2210001000000<STX>SA`                (the <STX>S entry's own sample)
+ *
+ * Taking the first `<STX>` on a line and discarding what came before it — what
+ * a plain indexOf does — throws the record away and reports NOTHING. Measured:
+ * manual sample 1 parsed to 0 elements and 0 issues. So the line is split at
+ * every attention-getter, and what precedes the first one is emitted as the
+ * record it is.
+ *
+ * The two Special Label Formatting Commands are not returned as commands at
+ * all. The manual defines them as living "in the format record data field"
+ * (p. 125), so their effect belongs to the data, and the record's `params`
+ * carries the text with the marker substituted (see dplDateTime). That also
+ * sidesteps the collision the manual warns about — "Do not confuse them with
+ * System-Level Commands because the same control character is used" — since a
+ * `<STX>S` here can no longer be mistaken for the feed-speed setting.
  */
-export const tokenizeDpl = (source: string): DplCommand[] => {
+export const tokenizeDpl = (source: string, now: Date = new Date()): DplCommand[] => {
     const out: DplCommand[] = [];
     // <STX> and <SOH> may arrive as raw bytes or as the literal notation, the
     // same hazard every other language here has. Normalise both to raw.
@@ -102,17 +124,78 @@ export const tokenizeDpl = (source: string): DplCommand[] => {
         .replace(/<LF>/gi, '\n');
     for (const line of text.split(/\r\n|\r|\n/)) {
         if (line === '') continue;
-        const stx = line.indexOf('\x02');
-        if (stx < 0) {
-            out.push({ name: '', params: line.trim(), raw: line });
-            continue;
+        const parts = line.split('\x02');
+
+        // Everything before the first attention-getter is the record. An empty
+        // head means the attention-getter opened the line, which makes it a
+        // system-level command with no record in front of it.
+        //
+        // `record` is deliberately scoped to THIS line rather than taken from
+        // the end of `out`. A special command with no record of its own would
+        // otherwise append its value to whatever was emitted last — a `<STX>T`
+        // on a line of its own was seen to hand its date to the preceding
+        // `<STX>L`, turning that command's params into "MON". Reading the value
+        // back off the last entry is only safe if that entry is a record.
+        const head = parts[0];
+        let record: DplCommand | null = null;
+        if (head !== '') {
+            record = { name: '', params: head.trimStart(), raw: line };
+            out.push(record);
         }
-        // A system-level command: <STX> followed by its letter and params.
-        // Commands and records are separate LINES in DPL — every sample in the
-        // manual writes one per line, and the carriage return that terminates a
-        // command is what ends it. A record never shares a line with one.
-        const body = line.slice(stx + 1);
-        out.push({ name: body.slice(0, 1), params: body.slice(1).trim(), raw: line });
+
+        // Which parts are the time STRING and which are DATA is decided by the
+        // two attention-getters around it. The manual gives the rule in the
+        // <STX>T entry: the command "may be preceded by data to be printed/
+        // encoded, and/or the string may now be terminated by an <STX> command
+        // and then followed by more data terminated by a <CR>" (p. 126). So
+        // only the text between <STX>T and the next <STX> is a marker string;
+        // everything outside it is printed as written. Sample 3 is the proof —
+        // `191100100100010ABC <STX>TEF/PQ<STX> DEF` prints "ABC 12/21 DEF",
+        // with "ABC" and " DEF" carried through untouched.
+        let markerText: string | null = null;
+        let trailing = '';
+        for (let i = 1; i < parts.length; i++) {
+            const seg = parts[i];
+            const last = i === parts.length - 1;
+            const rest = last ? seg.slice(1).trim() : seg.slice(1);
+            const stx = seg.slice(0, 1);
+
+            // A command letter is alphabetic. An attention-getter followed by a
+            // digit therefore opened no command at all — the most likely stream
+            // is a stray <STX> in front of a record, and reading it as a command
+            // named "1" would drop the record in the system-level branch, which
+            // reports nothing for an unrecognized letter.
+            if (record === null && !/[A-Za-z]/.test(stx)) {
+                record = { name: '', params: last ? seg.trim() : seg, raw: line };
+                out.push(record);
+                continue;
+            }
+
+            if (markerText !== null && !/^[A-Za-z]/.test(stx)) {
+                // An attention-getter that is not followed by a command letter
+                // CLOSES the time string, and the rest of the line is data
+                // again. The whole segment is kept, leading space included.
+                trailing += seg;
+                continue;
+            }
+
+            if (stx === 'T' && record) {
+                markerText = (markerText ?? '') + rest;
+                continue;
+            }
+
+            // Any other sigil ends the string, so what it was holding goes back
+            // into the record's data before the command itself is emitted.
+            if (markerText !== null && record) {
+                record.params += substituteDplDateTime(markerText, now);
+                markerText = null;
+            }
+            if (stx === '') trailing += rest;
+            else out.push({ name: stx, params: rest, raw: line });
+        }
+
+        if (markerText !== null && record) record.params += substituteDplDateTime(markerText, now);
+        if (record && trailing) record.params += trailing;
     }
     return out;
 };
@@ -157,13 +240,21 @@ interface PendingShape {
  * size passes it; without it the rows are placed against the content's own
  * extent, which is exact whenever some field already sits at the label's top.
  */
-export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel => {
+export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new Date()): ViewerLabel => {
     const issues: ViewerIssue[] = [];
     const elements: ViewerElement[] = [];
     let nextId = 1;
 
     const issue = (level: ViewerIssue['level'], code_: string, message: string, command?: string) =>
         issues.push({ level, code: code_, message, command });
+    const seenOnce = new Set<string>();
+    /** Reports a condition once per parse — a stream that sets the same global
+     *  state on every record would otherwise bury the panel in duplicates. */
+    const once = (key: string, level: ViewerIssue['level'], code_: string, message: string, command?: string) => {
+        if (seenOnce.has(key)) return;
+        seenOnce.add(key);
+        issue(level, code_, message, command);
+    };
 
     const settings: ViewerLabel['settings'] = {};
 
@@ -203,16 +294,52 @@ export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel =>
      *  records ... transposed visually, as if the object is viewed in a
      *  mirror". It TOGGLES, so it is page-level state, not a field flag. */
     let mirror = false;
+    /** The data field of the record just read, for `G` to store. */
+    let lastRecordData = '';
 
     // A graphics record (b = X) describes its object in the DATA field rather
     // than in the header, so it is built when the record is read.
     let pendingShape: PendingShape | null = null;
 
+    /**
+     * `G` global registers, A-P, "named in the order received, beginning with
+     * register A ... and incrementing with each instance of the G command use"
+     * (p. 114). The manual calls this "temporary storage" for a record's print
+     * data, so it is per-job state that carries no position of its own — until
+     * a `<STX>S` copies it into a record.
+     */
+    const globalRegisters: string[] = [];
+
     /** DPL position units -> dots. Hundredths of an inch, or tenths of a mm. */
     const positionToDots = (units: number, dpi: number): number =>
         metric ? (units / 10) * (dpi / 25.4) : (units / 100) * dpi;
 
-    for (const cmd of tokenizeDpl(code)) {
+    const cmds = tokenizeDpl(code, now);
+
+    /**
+     * Which records a `<STX>S` fills, keyed by the record's token index.
+     *
+     * The manual writes the recall AFTER the record it fills, on the next line:
+     * `121100000000000Testing<CR>G<CR>1A2210001000000<STX>SA` (p. 126). So the
+     * pairing is a lookahead over the token list, and it is the PRECEDING
+     * RECORD that identifies the special command rather than the System-Level
+     * `<STX>S` (Set Feed Speed) the manual warns not to confuse it with
+     * (p. 125) — a record can only exist inside a label format, so a record
+     * immediately before the sigil settles it with no state to thread.
+     *
+     * Values are deliberately NOT read here: a register is filled by an earlier
+     * `G`, so it can only be resolved when the main loop reaches the record.
+     */
+    const recallFor = new Map<number, string>();
+    for (let i = 1; i < cmds.length; i++) {
+        const c = cmds[i];
+        if (c.name !== 'S' || !/^[A-P]$/.test(c.params)) continue;
+        const prev = cmds[i - 1];
+        if (prev.name === '' && /^\d/.test(prev.params)) recallFor.set(i - 1, c.params);
+    }
+
+    for (let ci = 0; ci < cmds.length; ci++) {
+        const cmd = cmds[ci];
         // ---- System-level commands ----
         if (cmd.name !== '') {
             const letter = cmd.name;
@@ -283,7 +410,31 @@ export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel =>
                         `M turns Mirror Mode ${mirror ? 'ON' : 'OFF'}: records after it print transposed as if seen in a mirror. This preview draws the label as laid out, so the mirroring is not applied.`, 'M');
                     break;
                 }
+                // The label-level metric/inch pair. The same letters do the same
+                // job at the system level (`<STX>m` / `<STX>n`), and every
+                // position in the format is read in whichever unit is current —
+                // so a format that switches mid-stream moves the fields after
+                // it, and positionToDots is what honours that.
+                case 'm': metric = true; break;
+                case 'n': metric = false; break;
                 case 'Q': quantity = Math.max(1, Math.trunc(num(rest, 1))); break;
+                case 'G': {
+                    // "The 'G' command saves the print data of a print format
+                    // record in a global register (temporary storage) ... Global
+                    // registers are named in the order received, beginning with
+                    // register A, ending at register P" (p. 114). It is the
+                    // partner of <STX>S, which copies the value into a later
+                    // record.
+                    if (globalRegisters.length < 16) {
+                        globalRegisters.push(lastRecordData);
+                        issue('info', 'dpl-global-register',
+                            `G stores the preceding record's data ("${lastRecordData}") in global register ${String.fromCharCode(65 + globalRegisters.length - 1)}.`, 'G');
+                    } else {
+                        issue('warning', 'dpl-global-overflow',
+                            'G is used more than 16 times here, but DPL keeps only the registers A to P; the printer ignores this one.', 'G');
+                    }
+                    break;
+                }
                 case 'H': settings.darknessAdjust = Math.trunc(num(rest, 0)); break;
                 case 'P': settings.printSpeed = Math.trunc(num(rest, 0)); break;
                 case 'X': inFormat = false; break;   // terminate without printing
@@ -295,18 +446,44 @@ export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel =>
                     // A format command this subset does not model. Named, never
                     // dropped in silence — the contract every parser here keeps.
                     //
-                    // The silence list below is checked against the manual's own
-                    // Label Formatting chapter, because a listing that does not
-                    // match the real command is worse than none: it silences
-                    // nothing while the real command reports as unrecognized.
+                    // The list below is re-derived from the manual's own Label
+                    // Formatting chapter headings, and the test of a sound entry
+                    // is that it can actually BE reached: a name the switch above
+                    // already handles can never arrive here, so listing it
+                    // silences nothing. 'J', 'R' and 'U' were on the list and all
+                    // three are handled above; 'g' was too, but the manual's
+                    // command is 'G' (Place Data in Global Register) — there is
+                    // no lowercase 'g' in the chapter at all. That is the same
+                    // defect 'd' and 'V' had before them: a phantom entry that
+                    // quietens a name the tokenizer can never produce while every
+                    // real occurrence of the command reports as unknown.
                     //
-                    // 'd' and 'V' were removed after that check. 'd' is not a
-                    // label command at all (the manual has 'D', dot size), and
-                    // 'V' is a system-level software-switch command that never
-                    // appears inside a format. Both would have silenced a name
-                    // the tokenizer can never produce, while every real
-                    // occurrence of those letters reported as unknown.
-                    if (!'cefgJmnpRSszTUy'.includes(letter)) {
+                    // What remains is six commands, each of which is real and
+                    // each of which this subset does not model:
+                    //   `c` and its upper-case twin Cut By Amount, `e` Recall
+                    //       Printer Configuration (whose parameter is bare text,
+                    //       `ePlant1` — it needs a line terminator to end it, so
+                    //       a record written right after it without one is read
+                    //       as part of the name and never appears), and
+                    //   `f` Present Speed and `p` Backfeed Speed (printer
+                    //       motion rather than image). Both take bare-text
+                    //       parameters too, `fA19110...` in the manual's sample,
+                    //       and so carry the same hazard.
+                    //   bare `S` Set Feed Speed / `T` Set Field Data Line
+                    //       Terminator, which share their letters with the
+                    //       special <STX>S / <STX>T commands the manual warns
+                    //       not to confuse them with (p. 125).
+                    // The digit-sigilled `+`, `-` and `^` are NOT here: they
+                    // take no leading letter, so they read as records and are
+                    // caught by the not-a-record check further down.
+                    //
+                    // `F` (Advanced Format Attributes), `r` (Recall Stored
+                    // Label Format), `s` (Store Label Format in Module), `y`
+                    // (Font Symbol Set) and `z` (Zero Conversion) are NOT here
+                    // either, and deliberately: each one changes what the label
+                    // looks like or brings in fields this parse never saw, so
+                    // they must report rather than be listed as harmless.
+                    if (!'cefpST'.includes(letter)) {
                         issue('info', 'dpl-command', `DPL label command "${letter}" is not part of the supported subset; it has no effect on the preview.`, letter);
                     }
                     break;
@@ -351,10 +528,41 @@ export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel =>
         const col = positionToDots(num(gggg, 0) + columnOffset, 203);
         const rot = quadrantFromDpl(rotationDigit);
 
+        // A <STX>S following this record replaces its data with a global
+        // register's. If that register was never filled the record prints
+        // NOTHING on the printer, so it must not be drawn with its placeholder
+        // either — and unlike every other record, the data is taken from
+        // somewhere else rather than read out of the line afterwards.
+        // Searched BACKWARD for the nearest record, since the recall may sit
+        // after intervening blank records.
+        let recallRegister: string | null = null;
+        for (let k = ci; k >= 0; k--) {
+            if (recallFor.has(k)) { recallRegister = recallFor.get(k) as string; break; }
+            if (cmds[k].name === '' && /^\d/.test(cmds[k].params)) break;
+        }
+        let recalled: string | null = null;
+        if (recallRegister) {
+            const idx = recallRegister.charCodeAt(0) - 65;
+            recalled = globalRegisters[idx] ?? '';
+            once(`recall-${recallRegister}`, 'info', 'dpl-global-recall',
+                recalled === ''
+                    ? `<STX>S${recallRegister} copies global register ${recallRegister} into this record, but the format never stores anything in that register, so the printer prints nothing here.`
+                    : `<STX>S${recallRegister} copies global register ${recallRegister}'s data ("${recalled}") into this record at print time.`,
+                'S');
+        }
+        if (recalled === '') continue;
+        if (recalled !== null) payload = recalled;
+        lastRecordData = payload.trim();
+
         // --- Graphic object (b = X): the DATA field describes the shape ---
         if (bChar === 'X') {
             const shape = payload.trim();
             const head = shape[0];
+            if (head === undefined || shape === '') {
+                issue('warning', 'dpl-shape-empty',
+                    'A graphics record (b = X) carries the whole shape in its data field, and that field is empty here, so there is nothing to draw.', 'X');
+                continue;
+            }
             // "LINE*: Lhhhvvv", "BOX***: Bhhhvvvbbbsss" (manual p. 139). The
             // lowercase forms take four-digit fields instead of three.
             const isUpperForm = head === 'L' || head === 'B';
@@ -397,6 +605,10 @@ export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel =>
         // --- Bar code (b = a letter A-Z / a-z, or Wxx) ---
         const bc = dplBarcodeFor(bField);
         if (bc) {
+            if (payload.trim() === '') {
+                issue('warning', 'dpl-empty-barcode',
+                    `A ${bc.type.name} record has no data field, so there is nothing to encode. The header alone accounts for the whole line, which is also what a truncated record looks like.`, bChar);
+            }
             // Field c is the WIDE bar (numerator) and d the NARROW bar
             // (denominator) for ratio-based codes; for module-based codes d is
             // the module size and the manual says c and d must match.
@@ -423,7 +635,14 @@ export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel =>
         if (/^[0-8]$/.test(bChar) || bChar === DPL_SMOOTH_FONT) {
             const text = payload;
             if (text === '') {
-                issue('info', 'dpl-empty-text', 'A text record with an empty data field prints nothing.', bChar);
+                // The header consumed the whole line, so the field is
+                // deliberately empty. That is legitimate in DPL — a bar code
+                // often draws its text from a neighbouring field and leaves its
+                // own data blank — but it is also what a stream looks like when
+                // its data was lost, so it is said at warning level rather than
+                // passed over in silence.
+                issue('warning', 'dpl-empty-text',
+                    'A text record with an empty data field prints nothing. This is normal for a field that only reserves a slot, but it is also what a truncated record looks like.', bChar);
                 continue;
             }
             const isSmooth = bChar === DPL_SMOOTH_FONT;

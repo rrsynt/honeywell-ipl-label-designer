@@ -19,6 +19,7 @@ import { parseDPL, tokenizeDpl } from '../services/dpl/dplParser';
 import { generateDPL } from '../services/dpl/dplGenerator';
 import { DPL_FONTS, dplMultiplier, dplMultiplierValue, nearestSmoothPoint } from '../services/dpl/dplFonts';
 import { dplBarcodeFor, DPL_BARCODES } from '../services/dpl/dplBarcodes';
+import { substituteDplDateTime, isDplDateMarker } from '../services/dpl/dplDateTime';
 import { detectSourceLanguage } from '../components/IPLViewerModal';
 import { estimateElementSize } from '../services/ipl/renderer';
 import type { Design } from '../types';
@@ -60,16 +61,53 @@ describe('DPL tokenizer', () => {
         expect(cmds[3].params).toBe('E');
     });
 
-    it('treats a command and a record as separate lines, as the manual writes them', () => {
-        // Every sample in the manual puts one command per line, and the
-        // carriage return that terminates a command is what ends it — so a
-        // record is never part of a command's line. Pinned because a reader who
-        // assumed otherwise would try to split them and mis-parse both.
+    it('keeps a label command and a record on separate lines apart', () => {
+        // The ordinary shape: one command per line, terminated by the carriage
+        // return. A line with no attention-getter on it is a record.
         const cmds = tokenizeDpl('\x02L\rJR\r141100002000200HELLO\rQ0001\rE\r');
+        // The leading '' is the <STX>L entry itself, which carries no params.
         expect(cmds.map(c => c.params)).toEqual(['', 'JR', '141100002000200HELLO', 'Q0001', 'E']);
         const lab = parseDPL('\x02L\rJR\r141100002000200HELLO\rQ0001\rE\r', PAGE);
         expect(lab.elements, 'the record draws').toHaveLength(1);
         expect((lab.elements[0] as any).source.data).toBe('HELLO');
+    });
+
+    it('splits a record from an <STX>T that shares its line', () => {
+        // A LINE IS NOT A COMMAND, and this is the case that proved it. The
+        // manual's own <STX>T samples put the record and the time command on
+        // ONE line: `121100001000100<STX>TBCD GHI PQ, TU` (p. 126). An earlier
+        // version of this test asserted the opposite — that a record "never
+        // shares a line" with a command — and the tokenizer then took the first
+        // <STX> on the line and discarded everything before it, so parsing
+        // manual sample 1 gave 0 elements and 0 issues: total silence.
+        const cmds = tokenizeDpl('\x02L\r121100001000100<STX>TBCD GHI PQ, TU\rE\r');
+        expect(cmds.map(c => c.params)).toEqual([
+            '',                                // the <STX>L entry, which has no params
+            '121100001000100THU OCT 01, 26',   // the record, with its string baked
+            'E',
+        ]);
+    });
+
+    it('gives a special command with no record of its own nowhere to write', () => {
+        // The record a special command fills is the one on ITS OWN line. Reading
+        // it back off the end of the token list instead reached whatever was
+        // emitted last — here the <STX>L — and handed it the date, turning that
+        // command's params into "MON". A <STX>T out of position must not be able
+        // to corrupt the command before it.
+        const cmds = tokenizeDpl('\x02L\r\x02TBCD\r141100001000100HI\rE\r');
+        const l = cmds.find(c => c.name === 'L');
+        expect(l?.params, 'the <STX>L must keep its own (empty) params').toBe('');
+        expect(cmds.map(c => c.name)).toContain('T');
+    });
+
+    it('keeps a line that opens with an inline <STX> as one piece of data', () => {
+        // An attention-getter followed by a DIGIT is not a command letter, so
+        // the whole line stays data rather than being split into a command
+        // named "1" with the rest of the record as its parameter.
+        const cmds = tokenizeDpl('\x02L\r\x02141100001000100HI\rE\r');
+        const rec = cmds.find(c => c.name === '' && /^\d/.test(c.params));
+        expect(rec, 'the record survives intact').toBeDefined();
+        expect(rec?.params).toBe('141100001000100HI');
     });
 
     it('accepts the <STX> notation as well as the raw byte', () => {
@@ -79,6 +117,17 @@ describe('DPL tokenizer', () => {
         const notated = tokenizeDpl('<STX>L\r141100001000100X\r E\r'.replace('\r E', '\rE'));
         expect(notated.map(c => c.name)).toEqual(raw.map(c => c.name));
         expect(notated[1].params).toBe(raw[1].params);
+    });
+
+    it('spells <STX>T the same whether it arrives raw or notated', () => {
+        // The notation hazard is at its sharpest here, because the whole point
+        // of the command is that its sigil sits inside a record's data field.
+        const seed = () => new Date(2026, 9, 1, 14, 30, 45);
+        const raw = parseDPL('\x02L\r121100001000100\x02TBCD GHI PQ, TU\rE\r', PAGE, seed());
+        const notated = parseDPL('\x02L\r121100001000100<STX>TBCD GHI PQ, TU\rE\r', PAGE, seed());
+        expect((notated.elements[0] as any).source.data)
+            .toBe((raw.elements[0] as any).source.data);
+        expect((raw.elements[0] as any).source.data).toBe('THU OCT 01, 26');
     });
 });
 
@@ -299,10 +348,47 @@ describe('DPL label-formatting commands (manual Chapter 6)', () => {
         const unknown = parseDPL('\x02L\rW99\r141100001000100HI\rQ0001\rE\r', PAGE);
         expect(unknown.issues.map(i => i.code)).toContain('dpl-command');
         // and the real ones stay quiet
-        for (const silent of ['c07', 'e1', 'f1', 'J2', 'm', 'n', 'p1', 'R0010', 'S1', 's1', 'z', 'T1', 'y1']) {
+        for (const silent of ['c07', 'e1', 'f1', 'p1', 'S1', 'T1']) {
             const quiet = parseDPL(`\x02L\r${silent}\r141100001000100HI\rQ0001\rE\r`, PAGE);
             expect(quiet.issues.map(i => i.code), `"${silent}" is a real command`).not.toContain('dpl-command');
         }
+    });
+
+    it('keeps the silence list reachable, so it silences something real', () => {
+        // A name the switch above already handles can never arrive at the
+        // silence check, so listing it quietens nothing. 'J', 'R' and 'U' were
+        // on the list and all three are handled; 'g' was too, but the manual's
+        // command is 'G'. This is the same defect the 'd' and 'V' entries had,
+        // and the reason each entry must be shown to be reachable.
+        //
+        // The mirror image matters just as much: a real command that changes
+        // the IMAGE must not be quieted. `y` (font symbol set) and `z` (zero
+        // conversion) both do, so they report.
+        for (const mustReport of ['y1', 'z']) {
+            const lab = parseDPL(`\x02L\r${mustReport}\r141100001000100HI\rQ0001\rE\r`, PAGE);
+            expect(lab.issues.map(i => i.code), `"${mustReport}" changes the image`).toContain('dpl-command');
+        }
+        // and the handled ones are handled rather than silenced
+        for (const [cmd, code] of [['J2', null], ['R0010', null], ['U', 'dpl-replacement-field']] as const) {
+            const lab = parseDPL(`\x02L\r${cmd}\r141100001000100HI\rQ0001\rE\r`, PAGE);
+            if (code) expect(lab.issues.map(i => i.code)).toContain(code);
+            expect(lab.issues.map(i => i.code), `"${cmd}" must not fall through to the silence list`)
+                .not.toContain('dpl-command');
+        }
+    });
+
+    it('handles metric mode inside the format, not just at system level', () => {
+        // 'm' and 'n' appear in the Label Formatting chapter as well as the
+        // system-level one, and every position is read in whichever unit is
+        // current. A format that switches mid-stream really does move the
+        // fields after it, so reading them as unknown commands would have left
+        // every following position in the wrong unit.
+        const inch = parseDPL('\x02L\r141100001000100HI\rQ0001\rE\r', PAGE).elements[0] as any;
+        const metric = parseDPL('\x02L\rm\r141100001000100HI\rQ0001\rE\r', PAGE).elements[0] as any;
+        // 100 hundredths of an inch is one inch; 100 tenths of a mm is 10 mm,
+        // which is a different distance at any dpi.
+        expect(metric.oy).not.toBe(inch.oy);
+        expect(metric.oy).toBeGreaterThan(inch.oy);
     });
 
     it('does not silence a letter that is NOT a label command', () => {
@@ -379,6 +465,141 @@ describe('DPL language detection', () => {
         expect(detectSourceLanguage('^XA^FO10,10^FDX^FS^XZ')).toBe('zpl');
         expect(detectSourceLanguage('N\nq400\nQ200,24\nA10,10,0,2,1,1,N,"X"\nP1')).toBe('epl');
         expect(detectSourceLanguage('<STX><ESC>C<SI>W800<ETX>')).toBe('ipl');
+    });
+});
+
+describe('DPL <STX>T time and date (manual Table 6-3, p. 126)', () => {
+    // The manual's date: "The sample listings below assume a current printer
+    // date of December 21, 1998." Every expectation here is that sample.
+    const SAMPLE_DATE = () => new Date(1998, 11, 21, 13, 30, 45);
+    const bake = (s: string) => substituteDplDateTime(s, SAMPLE_DATE());
+
+    it('reproduces the manual\'s own samples character for character', () => {
+        // Sample 1: "121100001000100<STX>TBCD GHI PQ, TU" -> "SUN DEC 21, 98".
+        // Sample 2: "191100100100010<STX>TEF/PQ"          -> "12/21".
+        // These are the strongest evidence the table can have: the manual states
+        // the printed result, so a table that drifts fails against text that
+        // was written before this code existed.
+        // (Dec 21 1998 was a MONDAY; the manual's "SUN" is its own typo, and
+        //  the weekday naming rule is pinned separately below.)
+        expect(bake('BCD GHI PQ, TU')).toBe('MON DEC 21, 98');
+        expect(bake('EF/PQ')).toBe('12/21');
+        // The manual's own text confirms GHI is the month's first three
+        // letters: "Sample 2 will print 12/21" with EF as the month number.
+        expect(bake('BCD')).toBe('MON');
+        expect(bake('GHI')).toBe('DEC');
+        expect(bake('TU')).toBe('98');
+        expect(bake('RSTU')).toBe('1998');
+    });
+
+    it('leaves every non-marker character exactly as written', () => {
+        // "The string characters/markers are not printed" — but only the
+        // markers. Sample 1's spaces and comma survive into the output, so the
+        // string is a template, not a list of markers.
+        expect(bake('PQ/PQ')).toBe('21/21');
+        // A group can be entered part-way, and then it prints the part asked
+        // for: Q is the day's SECOND character, so `QRST` is "1" from day 21
+        // plus "199" from year 1998 — not the day and the year. Derived from
+        // the group values rather than written out, because the concatenations
+        // are easy to get wrong by hand and the point is the ADDRESSING.
+        const day = bake('PQ');
+        const year = bake('RSTU');
+        expect(bake('Q')).toBe(day[1]);
+        expect(bake('P')).toBe(day[0]);
+        expect(bake('QRST')).toBe(day[1] + year.slice(0, 3));
+        expect(bake('PQRSTU')).toBe(day + year);
+        // Lowercase letters past h are not markers and pass through untouched,
+        // as do digits and punctuation.
+        expect(bake('lmn')).toBe('lmn');
+        expect(bake('12-34')).toBe('12-34');
+        expect(isDplDateMarker('G')).toBe(true);
+        expect(isDplDateMarker('i')).toBe(false);
+
+        // THE TRAP, and the reason a mixed string is dangerous: every UPPERCASE
+        // letter is a marker, because Table 6-3 uses the whole alphabet A-Z.
+        // So ordinary capitalised text inside an <STX>T string is NOT printed
+        // as written — "DEC" comes out as the pieces of three different values.
+        const D = bake('BCD')[2], E = bake('EF')[0], C = bake('BCD')[1];
+        expect(bake('DEC')).toBe(D + E + C);
+        expect(bake('DEC')).not.toBe('DEC');
+    });
+
+    it('addresses each value by the marker letter\'s position in its group', () => {
+        // The reading that makes Table 6-3 legible: the letters of a group are
+        // placeholders for the characters of its value, so G, H and I are the
+        // first three of G..O because B, C and D are the first three of the
+        // weekday name. Checked on a value with no padding to hide an error.
+        expect(bake('Za')).toBe('30');   // minutes 30
+        expect(bake('bc')).toBe('PM');   // 13:30
+        expect(bake('gh')).toBe('45');   // seconds 45
+        expect(bake('VW')).toBe('13');   // hour, 24-hour
+        expect(bake('XY')).toBe('01');   // hour, 12-hour
+        expect(bake('def')).toBe('355'); // Julian day of Dec 21 1998
+    });
+
+    it('keeps every group the same width as the value it prints', () => {
+        // The invariant that a drifted table breaks first. If a letter is added
+        // to a group or a value changes width, the substitution silently drops
+        // or misplaces a character — so it is asserted rather than assumed.
+        const groups: Array<[string, string]> = [
+            ['A', bake('A')], ['BCD', bake('BCD')], ['EF', bake('EF')],
+            ['GHIJKLMNO', bake('GHIJKLMNO')], ['PQ', bake('PQ')], ['RSTU', bake('RSTU')],
+            ['VW', bake('VW')], ['XY', bake('XY')], ['Za', bake('Za')],
+            ['bc', bake('bc')], ['def', bake('def')], ['gh', bake('gh')],
+        ];
+        // J..O print spaces because "DECEMBER" is shorter than its nine-letter
+        // group — that is the padding showing, not a gap.
+        for (const [letters, value] of groups) {
+            expect(value.length, `group ${letters}`).toBe(letters.length);
+        }
+    });
+
+    it('bakes the time into a record that shares its line with the string', () => {
+        // The end-to-end shape, which is the one that used to vanish: this
+        // parsed to 0 elements and 0 issues before the tokenizer was fixed.
+        const lab = parseDPL('\x02L\r121100001000100<STX>TBCD GHI PQ, TU\rE\r', PAGE, SAMPLE_DATE());
+        expect(lab.elements, 'the record must survive its own data field').toHaveLength(1);
+        expect((lab.elements[0] as any).source.data).toBe('MON DEC 21, 98');
+    });
+
+    it('treats text outside the string as data, per sample 3', () => {
+        // "The <STX>T may be preceded by data to be printed/encoded, and/or the
+        // string may now be terminated by an <STX> command and then followed by
+        // more data" (p. 126). Sample 3 prints "ABC 12/21 DEF": only EF/PQ is a
+        // marker string — ABC and " DEF" are literal. Reading the trailing text
+        // as markers too is how an earlier attempt produced "U10" for " DEF".
+        const lab = parseDPL('\x02L\r191100100100010ABC <STX>TEF/PQ<STX> DEF\rE\r', PAGE, SAMPLE_DATE());
+        expect((lab.elements[0] as any).source.data).toBe('ABC 12/21 DEF');
+    });
+});
+
+describe('DPL global registers and <STX>S (manual p. 114 and p. 126)', () => {
+    it('copies a stored field into a later record', () => {
+        // The manual's own sample: store "Testing" with G, then recall it with
+        // <STX>SA. "One label is printed with 'Testing' in two locations."
+        const lab = parseDPL('\x02L\r121100000000000Testing\rG\r1A2210001000000<STX>SA\rE\r', PAGE);
+        expect(lab.elements, 'both records draw').toHaveLength(2);
+        expect((lab.elements[0] as any).source.data).toBe('Testing');
+        expect((lab.elements[1] as any).source.data).toBe('Testing');
+        expect(lab.issues.map(i => i.code)).toContain('dpl-global-recall');
+    });
+
+    it('draws nothing when the register it recalls was never filled', () => {
+        // A register that no G ever wrote prints an empty field on the printer.
+        // Drawing the format's own placeholder text instead would put a string
+        // on the label that the printer will not print.
+        const lab = parseDPL('\x02L\r1A2210001000000<STX>SB\rE\r', PAGE);
+        expect(lab.elements, 'an unfilled register prints nothing').toHaveLength(0);
+        expect(lab.issues.map(i => i.code)).toContain('dpl-global-recall');
+    });
+
+    it('reads a bare S as the feed-speed command, not as a recall', () => {
+        // The manual warns about this collision in as many words: "Do not
+        // confuse them with System-Level Commands because the same control
+        // character is used" (p. 125). A bare `S` line is Set Feed Speed.
+        const lab = parseDPL('\x02L\rS1\r141100001000100HI\rQ0001\rE\r', PAGE);
+        expect(lab.elements, 'a bare S does not eat the record').toHaveLength(1);
+        expect(lab.issues.map(i => i.code)).not.toContain('dpl-global-recall');
     });
 });
 
