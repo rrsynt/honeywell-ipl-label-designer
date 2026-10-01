@@ -27,7 +27,7 @@ import type {
     BoxElement, LineElement, EllipseElement, PolygonElement, GraphicElement, UnknownElement,
 } from '../ipl/types';
 import { estimateElementSize } from '../ipl/renderer';
-import { DPL_FONTS, DPL_SMOOTH_FONT, dplMultiplierValue, dplDefaultHeightDots } from './dplFonts';
+import { DPL_FONTS, DPL_SMOOTH_FONT, dplMultiplierValue, dplDefaultHeightDots, DPL_SPEED_IPS } from './dplFonts';
 import { dplBarcodeFor, DPL_CODE_PAGE_IDS, DPL_CHAR_MAP_IDS } from './dplBarcodes';
 import { substituteDplDateTime } from './dplDateTime';
 import { FONT_MAP } from '../../constants';
@@ -849,6 +849,19 @@ export const parseDPL = (
                         `M turns Mirror Mode ${mirror ? 'ON' : 'OFF'}: records after it print transposed as if seen in a mirror. This preview draws the label as laid out, so the mirroring is not applied.`, 'M');
                     break;
                 }
+                case 'p': {
+                    // "Syntax: pa — a: Is a single alpha character representing
+                    // a speed; see Appendix L for valid ranges" (p. 117). Same
+                    // table as `P`, and the manual's sample `pF` "sets the
+                    // printer to a backup speed of 3.5 IPS" — which Table L-1
+                    // gives for `F`, confirming the letter is read as itself.
+                    const ips = DPL_SPEED_IPS[rest.trim()];
+                    if (ips !== undefined) {
+                        once(`feed-${rest.trim()}`, 'info', 'dpl-print-speed',
+                            `p sets the backfeed speed to ${ips} inches per second (Table L-1 "${rest.trim()}"). The preview does not model media motion, so this is not applied.`, 'p');
+                    }
+                    break;
+                }
                 case 'F': {
                     // "F Advanced Format Attributes ... These commands extend
                     // the text presentation capabilities for Scalable Fonts"
@@ -898,7 +911,35 @@ export const parseDPL = (
                     break;
                 }
                 case 'H': settings.darknessAdjust = Math.trunc(num(rest, 0)); break;
-                case 'P': settings.printSpeed = Math.trunc(num(rest, 0)); break;
+                case 'P': {
+                    // "Syntax: Pa — a: Is a single character representing a
+                    // speed; see Appendix L for valid ranges" (p. 117). The
+                    // manual's own sample is `PC`, which it says prints "at a
+                    // speed of 2 inches per second".
+                    //
+                    // Read as a NUMBER, that sample — and every other letter
+                    // speed — became 0 in silence. The IR's printSpeed is a
+                    // NUMBER in the printer's tenths, so a letter cannot go
+                    // there without inventing a unit the type does not declare;
+                    // the speed is reported instead, with its own table's value.
+                    // The lookup is CASE-SENSITIVE, and has to be: Table L-1
+                    // gives `A` as 1.0 ips and `a` as 16.0 — the same letter two
+                    // different speeds. Upper-casing first, as this did, read
+                    // `Pa` as 1.0 where the table says 16.0.
+                    const c = rest.trim();
+                    const ips = DPL_SPEED_IPS[c];
+                    if (ips !== undefined) {
+                        once(`speed-${c}`, 'info', 'dpl-print-speed',
+                            `P sets the print speed to ${ips} inches per second (Table L-1 "${c}"). The preview draws at any speed, so this is not applied.`, 'P');
+                    } else {
+                        issue('info', 'dpl-print-speed',
+                            rest === ''
+                                ? 'P sets the print speed, but no speed character follows it, so the printer keeps the speed it has.'
+                                : `P sets the print speed to "${rest}", which is not one of the characters Table L-1 defines (A-Z, a-e).`,
+                            'P');
+                    }
+                    break;
+                }
                 case 'X': inFormat = false; break;   // terminate without printing
                 case 'E':
                     inFormat = false;

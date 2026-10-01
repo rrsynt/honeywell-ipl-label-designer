@@ -41,6 +41,26 @@ export const DPL_FONTS: Record<string, DplFontMetric> = {
 export const DPL_SMOOTH_FONT = '9';
 
 /**
+ * Appendix L Table L-1: the speed a command's single character selects, in
+ * inches per second.
+ *
+ * The letters are not incrementing all the way: A-Z step by 0.5 up to W (12.0),
+ * then X, Y and Z jump by a whole inch each (13, 14, 15) and the lower case
+ * a-e carry on by the same whole inch (16-20). Encoded as the table gives it
+ * rather than computed, because the two runs do not share a step.
+ *
+ * "Applicable speed values are printer dependent. See Table L-2" — a model
+ * supports a RANGE, and this is the value each character stands for.
+ */
+export const DPL_SPEED_IPS: Record<string, number> = {
+    A: 1.0, B: 1.5, C: 2.0, D: 2.5, E: 3.0, F: 3.5, G: 4.0, H: 4.5,
+    I: 5.0, J: 5.5, K: 6.0, L: 6.5, M: 7.0, N: 7.5, O: 8.0, P: 8.5,
+    Q: 9.0, R: 9.5, S: 10.0, T: 10.5, U: 11.0, V: 11.5, W: 12.0,
+    X: 13.0, Y: 14.0, Z: 15.0,
+    a: 16.0, b: 17.0, c: 18.0, d: 19.0, e: 20.0,
+};
+
+/**
  * Table F-2: "Bar Code Default Widths and Heights", the printed height in
  * INCHES of each symbol at 203 dpi.
  *

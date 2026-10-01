@@ -1149,6 +1149,43 @@ describe('DPL EAN/UPC variants and the price checksum (Appendix F/G/P)', () => {
     });
 });
 
+describe('DPL speed commands (Appendix L Table L-1, p. 243)', () => {
+    const msgFor = (cmd: string) =>
+        parseDPL(`\x02L\r${cmd}\r141100001000100HI\rE\r`, PAGE).issues[0];
+
+    it('reads the speed LETTER, as the manual writes it', () => {
+        // "Syntax: Pa — a: Is a single character representing a speed; see
+        // Appendix L for valid ranges", and the sample is `PC`, which the
+        // manual says prints "at a speed of 2 inches per second". Read as a
+        // NUMBER every letter speed became 0 in silence.
+        expect(msgFor('PC')?.message).toContain('2 inches per second');
+        expect(msgFor('PA')?.message).toContain('1 inches per second');
+        expect(msgFor('PZ')?.message).toContain('15 inches per second');
+    });
+
+    it('keeps the letter case — A and a are different speeds', () => {
+        // Table L-1 gives `A` as 1.0 ips and `a` as 16.0. Upper-casing the
+        // selection first, as an early version did, read `Pa` as 1.0 where the
+        // table says 16.0 — a wrong answer presented confidently, which is
+        // worse than the zero it replaced.
+        expect(msgFor('Pa')?.message).toContain('16 inches per second');
+        expect(msgFor('PA')?.message).toContain('1 inches per second');
+        expect(msgFor('Pe')?.message).toContain('20 inches per second');
+    });
+
+    it('reports a backfeed speed from the same table', () => {
+        // "The sample sets the printer to a backup speed of 3.5 IPS" for `pF`
+        // — the manual's own check that F is 3.5.
+        expect(msgFor('pF')?.message).toContain('3.5 inches per second');
+        expect(msgFor('pF')?.message).toContain('backfeed');
+    });
+
+    it('names a character the table does not define', () => {
+        expect(msgFor('P5')?.message).toContain('not one of the characters');
+        expect(msgFor('P')?.message, 'a bare P keeps the printer\'s speed').toContain('no speed character');
+    });
+});
+
 describe('DPL resolutions (Appendix K, p. 240)', () => {
     it('sizes an inch of DPL by the printer\'s resolution, not a constant', () => {
         // Every DPL measurement is a physical distance in hundredths of an

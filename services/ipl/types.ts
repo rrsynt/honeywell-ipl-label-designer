@@ -338,6 +338,16 @@ export type ViewerElement =
 export interface LabelSettingsInfo {
     mediaSenseMode?: 'gap' | 'reflective' | 'continuous';
     mediaType?: 'direct-thermal' | 'thermal-transfer';
+    /**
+     * A NUMBER in the printer's own tenths, which is how IPL states it: PRM
+     * p.132 has the speed as a tenth, so 30 is 3.0 ips.
+     *
+     * DPL cannot be expressed here at all: its `Pa` takes a LETTER and Appendix
+     * L Table L-1 maps it to inches per second — nothing in a DPL stream carries
+     * a number. A DPL speed is therefore reported rather than converted, since
+     * putting one into this field would mean inventing a unit this type does not
+     * declare.
+     */
     printSpeed?: number;
     darknessAdjust?: number;
     /** Number of batches (<RS>n); inc/dec advances once per batch. */
