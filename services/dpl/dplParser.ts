@@ -103,14 +103,16 @@ export const tokenizeDpl = (source: string): DplCommand[] => {
     for (const line of text.split(/\r\n|\r|\n/)) {
         if (line === '') continue;
         const stx = line.indexOf('\x02');
-        if (stx >= 0) {
-            // A system-level command: <STX> followed by its letter and params.
-            const body = line.slice(stx + 1);
-            const name = body.slice(0, 1);
-            out.push({ name, params: body.slice(1).trim(), raw: line });
+        if (stx < 0) {
+            out.push({ name: '', params: line.trim(), raw: line });
             continue;
         }
-        out.push({ name: '', params: line.trim(), raw: line });
+        // A system-level command: <STX> followed by its letter and params.
+        // Commands and records are separate LINES in DPL — every sample in the
+        // manual writes one per line, and the carriage return that terminates a
+        // command is what ends it. A record never shares a line with one.
+        const body = line.slice(stx + 1);
+        out.push({ name: body.slice(0, 1), params: body.slice(1).trim(), raw: line });
     }
     return out;
 };
@@ -189,7 +191,18 @@ export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel =>
     let dotHeight = 1;
     let quantity = 1;                      // Q command
     let currentAttribute = 2;              // A command; 5 is inverse
-    let inverseField = false;              // set when A5 is in effect
+    /**
+     * J command: where the record's COLUMN anchors its text. "Ja" with L
+     * (default), R or C shifts the string left/centre about the point — and
+     * the manual is explicit that only the anchor moves: "the second text will
+     * be printed at one inch up one inch over, going left. (Note the
+     * characters will not be reversed.)"
+     */
+    let justification: 'left' | 'center' | 'right' = 'left';
+    /** M command: "instructs the printer to mirror all subsequent print field
+     *  records ... transposed visually, as if the object is viewed in a
+     *  mirror". It TOGGLES, so it is page-level state, not a field flag. */
+    let mirror = false;
 
     // A graphics record (b = X) describes its object in the DATA field rather
     // than in the header, so it is built when the record is read.
@@ -198,8 +211,6 @@ export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel =>
     /** DPL position units -> dots. Hundredths of an inch, or tenths of a mm. */
     const positionToDots = (units: number, dpi: number): number =>
         metric ? (units / 10) * (dpi / 25.4) : (units / 100) * dpi;
-
-    const elementsBefore = () => elements.length;
 
     for (const cmd of tokenizeDpl(code)) {
         // ---- System-level commands ----
@@ -236,6 +247,42 @@ export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel =>
                     dotHeight = Math.max(1, Math.trunc(num(rest.slice(1, 2), 1)));
                     break;
                 }
+                case 'J': {
+                    // "L = left justified (default), R = right justified,
+                    // C = center justified" (manual p. 115).
+                    const a = rest.trim().toUpperCase();
+                    justification = a === 'R' ? 'right' : a === 'C' ? 'center' : 'left';
+                    break;
+                }
+                case 'U': {
+                    // "Mark Previous Field as a String Replacement Field" (p.
+                    // 121): the field's content is replaced at print time by a
+                    // host <STX>U payload of the same length. The format's own
+                    // text is a template placeholder, so the value shown here is
+                    // what the label carries before substitution — named, the
+                    // same way EPL's V token is, rather than silently passed off
+                    // as the printed value.
+                    issue('info', 'dpl-replacement-field',
+                        'U marks the previous field as a string replacement, so its text is filled in from the host at print time; the preview shows the format\'s own placeholder.', 'U');
+                    break;
+                }
+                case 'M': {
+                    // "instructs the printer to mirror all subsequent print
+                    // field records ... Mirrored fields are transposed
+                    // visually, as if the object is viewed in a mirror" (p.
+                    // 116), and it TOGGLES rather than taking a value.
+                    //
+                    // This is a whole-label transform, the same class as TSPL's
+                    // DIRECTION, and it is reported rather than applied for the
+                    // same reason: the preview draws each field at its own
+                    // coordinates, and mirroring the page would move every one
+                    // of them. Saying so beats drawing a label that is silently
+                    // flipped from the printed one.
+                    mirror = !mirror;
+                    issue('info', 'dpl-mirror',
+                        `M turns Mirror Mode ${mirror ? 'ON' : 'OFF'}: records after it print transposed as if seen in a mirror. This preview draws the label as laid out, so the mirroring is not applied.`, 'M');
+                    break;
+                }
                 case 'Q': quantity = Math.max(1, Math.trunc(num(rest, 1))); break;
                 case 'H': settings.darknessAdjust = Math.trunc(num(rest, 0)); break;
                 case 'P': settings.printSpeed = Math.trunc(num(rest, 0)); break;
@@ -247,7 +294,19 @@ export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel =>
                 default:
                     // A format command this subset does not model. Named, never
                     // dropped in silence — the contract every parser here keeps.
-                    if (!'cdefgJmnpRSszTUVy'.includes(letter)) {
+                    //
+                    // The silence list below is checked against the manual's own
+                    // Label Formatting chapter, because a listing that does not
+                    // match the real command is worse than none: it silences
+                    // nothing while the real command reports as unrecognized.
+                    //
+                    // 'd' and 'V' were removed after that check. 'd' is not a
+                    // label command at all (the manual has 'D', dot size), and
+                    // 'V' is a system-level software-switch command that never
+                    // appears inside a format. Both would have silenced a name
+                    // the tokenizer can never produce, while every real
+                    // occurrence of those letters reported as unknown.
+                    if (!'cefgJmnpRSszTUy'.includes(letter)) {
                         issue('info', 'dpl-command', `DPL label command "${letter}" is not part of the supported subset; it has no effect on the preview.`, letter);
                     }
                     break;
@@ -291,7 +350,6 @@ export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel =>
         const row = positionToDots(num(ffff, 0) + rowOffset, 203);
         const col = positionToDots(num(gggg, 0) + columnOffset, 203);
         const rot = quadrantFromDpl(rotationDigit);
-        elementsBefore();
 
         // --- Graphic object (b = X): the DATA field describes the shape ---
         if (bChar === 'X') {
@@ -385,6 +443,15 @@ export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel =>
                 continue;
             }
             const metric = DPL_FONTS[bChar] ?? FALLBACK_DPI_FONT;
+            // J moves WHERE the string hangs off its point: right justification
+            // puts the point at the string's right end (so the text runs left
+            // from it) and centre puts it in the middle. The manual is explicit
+            // that only the anchor moves and "the characters will not be
+            // reversed", so this shifts the origin rather than mirroring.
+            const textW = text.length * metric.width * wMult;
+            const textCol = justification === 'left' ? col
+                : justification === 'right' ? col - textW
+                    : col - textW / 2;
             // The IR's bitmap fonts are IPL's cells, which are not DPL's. Pick
             // the closest by HEIGHT and let the multipliers carry the exact
             // ratio, the way the EPL parser does — leaving every DPL font on c0
@@ -392,7 +459,7 @@ export const parseDPL = (code: string, labelLengthDots?: number): ViewerLabel =>
             const pick = closestIrFont(metric.height);
             const cell = IR_CELLS[pick];
             elements.push({
-                kind: 'text', id: nextId++, ox: col, oy: row, f: rot,
+                kind: 'text', id: nextId++, ox: textCol, oy: row, f: rot,
                 font: pick,
                 // Round rather than truncate: a ratio of 1.87 is 2x magnification
                 // on a cell that is nearly the right one, not 1x of a wrong one.

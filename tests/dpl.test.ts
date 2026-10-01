@@ -60,6 +60,18 @@ describe('DPL tokenizer', () => {
         expect(cmds[3].params).toBe('E');
     });
 
+    it('treats a command and a record as separate lines, as the manual writes them', () => {
+        // Every sample in the manual puts one command per line, and the
+        // carriage return that terminates a command is what ends it — so a
+        // record is never part of a command's line. Pinned because a reader who
+        // assumed otherwise would try to split them and mis-parse both.
+        const cmds = tokenizeDpl('\x02L\rJR\r141100002000200HELLO\rQ0001\rE\r');
+        expect(cmds.map(c => c.params)).toEqual(['', 'JR', '141100002000200HELLO', 'Q0001', 'E']);
+        const lab = parseDPL('\x02L\rJR\r141100002000200HELLO\rQ0001\rE\r', PAGE);
+        expect(lab.elements, 'the record draws').toHaveLength(1);
+        expect((lab.elements[0] as any).source.data).toBe('HELLO');
+    });
+
     it('accepts the <STX> notation as well as the raw byte', () => {
         // Every other language here carries this hazard; a stream may spell the
         // control characters out or send them, and both must read the same.
@@ -226,6 +238,82 @@ describe('DPL record parsing (manual Table 8-3)', () => {
         expect(rev, 'A5 must produce an inversion, not just a message').toBeDefined();
         expect(rev.widthDots).toBeGreaterThan(0);
         expect(lab.issues.map(i => i.code)).toContain('dpl-inverse-mode');
+    });
+});
+
+describe('DPL label-formatting commands (manual Chapter 6)', () => {
+    it('J shifts the anchor, and does NOT reverse the characters', () => {
+        // "Ja ... L = left justified (default), R = right justified, C = center
+        // justified" (p. 115), and the manual's own note on its sample: "the
+        // second text will be printed at one inch up one inch over, going left.
+        // (Note the characters will not be reversed.)"
+        // Each command is on its OWN line, which is how the manual writes
+        // every sample: a format command and a record never share one.
+        const rec = (j: string) => `\x02L\r${j ? j + '\r' : ''}141100002000200HELLO\rQ0001\rE\r`;
+        const left = parseDPL(rec(''), PAGE).elements[0] as any;
+        const right = parseDPL(rec('JR'), PAGE).elements[0] as any;
+        const centre = parseDPL(rec('JC'), PAGE).elements[0] as any;
+
+        // The point is what the column names; the string hangs off it. So a
+        // right-justified record starts FURTHER LEFT than a left-justified one
+        // at the same column, by exactly the string's width.
+        expect(right.ox, 'right justification moves the origin left').toBeLessThan(left.ox);
+        expect(centre.ox, 'centre sits between the two').toBeGreaterThan(right.ox);
+        expect(centre.ox).toBeLessThan(left.ox);
+        // and the two shifts are exactly the width and half of it
+        const width = left.ox - right.ox;
+        expect(width, 'the shift is the string width').toBeGreaterThan(0);
+        expect(left.ox - centre.ox).toBeCloseTo(width / 2, 0);
+
+        // and the text itself is untouched — only where it hangs changed
+        expect((right.source as { data: string }).data).toBe('HELLO');
+    });
+
+    it('M reports Mirror Mode rather than silently drawing an unmirrored label', () => {
+        // "instructs the printer to mirror all subsequent print field records
+        // ... Mirrored fields are transposed visually, as if the object is
+        // viewed in a mirror" (p. 116). It TOGGLES.
+        const on = parseDPL('\x02L\rM\r141100001000100HI\rQ0001\rE\r', PAGE);
+        const hit = on.issues.find(i => i.code === 'dpl-mirror');
+        expect(hit, 'the preview must say the mirroring is not applied').toBeDefined();
+        expect(hit!.message).toMatch(/mirror/i);
+        expect(hit!.message).toMatch(/not applied/i);
+        // The whole-label transform must not silently drop the field either.
+        expect(on.elements).toHaveLength(1);
+
+        // It is a toggle, so a second M flips it back and says so.
+        const twice = parseDPL('\x02L\rM\rM\r141100001000100HI\rQ0001\rE\r', PAGE);
+        expect(twice.issues.filter(i => i.code === 'dpl-mirror')).toHaveLength(2);
+    });
+
+    it('U names a replacement field rather than passing its placeholder off as data', () => {
+        // "Mark Previous Field as a String Replacement Field" (p. 121): the
+        // content comes from a host <STX>U payload at print time.
+        const lab = parseDPL('\x02L\r121100001000000123456789012\rU\rQ0001\rE\r', PAGE);
+        expect(lab.issues.map(i => i.code)).toContain('dpl-replacement-field');
+    });
+
+    it('names an unknown label command instead of swallowing it', () => {
+        // The silence list is checked against the manual: every letter in it is
+        // a real Label Formatting command. A letter that is NOT stays loud.
+        const unknown = parseDPL('\x02L\rW99\r141100001000100HI\rQ0001\rE\r', PAGE);
+        expect(unknown.issues.map(i => i.code)).toContain('dpl-command');
+        // and the real ones stay quiet
+        for (const silent of ['c07', 'e1', 'f1', 'J2', 'm', 'n', 'p1', 'R0010', 'S1', 's1', 'z', 'T1', 'y1']) {
+            const quiet = parseDPL(`\x02L\r${silent}\r141100001000100HI\rQ0001\rE\r`, PAGE);
+            expect(quiet.issues.map(i => i.code), `"${silent}" is a real command`).not.toContain('dpl-command');
+        }
+    });
+
+    it('does not silence a letter that is NOT a label command', () => {
+        // 'd' and 'V' were in the silence list and are not Label Formatting
+        // commands — the manual has 'D' (dot size) and 'V' is a system-level
+        // software switch. Silencing them silenced nothing while every real
+        // occurrence reported as unknown, which is the worse of the two.
+        for (const notACommand of ['d1', 'V1']) {
+            const lab = parseDPL(`\x02L\r${notACommand}\r141100001000100HI\rQ0001\rE\r`, PAGE);
+            expect(lab.issues.map(i => i.code), `"${notACommand}"`).toContain('dpl-command');
+        }
     });
 });
 
