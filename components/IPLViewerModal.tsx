@@ -5,6 +5,7 @@ import { parseViewerIPL } from '../services/ipl/viewerParser';
 import { parseZPL } from '../services/zpl/zplParser';
 import { parseEPL } from '../services/epl/eplParser';
 import { parseTSPL } from '../services/tspl/tsplParser';
+import { parseDPL } from '../services/dpl/dplParser';
 import { computeLabelExtent, renderLabel } from '../services/ipl/renderer';
 import { ensureBarcodesReady } from '../services/ipl/barcodes';
 import type { ViewerIssue } from '../services/ipl/types';
@@ -45,6 +46,10 @@ const DPI_OPTIONS: PrinterSettings['dpi'][] = [203, 300, 406];
  */
 export const detectSourceLanguage = (code: string): PrinterLanguage => {
     if (/^\s*\^XA/i.test(code)) return 'zpl';
+    // DPL opens label formatting with <STX>L, which no other language here
+    // uses — IPL frames start with other letters and EPL/TSPL have no sigil.
+    // Both spellings count, since a stream may carry raw bytes or the notation.
+    if (/(?:\x02|<STX>)\s*L(?:\r|\n|$)/i.test(code)) return 'dpl';
     if (/^\s*CLS\s*$/mi.test(code) && /^(?:TEXT\s+\d+,\d+,\s*"|BARCODE\s+\d+,\d+,\s*"|SIZE\s+)/mi.test(code)) return 'tspl';
     if (/^(?:A\d+,\d+,|B[0-9A-Za-z]*\d*,\d+,|LO\d+,|LW\d+,|X\d+,\d+,|b\d+,\d+,|q\d+\s*$|Q\d+,)/m.test(code)) return 'epl';
     return 'ipl';
@@ -321,6 +326,12 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
         () => (language === 'zpl' ? parseZPL(debouncedCode)
             : language === 'epl' ? parseEPL(debouncedCode)
             : language === 'tspl' ? parseTSPL(debouncedCode)
+            // DPL measures every position UP from the label's bottom edge and
+            // has no command that states the label length, so the stock height
+            // has to be supplied. The manual "Paper mm" control is the only
+            // place a person can give it — the same control, and the same gap,
+            // the IPL parser has for its page height.
+            : language === 'dpl' ? parseDPL(debouncedCode, paperMm && paperMm.h > 0 ? Math.round(paperMm.h / 25.4 * dpi) : undefined)
             : parseViewerIPL(debouncedCode, {
                 model: driverModel || undefined,
                 dpi,
@@ -780,6 +791,7 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
                                     <option value="zpl">ZPL</option>
                                     <option value="epl">EPL</option>
                                     <option value="tspl">TSPL</option>
+                                    <option value="dpl">DPL</option>
                                 </select>
                                 <span className="flex-shrink-0">Source</span>
                                 {langOverride && langOverride !== detectedLanguage && (

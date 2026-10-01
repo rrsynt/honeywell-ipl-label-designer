@@ -231,7 +231,7 @@ export interface PrinterSettings {
  * target that silently emits the WRONG language, which is a ruined label rather
  * than a type error.
  */
-export type PrinterLanguage = 'ipl' | 'zpl' | 'epl' | 'tspl';
+export type PrinterLanguage = 'ipl' | 'zpl' | 'epl' | 'tspl' | 'dpl';
 
 export interface DataSourceBase {
     id: string;

@@ -36,7 +36,10 @@ describe('validateTarget', () => {
         for (const port of ['abc', '0', '65536', '91.5', '']) {
             expect(validateTarget({ ...valid, port }).error, port).toMatch(/port/i);
         }
-        expect(validateTarget({ ...valid, language: 'dpl' as never }).error).toMatch(/language/i);
+        // A language the app does not speak. This used to use 'dpl' — which is
+        // now a real language here, so the case moved to one that genuinely has
+        // no parser (the app speaks IPL, ZPL, EPL, TSPL and DPL).
+        expect(validateTarget({ ...valid, language: 'sbpl' as never }).error).toMatch(/language/i);
         expect(validateTarget({ ...valid, dpi: 600 as never }).error).toMatch(/dpi/i);
     });
 

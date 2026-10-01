@@ -23,6 +23,7 @@ import { generateIPL } from './iplGenerator';
 import { generateZPL } from './zpl/zplGenerator';
 import { generateEPL } from './epl/eplGenerator';
 import { generateTSPL } from './tspl/tsplGenerator';
+import { generateDPL } from './dpl/dplGenerator';
 import { sendIplViaBridge, type BridgeResult } from './bridgeSend';
 import { getPrintServerUrl, sendChunkViaPrintServer } from './printRemoteBackend';
 import { requestToPromise, storeOf } from './designerDb';
@@ -417,6 +418,7 @@ export const renderJobChunk = async (job: PrintJob, chunkIndex: number, chunks =
         switch (job.target.language) {
             case 'epl': return generateEPL(design).epl;
             case 'tspl': return generateTSPL(design).tspl;
+            case 'dpl': return generateDPL(design).dpl;
             default: return generateZPL(design).zpl;
         }
     }

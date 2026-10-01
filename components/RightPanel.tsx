@@ -8,6 +8,7 @@ import { designerOnlyWarnings } from '../services/designerOnly';
 import { generateZPL } from '../services/zpl/zplGenerator';
 import { generateEPL } from '../services/epl/eplGenerator';
 import { generateTSPL } from '../services/tspl/tsplGenerator';
+import { generateDPL } from '../services/dpl/dplGenerator';
 import { parseCsv, exportableVariableFields, planCsvJob, MAX_JOB_ROWS, decodeCsvText, MAX_CSV_FILE_BYTES } from '../services/csvJob';
 import { CsvRowPreview } from './CsvRowPreview';
 import { sendIplViaBridge } from '../services/bridgeSend';
@@ -1151,7 +1152,8 @@ export const RightPanel: React.FC<{ activeDesign: Design; selectedFieldIds: numb
                 const { stream, warnings } =
                     language === 'epl' ? (() => { const r = generateEPL(activeDesign); return { stream: r.epl, warnings: r.warnings }; })()
                         : language === 'tspl' ? (() => { const r = generateTSPL(activeDesign); return { stream: r.tspl, warnings: r.warnings }; })()
-                            : (() => { const r = generateZPL(activeDesign); return { stream: r.zpl, warnings: r.warnings }; })();
+                            : language === 'dpl' ? (() => { const r = generateDPL(activeDesign); return { stream: r.dpl, warnings: r.warnings }; })()
+                                : (() => { const r = generateZPL(activeDesign); return { stream: r.zpl, warnings: r.warnings }; })();
                 setIplCode(stream);
                 setZplWarnings(warnings);
             } else {
