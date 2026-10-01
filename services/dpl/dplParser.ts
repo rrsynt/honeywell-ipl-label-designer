@@ -27,7 +27,7 @@ import type {
     BoxElement, LineElement, EllipseElement, PolygonElement,
 } from '../ipl/types';
 import { estimateElementSize } from '../ipl/renderer';
-import { DPL_FONTS, DPL_SMOOTH_FONT, dplMultiplierValue } from './dplFonts';
+import { DPL_FONTS, DPL_SMOOTH_FONT, dplMultiplierValue, dplDefaultHeightDots } from './dplFonts';
 import { dplBarcodeFor } from './dplBarcodes';
 import { substituteDplDateTime } from './dplDateTime';
 import { FONT_MAP } from '../../constants';
@@ -905,24 +905,50 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                 issue('warning', 'dpl-empty-barcode',
                     `A ${bc.type.name} record has no data field, so there is nothing to encode. The header alone accounts for the whole line, which is also what a truncated record looks like.`, bChar);
             }
-            // Field c is the WIDE bar (numerator) and d the NARROW bar
-            // (denominator) for ratio-based codes; for module-based codes d is
-            // the module size and the manual says c and d must match.
-            // eee is the symbol height in hundredths of an inch / tenths of mm.
-            const heightDots = Math.max(1, Math.round(positionToDots(num(eee, 0), 203))) * barMagnification;
-            const moduleDots = Math.max(1, dplMultiplierValue(dChar)) * dotWidth;
-            const wideRatio = dplMultiplierValue(cChar);
+            // Table 8-3, "Bar Code Fields": "For module-based bar codes, field
+            // d is the narrow bar width in dots (bar code module size) ... For
+            // ratio-based bar codes field c is the wide bar width in dots (the
+            // numerator); field d is the narrow bar width in dots (the
+            // denominator)." So c and d are BOTH WIDTHS, in dots — the ratio is
+            // the quotient, not c compared against a dot count.
+            //
+            // eee is the symbol height. ZERO IS NOT ZERO DOTS: "Unless
+            // otherwise noted all bar codes depicted here were produced using
+            // the ratio/module values of 00 and height fields of 000 to cause
+            // the printer to produce symbols using DEFAULT bar widths and
+            // height fields" (p. 181) — and that is how every example in the
+            // appendix is written, so reading it as zero drew each of them as a
+            // one-dot line.
+            const heightDots = (num(eee, 0) > 0
+                ? Math.max(1, Math.round(positionToDots(num(eee, 0), 203)))
+                : dplDefaultHeightDots()) * barMagnification;
+            const wideDots = dplMultiplierValue(cChar);
+            const narrowDots = dplMultiplierValue(dChar);
+            const moduleDots = Math.max(1, narrowDots) * dotWidth;
+            // The IR's ratio codes: 2 = 2:1, 1 = 3:1, 0 = 2.5:1. The quotient
+            // is rounded to the nearest of the documented ratios — Code 39
+            // states "the expected ratio of wide to narrow bars can range from
+            // 2:1 to 3:1", so the two are the whole range that matters here.
+            const quotient = wideDots / Math.max(1, narrowDots);
+            const ratio: 0 | 1 | 2 = quotient >= 3 ? 1 : quotient >= 2 ? 2 : 0;
+            // Code 128 carries its own subset: "The default code subset is B;
+            // otherwise, the first character (A, B, C) of the data field
+            // determines the subset ... the printer will compute the optimal
+            // packing" (Appendix G, p. 181). The letter is a MODE, not data —
+            // bwip-js is given the subset directly, and leaving the letter in
+            // the payload printed a stray character before the symbol.
+            let barcodeData = payload.trim();
+            if ((bc.type.symbology === '6' || bc.type.symbology === '15') && /^[ABC]/.test(barcodeData)) {
+                barcodeData = barcodeData.slice(1);
+            }
             elements.push({
                 kind: 'barcode', id: nextId++, ox: col, oy: row, f: rot,
                 symbology: bc.type.symbology,
                 heightDots,
                 moduleDots,
-                // The IR's ratio codes: 0 = 2.5:1, 1 = 3:1, 2 = 2:1. A wide-bar
-                // value at or below the narrow one is the 1:1 module case, which
-                // the IR expresses as the default.
-                ratio: wideRatio <= moduleDots ? 1 : wideRatio <= moduleDots * 2 ? 2 : 1,
+                ratio,
                 hri: bc.hri,
-                source: { type: 'fixed', data: payload.trim() },
+                source: { type: 'fixed', data: barcodeData },
             } as BarcodeElement);
             continue;
         }

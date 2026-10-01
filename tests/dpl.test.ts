@@ -805,6 +805,61 @@ describe('DPL graphics: polygons and circles (Tables 8-13/8-14, p. 140-141)', ()
     });
 });
 
+describe('DPL bar code fields (Table 8-3 and Appendix G)', () => {
+    // header: a b c d eee ffff gggg — '1A' '3' '1' '000' '0015' '0100'
+    const at = (rec: string) => parseDPL(`\x02L\r${rec}\rE\r`, PAGE)
+        .elements.find(e => e.kind === 'barcode') as any;
+
+    it('reads c and d as wide:narrow WIDTHS in dots', () => {
+        // "For ratio-based bar codes field c is the wide bar width in dots (the
+        // numerator); field d is the narrow bar width in dots (the
+        // denominator)". The ratio is the quotient — the parser used to compare
+        // c against a dot count, so EVERY symbol fell through to the same
+        // default and every bar code drew at one width.
+        expect(at('1A31000001501000123456789').ratio, 'c=3 d=1 is 3:1').toBe(1);
+        expect(at('1A21000001501000123456789').ratio, 'c=2 d=1 is 2:1').toBe(2);
+        expect(at('1A42000001501000123456789').ratio, 'c=4 d=2 is still 2:1').toBe(2);
+        // and d is carried through as the module in dots
+        expect(at('1A42000001501000123456789').moduleDots).toBe(2);
+        expect(at('1A31000001501000123456789').moduleDots).toBe(1);
+    });
+
+    it('treats height field 000 as the documented default, not zero dots', () => {
+        // "all bar codes depicted here were produced using the ratio/module
+        // values of 00 and height fields of 000 to cause the printer to produce
+        // symbols using DEFAULT bar widths and height fields" (p. 181) — and
+        // every example in Appendix G is written that way, so zero is the
+        // common case. Read as zero dots it drew a one-dot line.
+        const dflt = at('1A11000001501000123456789').heightDots;
+        expect(dflt, 'a 000 field must not be one dot').toBeGreaterThan(50);
+        // 0.40 in at 203 dpi is 81 dots, and it must match the explicit form
+        expect(dflt).toBe(at('1A11040001501000123456789').heightDots);
+    });
+
+    it('takes the Code 128 subset letter as a mode, not as data', () => {
+        // "The default code subset is B; otherwise, the first character (A, B,
+        // C) of the data field determines the subset." The letter selects the
+        // subset and is not part of the encoded value, so leaving it in printed
+        // a stray character before the symbol.
+        //
+        // The record is BUILT rather than written out, because the header is
+        // positional: a, b, c, d, eee, ffff, gggg is 1+1+1+1+3+4+4 = 15
+        // characters, and a hand-written one that is a digit short silently
+        // shifts every field — which is exactly what happened twice while
+        // writing this test, the payload arriving as "00C123456".
+        // 1E | 1 | 1 | 000 | 0010 | 0100  ->  row 0010, column 0100
+        const rec = (data: string) => `\x02L\r1E1100000100100${data}\rE\r`;
+        expect(at(rec('C123456')).source.data).toBe('123456');
+        expect(at(rec('A123456')).source.data).toBe('123456');
+        // a payload that merely BEGINS with one of those letters as text is
+        // indistinguishable by design — the manual's rule makes it a subset
+        expect(at(rec('B123456')).source.data).toBe('123456');
+        // and a letter that is not a subset is left alone
+        expect(at(rec('D12345')).source.data).toBe('D12345');
+        expect(at(rec('123456')).source.data).toBe('123456');
+    });
+});
+
 describe('DPL tables are complete against the manual', () => {
     it('every letter the manual lists is present', () => {
         // Appendix F Table F-1 lists these single-letter ids; a gap would make

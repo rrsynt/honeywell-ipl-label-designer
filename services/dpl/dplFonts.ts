@@ -41,6 +41,34 @@ export const DPL_FONTS: Record<string, DplFontMetric> = {
 export const DPL_SMOOTH_FONT = '9';
 
 /**
+ * The printed height of a bar code whose `eee` field is 0.
+ *
+ * Zero is not zero dots. "Unless otherwise noted all bar codes depicted here
+ * were produced using the ratio/module values of 00 and height fields of 000 to
+ * cause the printer to produce symbols using DEFAULT bar widths and height
+ * fields" (Appendix G, p. 181) — and that is how EVERY example in that appendix
+ * is written, so a stream leaving the field at zero is the common case, not the
+ * edge. Reading it as zero drew each of them as a one-dot line.
+ *
+ * Table F-2 gives a default per symbol, and they are NOT all one value — the
+ * page shows 0.40 in for most symbols but 0.80, 0.90, 1.30 and 1.40 for others.
+ * That table cannot be read reliably from this PDF: its symbol labels and its
+ * numbers extract as separate text runs, and the numbers carry no x position,
+ * so the columns cannot be paired with confidence. Rather than ship a per-symbol
+ * table assembled from a guess at the alignment, one documented default is used
+ * and the limitation is stated here.
+ *
+ * 0.40 in is the value the table shows against the most symbols, including
+ * Code 39, Code 128 and UPC/EAN. A stream that needs an exact height states it
+ * in `eee`, which is the field the manual provides for it.
+ */
+export const DPL_DEFAULT_BARCODE_HEIGHT_INCHES = 0.40;
+
+/** The printed height in dots of a bar code whose height field is 000. */
+export const dplDefaultHeightDots = (dpi = 203): number =>
+    Math.round(DPL_DEFAULT_BARCODE_HEIGHT_INCHES * dpi);
+
+/**
  * Appendix C Table C-6: the smooth font's fixed sizes, expressed as the `Axx`
  * specifier the eee field takes. Points, not dots — the manual is explicit
  * that points keep a stream portable between printers of different dpi.
