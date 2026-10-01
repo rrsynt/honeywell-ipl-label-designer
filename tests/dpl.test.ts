@@ -1112,6 +1112,47 @@ describe('DPL EAN/UPC variants and the price checksum (Appendix F/G/P)', () => {
         };
     };
 
+    it('writes the EAN/UPC letter the DATA LENGTH names, not always UPC-A', () => {
+        // B/C/F/G are four symbols sharing the IR's one symbology id '7', so a
+        // design that stores only '7' forces the generator to pick the letter.
+        // It used to hardcode 'B' (UPC-A) for every length, so an EAN-13 was
+        // exported as a UPC-A record — the printer draws the symbol the LETTER
+        // names, so a 13-digit payload under `B` prints the wrong bar code
+        // silently. The length decides, exactly as the EPL and TSPL generators
+        // do, and the DPL PARSER reads these same letters back into the variant.
+        const eanField = (data: string) => ({ id: 1, type: 'barcode', name: 'BC', x: 5, y: 5, rotation: 0, symbology: '7', humanReadable: 'none', h_mag: 60, w_mag: 2, dataSource: { type: 'fixed', data } });
+        const letterFor = (data: string) => {
+            const rec = generateDPL(design([eanField(data)])).dpl.split('\r').find(l => /^1[A-Za-z]/.test(l))!;
+            return rec[1];
+        };
+        expect(letterFor('123456789012'), 'UPC-A is 12 digits').toBe('b');
+        expect(letterFor('1234567'), 'UPC-E is 7 digits').toBe('c');
+        expect(letterFor('1234567890123'), 'EAN-13 is 13 digits').toBe('f');
+        expect(letterFor('12345678'), 'EAN-8 is 8 digits').toBe('g');
+    });
+
+    it('names an EAN/UPC data length no member takes, rather than writing UPC-A', () => {
+        const r = generateDPL(design([{ id: 1, type: 'barcode', name: 'BC', x: 5, y: 5, rotation: 0, symbology: '7', humanReadable: 'none', h_mag: 60, w_mag: 2, dataSource: { type: 'fixed', data: '123456' } }]));
+        expect(r.warnings.some(w => /BC/.test(w) && /not a length DPL recognizes/.test(w))).toBe(true);
+        expect(r.dpl).not.toMatch(/^1[A-Za-z]/m);
+    });
+
+    it('round-trips the EAN/UPC variant out and back', () => {
+        // The strongest form: a design EAN-13 (symbology '7') must come back
+        // reading as EAN-13, not UPC-A. The parser carries `eanUpcVersion`
+        // from the letter, so the digit count never has to be guessed.
+        const eanField = (data: string) => ({ id: 1, type: 'barcode', name: 'BC', x: 5, y: 5, rotation: 0, symbology: '7', humanReadable: 'none', h_mag: 60, w_mag: 2, dataSource: { type: 'fixed', data } });
+        const back = (data: string) => {
+            const rec = generateDPL(design([eanField(data)])).dpl;
+            const bc = parseDPL(rec, PAGE).elements.find(e => e.kind === 'barcode') as any;
+            return bc && buildBwipSpec(bc.symbology, bc.source.data, { eanUpcVersion: bc.eanUpcVersion })?.main.bcid;
+        };
+        expect(back('1234567890123'), 'EAN-13 stays EAN-13').toBe('ean13');
+        expect(back('123456789012'), 'UPC-A stays UPC-A').toBe('upca');
+        expect(back('12345678'), 'EAN-8 stays EAN-8').toBe('ean8');
+        expect(back('1234567'), 'UPC-E stays UPC-E').toBe('upce');
+    });
+
     it('draws each letter as its own symbol, not as whatever the digit count implies', () => {
         // B, C, F and G all carry the IR's symbology '7', and the letter is what
         // says which member of the family it is. Without that the encoder

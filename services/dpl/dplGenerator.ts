@@ -38,7 +38,8 @@ const DPL_LETTER_FOR: Record<string, { letter: string; wId?: string; name: strin
     '2': { letter: 'D', name: 'Interleaved 2 of 5' },
     '4': { letter: 'I', name: 'Codabar' },
     '6': { letter: 'E', name: 'Code 128' },
-    '7': { letter: 'B', name: 'UPC-A' },
+    // '7' (EAN/UPC) is NOT here: B/C/F/G are one id in the IR, so the letter is
+    // derived from the data length in bFieldFor, not fixed.
     '11': { letter: 'P', name: 'Postnet' },
     '12': { letter: 'Z', name: 'PDF417', wId: 'W1Z' },
     '14': { letter: 'U', name: 'UPS MaxiCode' },
@@ -48,13 +49,39 @@ const DPL_LETTER_FOR: Record<string, { letter: string; wId?: string; name: strin
 };
 
 /**
+ * The EAN/UPC family's DPL letter is chosen by the DATA LENGTH: B/C/F/G are
+ * four different symbols that all share the IR's symbology id '7' (the DPL
+ * parser's `DPL_BARCODES` reads exactly this back, carrying `eanVariant`).
+ * The same rule the EPL and TSPL generators use.
+ *
+ * Emitting 'B' for all of them exported an EAN-13 as UPC-A — and the printer
+ * draws the symbol the LETTER names, so a 13-digit payload under `B` is a
+ * wrong-symbol bar code, silently, exactly the class this project fights.
+ */
+const dplEanLetter = (data: string): { letter: string; name: string } | null => {
+    switch (data.replace(/\D/g, '').length) {
+        case 13: return { letter: 'F', name: 'EAN-13' };
+        case 12: return { letter: 'B', name: 'UPC-A' };
+        case 8: return { letter: 'G', name: 'EAN-8' };
+        case 7: return { letter: 'C', name: 'UPC-E' };
+        default: return null;
+    }
+};
+
+/**
  * DPL's `Wxx` two-character IDs are addressed through the SAME b field that
  * normally holds one letter, so the record header shifts by two characters
  * when one is used — a generator that pads them to one letter would produce a
  * stream the printer reads as a completely different record.
  */
-const bFieldFor = (sym: string, hri: boolean): { field: string; warning?: string } | null => {
-    const entry = DPL_LETTER_FOR[sym];
+const bFieldFor = (sym: string, hri: boolean, data = ''): { field: string; warning?: string } | null => {
+    let entry = DPL_LETTER_FOR[sym];
+    if (sym === '7') {
+        // B/C/F/G are one symbology id in the IR; the length picks the letter.
+        const ean = dplEanLetter(data);
+        if (!ean) return null;
+        entry = { letter: ean.letter, name: ean.name };
+    }
     if (!entry) return null;
     if (entry.wId) {
         // "The column labeled..." — the W forms carry their own case rule:
@@ -235,9 +262,15 @@ export const generateDPL = (design: Design): DplGenerateResult => {
         if (field.type === 'barcode') {
             const data = fieldData(field, design);
             const wantHri = field.humanReadable !== 'none';
-            const bf = bFieldFor(field.symbology, wantHri);
+            const bf = bFieldFor(field.symbology, wantHri, data);
             if (!bf) {
-                warnings.push(`"${field.name}" is barcode type ${field.symbology}, which has no DPL equivalent. It was left off the label.`);
+                if (field.symbology === '7') {
+                    // B/C/F/G are told apart by the digit count; a length none of
+                    // them takes cannot be written as any EAN/UPC member.
+                    warnings.push(`"${field.name}" is an EAN/UPC bar code whose data is ${data.replace(/\D/g, '').length} digits, which is not a length DPL recognizes (12 UPC-A, 7 UPC-E, 13 EAN-13 or 8 EAN-8). It was left off the label.`);
+                } else {
+                    warnings.push(`"${field.name}" is barcode type ${field.symbology}, which has no DPL equivalent. It was left off the label.`);
+                }
                 continue;
             }
             if (bf.warning) warnings.push(`"${field.name}": ${bf.warning}`);
