@@ -155,6 +155,58 @@ describe('parseZPL', () => {
         expect(lost.issues.map(i => i.code)).toContain('zpl-shape-no-origin');
     });
 
+    it('draws ^GF, and the oracle pins the field order and the bit order', () => {
+        // No ZPL manual is in this repo, so ^GFa,totalBytes,bytesTotal,
+        // bytesPerRow,<data> was settled by PROBING the oracle:
+        //   ^GFA,16,16,2, FFx16 -> 16x8   |  ^GFA,16,2,2, FFx16 -> 16x1
+        //     so p2 CAPS how much is drawn and p3 (bytesPerRow) fixes the shape
+        //     — 16 bytes over 2 per row is 8 rows of 16 dots;
+        //   ^GFA,999,16,2, FFx16 -> 16x8, so p1 is ignored;
+        //   ^GFA,8,8,0, FFx8 -> 8x16, so a ZERO p3 flows bytes down instead;
+        //   ^GFA,8,8,1,80… put its dot at the LEFT edge and 01… at the right,
+        //     so dots run from the HIGH bit.
+        // Our render of the diagonal 8040201008040201 was then identical to the
+        // oracle's, pixel for pixel.
+        const gf = (body: string) => parseZPL(`^XA^FO20,20${body}^FS^XZ`).elements[0] as any;
+
+        const solid = gf('^GFA,8,8,1,FFFFFFFFFFFFFFFF');
+        expect(solid.kind).toBe('graphic');
+        expect([solid.widthDots, solid.heightDots], 'one byte per row is 8 dots wide').toEqual([8, 8]);
+        expect(solid.rows, 'the first byte run is the TOP row').toHaveLength(8);
+
+        // p3 sets the shape: 16 bytes at 2 per row is 8 rows of 16 dots.
+        const wide = gf('^GFA,16,16,2,' + 'FF'.repeat(16));
+        expect([wide.widthDots, wide.heightDots]).toEqual([16, 8]);
+
+        // p2 CAPS the data: only p2 bytes are drawn.
+        const capped = gf('^GFA,16,2,2,' + 'FF'.repeat(16));
+        expect(capped.heightDots, 'p2 bytes over 2 per row is 1 row').toBe(1);
+
+        // p1 is ignored — the printer sizes from p3, not from the total.
+        expect(gf('^GFA,999,16,2,' + 'FF'.repeat(16)).heightDots).toBe(8);
+
+        // A zero p3 is not "no shape": each byte becomes a row of 8.
+        const flowed = gf('^GFA,8,8,0,FFFFFFFFFFFFFFFF');
+        expect([flowed.widthDots, flowed.heightDots]).toEqual([8, 8]);
+
+        // The bit order is what makes the picture right rather than mirrored.
+        // 0x80 is the LEFT dot and 0x01 the right one, so bit 7 comes first.
+        const leftCol = gf('^GFA,8,8,1,8080808080808080');
+        const rightCol = gf('^GFA,8,8,1,0101010101010101');
+        expect(leftCol.rows[0].charCodeAt(0), 'the first dot is the high bit').toBe(0x80);
+        expect(rightCol.rows[0].charCodeAt(0)).toBe(0x01);
+
+        // A rotated field still has somewhere to go; a missing ^FO does not.
+        const lost = parseZPL('^XA^GFA,8,8,1,FFFFFFFFFFFFFFFF^FS^XZ');
+        expect(lost.elements).toHaveLength(0);
+        expect(lost.issues.map(i => i.code)).toContain('zpl-gf-no-origin');
+
+        // A compressed form is named rather than drawn as garbage.
+        const comp = parseZPL('^XA^FO20,20^GFZ,8,8,1,abc^FS^XZ');
+        expect(comp.issues.map(i => i.code)).toContain('zpl-gf-compressed');
+        expect(comp.elements).toHaveLength(0);
+    });
+
     it('draws ^FB as a wrapped paragraph, with every parameter oracle-checked', () => {
         // No ZPL manual is in this repo, so each parameter of
         // ^FB width,maxLines,lineSpacing,align was settled by PROBING the

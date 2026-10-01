@@ -238,6 +238,16 @@ export interface GraphicElement extends ElementBase {
     heightDots: number;
     /** Packed ASCII column data from the G definition's u rows, when captured. */
     data?: string[];
+    /**
+     * Row-major pixels, one string per row, leftmost dot in the HIGH bit of
+     * each character — ZPL's ^GF, which is a different storage form from the
+     * column-major `data` above rather than another encoding of it.
+     *
+     * Measured against the oracle: ^GFA,8,8,1,80… puts its dot at the LEFT
+     * edge and 01… at the right, so the first dot is bit 7, not bit 0; and the
+     * first byte run is the TOP row.
+     */
+    rows?: string[];
 }
 
 /**

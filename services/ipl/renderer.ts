@@ -669,7 +669,20 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
             break;
         }
         case 'graphic': {
-            if (el.data && el.data.length > 0 && el.widthDots > 0 && el.heightDots > 0) {
+            if (el.rows && el.rows.length > 0 && el.widthDots > 0 && el.heightDots > 0) {
+                // Row-major 8-bit pixels (ZPL's ^GF). Leftmost dot in the high
+                // bit — the oracle put ^GFA,8,8,1,80… at the LEFT edge and 01…
+                // at the right, so bit 7 is the first dot.
+                const bitmap = el.rows.map((row) =>
+                    Array.from({ length: el.widthDots }, (_, x) => {
+                        const ch = row.charCodeAt(x >> 3);
+                        if (!Number.isFinite(ch)) return 0;
+                        return (ch >> (7 - (x & 7))) & 1;
+                    }),
+                );
+                while (bitmap.length < el.heightDots) bitmap.push(new Array(el.widthDots).fill(0));
+                paintBitmap(ctx, bitmap, 0, 0, s);
+            } else if (el.data && el.data.length > 0 && el.widthDots > 0 && el.heightDots > 0) {
                 const bitmap = decodeGraphicColumns(el.widthDots, el.heightDots, el.data);
                 paintBitmap(ctx, bitmap, 0, 0, s);
             } else {

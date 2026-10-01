@@ -239,6 +239,85 @@ export const parseZPL = (code: string): ViewerLabel => {
             // draw, so it gets its own message rather than sharing the generic
             // "no effect here" line with settings that genuinely change nothing
             // visible.
+            case 'GF': {
+                // ^GFa,totalBytes,bytesTotal,bytesPerRow,<data> — the tokenizer
+                // takes two letters, so the format letter is p[0].
+                //
+                // No ZPL manual is in the repo, so the parameters were settled
+                // by PROBING the oracle and measuring:
+                //   ^GFA,16,16,2, FFx16 -> 16x8   ^GFA,16,2,2, FFx16 -> 16x1
+                //     so p2 CAPS the data drawn — only p2 bytes are used — and
+                //     p3 (bytesPerRow) fixes the SHAPE: 16 bytes over 2 per row
+                //     is 8 rows of 16 dots;
+                //   ^GFA,999,16,2, FFx16 -> 16x8, i.e. p1 is ignored;
+                //   ^GFA,8,8,0, FFx8 -> 8x16, so a zero p3 flows bytes DOWN.
+                //   ^GFA,8,8,1,80… put the dot at the LEFT edge and 01… at the
+                //     right, so dots run from the HIGH bit.
+                if (origin === null) {
+                    issue('warning', 'zpl-gf-no-origin', '^GF has no ^FO before it, so it has nowhere to go. Skipped.', '^GF');
+                    break;
+                }
+                const fmt = (p[0] ?? '').trim().toUpperCase();
+                const dataStart = (cmd.params.match(/,/) ? cmd.params.indexOf(',') : -1);
+                let raw = dataStart >= 0 ? cmd.params.slice(dataStart + 1) : '';
+                // Everything up to the FOURTH comma is parameters; the rest is
+                // the payload, which may not contain a comma of its own.
+                for (let k = 0; k < 3; k++) {
+                    const c = raw.indexOf(',');
+                    if (c < 0) break;
+                    raw = raw.slice(c + 1);
+                }
+                const declared = num(p[1], 0);      // total bytes (ignored by the printer)
+                void declared;
+                const totalBytes = num(p[2], 0);    // bytes actually drawn
+                const perRow = num(p[3], 0);
+
+                if (fmt !== 'A' && fmt !== 'B') {
+                    issue('info', 'zpl-gf-compressed',
+                        `^GF${fmt} is a compressed bitmap form (Z64 or similar); this preview decodes the uncompressed A (hexadecimal) and B (binary) forms.`, '^GF');
+                    resetField();
+                    break;
+                }
+                let bytes: number[] = [];
+                if (fmt === 'A') {
+                    for (let k = 0; k + 1 < raw.length; k += 2) {
+                        const v = parseInt(raw.slice(k, k + 2), 16);
+                        if (Number.isNaN(v)) break;
+                        bytes.push(v);
+                    }
+                } else {
+                    for (const ch of raw) bytes.push(ch.charCodeAt(0) & 0xff);
+                }
+                if (totalBytes > 0) bytes = bytes.slice(0, totalBytes);
+                if (bytes.length === 0) {
+                    issue('info', 'zpl-gf-empty', '^GF carries no bitmap data, so nothing is drawn.', '^GF');
+                    resetField();
+                    break;
+                }
+                let w: number;
+                let h: number;
+                if (perRow > 0) {
+                    w = perRow * 8;
+                    h = Math.ceil(bytes.length / perRow);
+                } else {
+                    // A zero bytes-per-row is not "no shape": the oracle drew
+                    // ^GFA,8,8,0, FFx8 as 8x16, so each byte is one row of 8.
+                    w = 8;
+                    h = bytes.length;
+                }
+                const rows = Array.from({ length: h }, (_, r) =>
+                    bytes.slice(r * (perRow > 0 ? perRow : 1), (r + 1) * (perRow > 0 ? perRow : 1))
+                        .map((b) => String.fromCharCode(b))
+                        .join(''),
+                );
+                elements.push({
+                    kind: 'graphic', id: nextId, ox: origin.x, oy: origin.y, f: fieldRotation ?? rotation,
+                    graphicId: nextId++, widthDots: w, heightDots: h, rows,
+                } as ViewerElement);
+                resetField();
+                break;
+            }
+
             case 'FB': {
                 // ^FB width,maxLines,lineSpacing,align[,hangingIndent].
                 // No ZPL manual is in this repo, so every parameter was settled
@@ -509,9 +588,6 @@ export const parseZPL = (code: string): ViewerLabel => {
                 // drawable. The ones left are outside what this subset expresses.
                 if (cmd.name.startsWith('B')) {
                     issue('warning', 'zpl-barcode-unsupported', `^${cmd.name} is a barcode this viewer does not draw yet. Its data is kept in the issues but nothing is rendered for it.`, `^${cmd.name}`);
-                } else if (cmd.name === 'GF') {
-                    issue('info', 'zpl-gf-unsupported',
-                        '^GF carries a bitmap as hexadecimal rows in the stream, 8 bits per byte across the row. This viewer draws graphics from the IPL column form (6 bits per character), so the payload is not decoded.', '^GF');
                 } else if (cmd.name === 'GS') {
                     issue('info', 'zpl-gs-unsupported',
                         '^GS draws a named SYMBOL (check box, copyright mark, ...) from the printer\'s own font, and the glyph is not in the stream. Labelary refuses these too, so the shapes cannot be checked against a reference here.', '^GS');
