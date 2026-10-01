@@ -24,7 +24,7 @@
 
 import type {
     ViewerLabel, ViewerElement, ViewerIssue, TextElement, BarcodeElement,
-    BoxElement, LineElement,
+    BoxElement, LineElement, EllipseElement, PolygonElement,
 } from '../ipl/types';
 import { estimateElementSize } from '../ipl/renderer';
 import { DPL_FONTS, DPL_SMOOTH_FONT, dplMultiplierValue } from './dplFonts';
@@ -241,11 +241,30 @@ const quadrantFromDpl = (digit: string | undefined): number => {
     return (4 - turns) % 4;
 };
 
+/**
+ * A graphic record's object, read out of its data field.
+ *
+ * `fillPattern` is carried but not drawn: the IR has no fill model, and the
+ * patterns are a mix of tones (6%, 25%, 50%), hachures and shadings that a
+ * single alpha or hatch could not stand in for. The record is reported when it
+ * asks for one, so the difference is named rather than silently flattened.
+ */
 interface PendingShape {
-    kind: 'line' | 'box';
+    kind: 'line' | 'box' | 'circle' | 'polygon';
     widthDots: number;
     heightDots: number;
     thicknessDots: number;
+    fillPattern?: number;
+    /**
+     * For a polygon: the vertices in PRINTER units, row counting up from the
+     * label's bottom edge, exactly as the record lists them. They are kept in
+     * that space and converted once, because the row flip at the end of the
+     * parse moves an element by its own height — converting here as well would
+     * apply the origin change twice.
+     */
+    points?: Array<{ row: number; col: number }>;
+    /** For a circle: its centre in printer units, for the same reason. */
+    centre?: { row: number; col: number };
 }
 
 /**
@@ -268,6 +287,14 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
     const issues: ViewerIssue[] = [];
     const elements: ViewerElement[] = [];
     let nextId = 1;
+    /**
+     * Circles, by element id: a circle's record names its CENTRE, while the IR's
+     * ellipse is placed by its bounding box's upper-left corner. The corner can
+     * only be worked out after the page height is known — the centre's row is in
+     * the printer's counting-up space — so the centre is held here and the
+     * corner resolved in the flip pass with everything else.
+     */
+    const pendingCircles = new Map<number, { row: number; col: number }>();
 
     const issue = (level: ViewerIssue['level'], code_: string, message: string, command?: string) =>
         issues.push({ level, code: code_, message, command });
@@ -711,7 +738,14 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
 
         // --- Graphic object (b = X): the DATA field describes the shape ---
         if (bChar === 'X') {
-            const shape = payload.trim();
+            // Every manual example writes the data field with spaces between
+            // its sub-fields — "1 X 11 009 0100 0100 C 001 0001 0025" — and
+            // every one of them is annotated "spaces have been added for
+            // readability", so the real record has none. Both are read the
+            // same way by dropping whitespace first: this field is all digits
+            // and single letters, so a space can carry no meaning, and leaving
+            // them in silently shifted every fixed offset after the first.
+            const shape = payload.trim().replace(/\s+/g, '');
             const head = shape[0];
             if (head === undefined || shape === '') {
                 issue('warning', 'dpl-shape-empty',
@@ -731,20 +765,127 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
                 const tIdx = 1 + wLen + hLen;
                 const top = num(shape.slice(tIdx, tIdx + wLen), 1);
                 pendingShape = { kind: 'box', widthDots: positionToDots(w, 203), heightDots: positionToDots(h, 203), thicknessDots: Math.max(1, positionToDots(top, 203)) };
+            } else if (head === 'C' || head === 'c') {
+                // "1 X 11 fff rrrr cccc C ppp bbbb rrrr" (Table 8-14, p. 141).
+                //
+                // The header is NOT the usual row/column. Read against that
+                // structure, the positional fields are fff = FILL PATTERN
+                // (e, the slot eee sits in), rrrr = ROW OF THE CENTRE (f) and
+                // cccc = COLUMN OF THE CENTRE (g); the data field is then
+                // `C` + fill + a fixed 0001 + the radius:
+                //
+                //   1 X 11 009 0100 0100 C 001 0001 0025
+                //
+                // "a circle centered at row 0100, column 0100 with a radius of
+                // 0025 and filled with pattern 9". The radius is one
+                // measurement, so the shape is a circle — an ellipse with equal
+                // axes.
+                const body = shape.slice(1).replace(/^[A-Za-z]/, '');
+                const cRow = num(ffff, 0);
+                const cCol = num(gggg, 0);
+                // body is `ppp` + `bbbb` + `rrrr` once the leading C is gone.
+                const radius = num(body.slice(7, 11), 0);
+                const fill = Math.trunc(num(eee, 0));
+                if (radius <= 0) {
+                    issue('warning', 'dpl-circle-radius', 'A circle record has a radius of zero, so there is nothing to draw.', 'X');
+                } else {
+                    const d = positionToDots(radius, 203);
+                    pendingShape = {
+                        kind: 'circle',
+                        widthDots: d * 2,
+                        heightDots: d * 2,
+                        thicknessDots: 1,
+                        fillPattern: fill,
+                        // The centre, not a corner: the record names the point
+                        // the circle is drawn around.
+                        centre: { row: positionToDots(cRow, 203), col: positionToDots(cCol, 203) },
+                    };
+                }
+            } else if (head === 'P') {
+                // "1 X 11 ppp rrrr cccc P ppp bbbb rrrr cccc rrrr cccc …"
+                // (Table 8-13, p. 140). The first row/column pair is the
+                // record's own and is point 1; everything after the `P` is a
+                // fill pattern, a fixed `0001`, and then the remaining points as
+                // row/column pairs — so the manual's triangle sample
+                //
+                //   1 X 11 000 0010 0010 P 001 0001 0040 0025 0010 0040
+                //
+                // is point 1 at (0010,0010), then `0040 0025` and `0010 0040`
+                // after the fill and the fixed value: exactly the three corners
+                // its figure shows. The fill and the fixed 0001 sit in the MIDDLE
+                // of the point list and have to be skipped, not read as a
+                // coordinate.
+                const body = shape.slice(1);
+                const fill = Math.trunc(num(body.slice(0, 3), 0));
+                // The fill is three characters and the fixed value four, so the
+                // points begin at 7. Reading from 6 worked only while the
+                // manual's readability spaces were still in the string, which
+                // silently re-grouped every coordinate once they were removed.
+                const afterFixed = body.slice(7);
+                const coords = (afterFixed.match(/\d{4}/g) ?? []).map(v => num(v, 0));
+                const points = [{ row: num(ffff, 0), col: num(gggg, 0) }];
+                // Pairs of row, column — a trailing odd value is not a point.
+                for (let i = 0; i + 1 < coords.length; i += 2) {
+                    points.push({ row: coords[i], col: coords[i + 1] });
+                }
+                if (points.length < 2) {
+                    issue('warning', 'dpl-polygon-points',
+                        `A polygon record lists ${points.length} point${points.length === 1 ? '' : 's'}; the manual draws a line from two, so nothing is drawn here.`, 'X');
+                } else {
+                    pendingShape = {
+                        kind: 'polygon',
+                        widthDots: 0,
+                        heightDots: 0,
+                        thicknessDots: 1,
+                        fillPattern: fill,
+                        points: points.map(p => ({
+                            row: positionToDots(p.row + rowOffset, 203),
+                            col: positionToDots(p.col + columnOffset, 203),
+                        })),
+                    };
+                }
             } else {
-                issue('info', 'dpl-graphic', `DPL graphics object "${head}" (polygon, circle or arc) is not part of the supported subset; nothing is drawn for it.`, 'X');
+                issue('info', 'dpl-graphic', `DPL graphics object "${head}" is not part of the supported subset; nothing is drawn for it.`, 'X');
             }
             const sh = pendingShape;
             pendingShape = null;
             if (sh) {
-                // The shape's row is its BOTTOM (lower-left origin), so the
-                // top-left the IR wants is row + height.
+                if (sh.fillPattern) {
+                    // The pattern is real and printed, but the IR has no fill
+                    // model and the patterns are a mix of tones, hachures and
+                    // shadings that no single stand-in covers — so the outline
+                    // is drawn and the difference is named.
+                    once(`fill-${sh.fillPattern}`, 'info', 'dpl-fill-pattern',
+                        `A graphic record asks for fill pattern ${sh.fillPattern} (Table 8-15: tones, hachures and shadings). The preview draws the outline only, so the printed shape will be filled and this one is not.`, 'X');
+                }
                 if (sh.kind === 'line') {
                     elements.push({
                         kind: 'line', id: nextId++, ox: col, oy: row, f: rot,
                         lengthDots: Math.round(sh.widthDots),
                         thicknessDots: Math.round(sh.heightDots) || Math.round(sh.thicknessDots),
                     } as LineElement);
+                } else if (sh.kind === 'circle' && sh.centre) {
+                    // The corner is resolved in the flip pass, once the page
+                    // height is known; the centre recorded here is in printer
+                    // units exactly as the record gave it.
+                    const id = nextId++;
+                    pendingCircles.set(id, sh.centre);
+                    elements.push({
+                        kind: 'ellipse', id, ox: sh.centre.col, oy: sh.centre.row, f: rot,
+                        widthDots: Math.round(sh.widthDots),
+                        heightDots: Math.round(sh.heightDots),
+                        thicknessDots: Math.round(sh.thicknessDots),
+                    } as EllipseElement);
+                } else if (sh.kind === 'polygon' && sh.points) {
+                    // Points are absolute in the printer's space; the element's
+                    // origin is the first of them, which is what the row flip
+                    // then moves.
+                    const first = sh.points[0];
+                    elements.push({
+                        kind: 'polygon', id: nextId++, ox: first.col, oy: first.row, f: rot,
+                        points: sh.points.map(p => ({ x: p.col, y: p.row })),
+                        thicknessDots: Math.round(sh.thicknessDots),
+                    } as PolygonElement);
                 } else {
                     elements.push({
                         kind: 'box', id: nextId++, ox: col, oy: row, f: rot,
@@ -890,7 +1031,22 @@ export const parseDPL = (code: string, labelLengthDots?: number, now: Date = new
     // every field sits one object-height too low.
     const flipped: ViewerElement[] = elements.map((el) => {
         const sz = estimateElementSize(el, 203);
-        return { ...el, oy: Math.max(0, pageDots - el.oy - sz.crossDots) };
+        const moved = { ...el, oy: Math.max(0, pageDots - el.oy - sz.crossDots) };
+        // A polygon's vertices and a circle's centre are ABSOLUTE, in the
+        // printer's own counting-up rows, so they need the same flip the origin
+        // gets. They were left in printer space once, which put them a whole
+        // page-height away from the element they belong to. No crossDots here,
+        // because a vertex is a point rather than an object with a height.
+        if (moved.kind === 'polygon') {
+            moved.points = moved.points.map(p => ({ x: p.x, y: Math.max(0, pageDots - p.y) }));
+        }
+        if (moved.kind === 'ellipse' && pendingCircles.has(el.id as number)) {
+            const c = pendingCircles.get(el.id as number) as { row: number; col: number };
+            const d = Math.max(0, pageDots - c.row);
+            moved.ox = c.col - moved.widthDots / 2;
+            moved.oy = d - moved.heightDots / 2;
+        }
+        return moved;
     });
 
     // ---- Inverse mode (A5) --------------------------------------------

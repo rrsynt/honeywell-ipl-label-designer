@@ -35,6 +35,7 @@ export const KIND_PREFIX: Record<ViewerElement['kind'], string> = {
     // every real IPL field letter (H/B/L/W/G/U) rather than colliding with one.
     reverse: 'V',
     ellipse: 'C',
+    polygon: 'P',
     diagonal: 'D',
     unknown: '?',
 };

@@ -719,6 +719,92 @@ describe('DPL advanced format attributes (manual Table 8-16, p. 144)', () => {
     });
 });
 
+describe('DPL graphics: polygons and circles (Tables 8-13/8-14, p. 140-141)', () => {
+    // Every example in the manual is annotated "spaces have been added for
+    // readability", so each case is pinned in BOTH spellings — a parser that
+    // only worked on the spaced form would shift every fixed offset the moment
+    // a real stream arrived.
+    const both = (record: string) => [
+        `\x02L\r${record}\rE\r`,
+        `\x02L\r${record.replace(/ /g, '')}\rE\r`,
+    ];
+
+    it('draws the manual\'s triangle, in both spellings', () => {
+        // "1 X 11 000 0010 0010 P 001 0001 0040 0025 0010 0040" produces a
+        // triangle whose figure has its apex at row 0040 and its base at
+        // row 0010 — and rows count UP from the label's bottom, so the apex is
+        // the SMALLER y in the IR's top-down space.
+        for (const src of both('1X1100000100010P0010001 0040 0025 0010 0040')) {
+            const lab = parseDPL(src, PAGE);
+            const poly = lab.elements.find(e => e.kind === 'polygon') as any;
+            expect(poly, src).toBeDefined();
+            expect(poly.points, 'three corners').toHaveLength(3);
+            const ys = poly.points.map((p: any) => p.y);
+            expect(Math.max(...ys) - Math.min(...ys), 'the apex must sit above the base').toBeGreaterThan(40);
+            // the apex is the single point, the base the other two
+            const apex = poly.points.find((p: any) => p.y === Math.min(...ys));
+            const base = poly.points.filter((p: any) => p !== apex);
+            expect(base[0].y, 'both base corners share a row').toBe(base[1].y);
+        }
+    });
+
+    it('draws the manual\'s circle at its centre with its radius', () => {
+        // "1 X 11 000 0100 0100 C 001 0001 0025" is "a circle centered at row
+        // 0100, column 0100 with a radius of 0025". Read against Table 8-14 the
+        // header is eee = fill, f = centre ROW, g = centre COLUMN, and the
+        // radius is the data field's last group.
+        for (const src of both('1X1100001000100C0010001 0025')) {
+            const lab = parseDPL(src, PAGE);
+            const el = lab.elements.find(e => e.kind === 'ellipse') as any;
+            expect(el, src).toBeDefined();
+            // 0025 hundredths of an inch at 203 dpi is ~50.8 dots of radius.
+            expect(el.widthDots).toBe(el.heightDots);
+            expect(el.widthDots).toBeGreaterThan(95);
+            expect(el.widthDots).toBeLessThan(106);
+            // and it sits around its centre: the box straddles it
+            expect(el.ox + el.widthDots / 2).toBeGreaterThan(el.ox);
+        }
+    });
+
+    it('reports the fill pattern it does not draw', () => {
+        // Table 8-15's patterns are tones, hachures and shadings; the IR has no
+        // fill model, so the outline is drawn and the difference is NAMED
+        // rather than silently flattened to a solid or an empty shape.
+        const lab = parseDPL('\x02L\r1X1100901000100C0010001 0025\rE\r', PAGE);
+        expect(lab.issues.map(i => i.code)).toContain('dpl-fill-pattern');
+        // pattern 0 is "No Pattern", and drawing nothing extra is correct there
+        const plain = parseDPL('\x02L\r1X1100001000100C0010001 0025\rE\r', PAGE);
+        expect(plain.issues.map(i => i.code)).not.toContain('dpl-fill-pattern');
+    });
+
+    it('measures a polygon by its span, not by how far it hangs one way', () => {
+        // A polygon's points are absolute and may lie on ANY side of the
+        // record's own row. Measuring the extent only "downwards" from the
+        // origin — in printer rows, which count UP — gave a negative height for
+        // a shape hanging below its row, and the element was then clipped
+        // completely: measured ink 0 for a record that draws perfectly well.
+        // The span is used instead, and it is the same measure before and after
+        // the row flip.
+        const lab = parseDPL('\x02L\r1X1100000700070P0010001 0010 0025 0070 0040\rE\r', PAGE);
+        const poly = lab.elements.find(e => e.kind === 'polygon') as any;
+        expect(poly, 'the record draws').toBeDefined();
+        const size = estimateElementSize(poly, 203);
+        expect(size.crossDots, 'the height must cover points on both sides').toBeGreaterThan(100);
+        expect(size.lengthDots).toBeGreaterThan(80);
+    });
+
+    it('draws two points as a line and refuses one', () => {
+        // "If only two points are specified, a single line will be drawn."
+        const lab = parseDPL('\x02L\r1X1100000100010P0010001 0040 0040\rE\r', PAGE);
+        const poly = lab.elements.find(e => e.kind === 'polygon') as any;
+        expect(poly.points, 'a line is a two-point polygon').toHaveLength(2);
+        // and a record that lists no usable point says so
+        const one = parseDPL('\x02L\r1X1100000100010P0010001\rE\r', PAGE);
+        expect(one.elements.find(e => e.kind === 'polygon')).toBeUndefined();
+        expect(one.issues.map(i => i.code)).toContain('dpl-polygon-points');
+    });
+});
+
 describe('DPL tables are complete against the manual', () => {
     it('every letter the manual lists is present', () => {
         // Appendix F Table F-1 lists these single-letter ids; a gap would make

@@ -302,12 +302,34 @@ export interface UnknownElement extends ElementBase {
     prefix?: string;
 }
 
+/**
+ * A closed outline through free points, which is what DPL's graphics polygon
+ * is. Its first point is the record's own row/column, so `ox`/`oy` repeat it
+ * and `f` is always 0 — the same convention DiagonalElement uses for its start
+ * point, and for the same reason: the remaining points are absolute, and
+ * rotating an element whose coordinates are already placed would move it twice.
+ *
+ * It is deliberately not a kind of its own per shape: the manual says "the
+ * points must be specified in the order to be drawn; the last point specified
+ * is automatically connected to the first point to close the polygon. If only
+ * two points are specified, a single line will be drawn." So a triangle and a
+ * line are the same record with a different count, and the element carries the
+ * points as given rather than pretending to be one shape or another.
+ */
+export interface PolygonElement extends ElementBase {
+    kind: 'polygon';
+    /** Absolute vertices in dots, in the order the record listed them. */
+    points: Array<{ x: number; y: number }>;
+    thicknessDots: number;
+}
+
 export type ViewerElement =
     | TextElement
     | BarcodeElement
     | LineElement
     | ReverseElement
     | EllipseElement
+    | PolygonElement
     | DiagonalElement
     | BoxElement
     | GraphicElement

@@ -230,6 +230,24 @@ export const estimateElementSize = (
                 lengthDots: Math.abs(el.ex - el.ox) + el.thicknessDots,
                 crossDots: Math.abs(el.ey - el.oy) + el.thicknessDots,
             };
+        case 'polygon': {
+            // The SPAN of the vertices, not the distance measured in one
+            // direction from the origin. The points are absolute and can lie on
+            // any side of the record's own row — and a span is the same measure
+            // before and after the parser's row flip, which a directional one
+            // is not: measuring only "downwards" in the printer's counting-up
+            // rows clipped a polygon that hung below its own row to nothing at
+            // all.
+            let minX = el.ox, maxX = el.ox, minY = el.oy, maxY = el.oy;
+            for (const p of el.points) {
+                minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+                minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+            }
+            return {
+                lengthDots: (maxX - minX) + el.thicknessDots,
+                crossDots: (maxY - minY) + el.thicknessDots,
+            };
+        }
         case 'box': return { lengthDots: el.widthDots, crossDots: el.heightDots };
         case 'graphic': return { lengthDots: el.widthDots, crossDots: el.heightDots };
         case 'unknown': return { lengthDots: 60, crossDots: 20 };
@@ -599,6 +617,31 @@ const drawElement = (ctx: CanvasRenderingContext2D, el: ViewerElement, opts: Ren
             // OUTER edge lands on the declared width/height, which is what the
             // manual's corner coordinates describe.
             ctx.ellipse(w / 2, h / 2, Math.max(0.5, w / 2 - t / 2), Math.max(0.5, h / 2 - t / 2), 0, 0, Math.PI * 2);
+            ctx.stroke();
+            break;
+        }
+        case 'polygon': {
+            // Like 'diagonal', every point is absolute against an origin the
+            // transform has already translated to, so they are drawn relative
+            // to it. The path is always CLOSED: the manual says "the last point
+            // specified is automatically connected to the first point to close
+            // the polygon", and with only two points that is the same line
+            // twice, which strokes as one line.
+            //
+            // The OUTLINE is what is drawn, never a fill — the record carries a
+            // fill pattern number, but no pattern is rendered here (the IR has
+            // no fill model), and filling solid black would be a large silent
+            // change for a pattern 0 that means "no pattern" at all.
+            if (el.points.length < 2) break;
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = Math.max(1, el.thicknessDots * s);
+            ctx.lineJoin = 'miter';
+            ctx.beginPath();
+            ctx.moveTo((el.points[0].x - el.ox) * s, (el.points[0].y - el.oy) * s);
+            for (let i = 1; i < el.points.length; i++) {
+                ctx.lineTo((el.points[i].x - el.ox) * s, (el.points[i].y - el.oy) * s);
+            }
+            ctx.closePath();
             ctx.stroke();
             break;
         }
