@@ -582,6 +582,38 @@ export const parseDPL = (
     const globalRegisters: string[] = [];
 
     /**
+     * The printer's own clock, as `<STX>A` sets it.
+     *
+     * `now` is the caller's idea of the time — what the preview would use for a
+     * stream that never sets a clock — and this starts there. `<STX>A` then
+     * moves it, so that a stream setting a date and printing it shows the date
+     * IT named rather than the day the file happened to be opened.
+     */
+    let printerClock = now;
+    // <STX>A is read by a PRE-PASS, because the date is substituted while the
+    // stream is tokenized and the tokenizer runs before the command loop would
+    // ever see the clock-setting command. Without this a stream that sets 1996
+    // and prints its own date still printed the system's day.
+    // Against the manual's own sample `<STX>A1020319960855034`, which it says
+    // prints "Mon. Feb 3, 1996, 8:55AM": w=1 (Monday), mm=02, dd=03,
+    // yyyy=1996, hh=08, MM=55, jjj=034 — SIXTEEN digits, so
+    //   [0] w  [1..2] mm  [3..4] dd  [5..8] yyyy  [9..10] hh  [11..12] MM  [13..15] jjj
+    // A first attempt counted fifteen and offset every field by one, reading
+    // the sample as the 5th of February 1999.
+    //
+    // Both spellings are handled, because the notation `<STX>` is normalised
+    // inside the tokenizer and this pass runs before it. Getting that wrong made
+    // a notated stream silently keep the system clock.
+    const clockSource = code.replace(/<STX>/gi, '\x02');
+    for (const m of clockSource.matchAll(/\x02A(\d{16})/g)) {
+        const d = m[1];
+        printerClock = new Date(
+            Number(d.slice(5, 9)), Number(d.slice(1, 3)) - 1, Number(d.slice(3, 5)),
+            Number(d.slice(9, 11)), Number(d.slice(11, 13)),
+        );
+    }
+
+    /**
      * DPL position units -> dots. Hundredths of an inch, or tenths of a mm.
      *
      * The resolution is the CALLER'S, not a constant. Every measurement in DPL
@@ -597,7 +629,7 @@ export const parseDPL = (
     const positionToDots = (units: number, dpi: number = dpiHint): number =>
         metric ? (units / 10) * (dpi / 25.4) : (units / 100) * dpi;
 
-    const cmds = tokenizeDpl(code, now);
+    const cmds = tokenizeDpl(code, printerClock);
 
     /**
      * Which records a `<STX>S` fills, keyed by the record's token index.
@@ -707,6 +739,47 @@ export const parseDPL = (
             // been applied — and leaving it to the unknown-command report would
             // name a command the parser does understand.
             if (letter === 'C' && /^C[12S]$/i.test(cmd.params)) continue;
+            // <STX>A — "Set Time and Date": "This command sets the time and
+            // date. The initial setting of the date will be stored in the
+            // printer's internal inch counter" (p. 17).
+            //
+            // It matters because <STX>T PRINTS from that clock: "The sample
+            // listings below assume a current printer date of December 21,
+            // 1998." A stream that sets the clock and then prints the date was
+            // getting the SYSTEM's date instead — measured: a stream setting
+            // 3 Feb 1996 printed "THU OCT 01" for its own date field.
+            //
+            // "Syntax: <STX>AwmmddyyyyhhMMjjj", and the manual's own sample
+            // "<STX>A1020319960855034" prints "Mon. Feb 3, 1996, 8:55AM, 034".
+            // Read against that sample the layout is w=1, mm=02, dd=03,
+            // yyyy=1996, hh=08, MM=55, jjj=034 — the field list's alignment in
+            // the extracted text is scrambled, and the sample is what settles it.
+            if (letter === 'A') {
+                const m = /^(\d)(\d{2})(\d{2})(\d{4})(\d{2})(\d{2})(\d{3})$/.exec(cmd.params.trim());
+                if (m) {
+                    // `w` states the weekday separately and can contradict the
+                    // date — the manual's OWN sample does, `w` = 1 (Monday)
+                    // against the 3rd of February 1996, which was a Saturday.
+                    // The DATE wins: Table 6-3's `BCD` group is the day NAME,
+                    // which a printer holding a date derives rather than is
+                    // told, and the manual's "Mon." there is its own error, the
+                    // same class as its "SUN" for the 21st of December 1998.
+                    // The disagreement is named rather than quietly resolved.
+                    const statedDow = Number(m[1]);
+                    const derivedDow = printerClock.getDay() === 0 ? 7 : printerClock.getDay();
+                    once('settime', 'info', 'dpl-clock-set',
+                        `<STX>A sets the printer's clock to ${printerClock.toDateString()} `
+                        + `${String(printerClock.getHours()).padStart(2, '0')}:${String(printerClock.getMinutes()).padStart(2, '0')}`
+                        + (statedDow === derivedDow
+                            ? ', and a later <STX>T prints from it.'
+                            : `, which is a different weekday from the ${statedDow} the command also states; the preview follows the DATE, so a <STX>T day name will differ from the command's own count.`),
+                        'A');
+                } else {
+                    issue('info', 'dpl-clock-set',
+                        'A sets the printer\'s time and date, but not in the form the manual gives (`<STX>AwmmddyyyyhhMMjjj`), so the preview keeps the clock it had.', 'A');
+                }
+                continue;
+            }
             // <STX>Kc — "Configuration Set", the menu's settings over the wire:
             // "<STX>Kcaa1val1[;aaIvalI][;aanvaln]", with two-letter parameter
             // names (p. 42). Most of it is printer setup the preview has no

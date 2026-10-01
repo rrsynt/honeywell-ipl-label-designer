@@ -1149,6 +1149,74 @@ describe('DPL EAN/UPC variants and the price checksum (Appendix F/G/P)', () => {
     });
 });
 
+describe('DPL printer clock (<STX>A sets it, <STX>T prints it)', () => {
+    // "<STX>A1020319960855034" — the manual's own sample, which it says prints
+    // "Mon. Feb 3, 1996, 8:55AM, 034". The date is SIXTEEN digits:
+    //   [0] w  [1..2] mm  [3..4] dd  [5..8] yyyy  [9..10] hh  [11..12] MM  [13..15] jjj
+    const setThenPrint = (setCmd: string, seed: Date) =>
+        parseDPL(
+            `${setCmd}\r\x02L\r121100001000100\x02TBCD GHI PQ\rE\r`,
+            PAGE, seed,
+        );
+
+    it('prints the date the STREAM set, not the system\'s', () => {
+        // <STX>T prints "from the printer's internal clock", so a stream that
+        // sets that clock and then prints the date must show ITS date. It was
+        // showing the caller's — measured: a stream setting 3 Feb 1996 printed
+        // "THU OCT 01" for its own date field.
+        const lab = setThenPrint('\x02A1020319960855034', new Date(2026, 9, 1));
+        const text = (lab.elements.find(e => e.kind === 'text') as any).source.data;
+        expect(text, 'the day name comes from the stream\'s date').toContain('FEB 03');
+        expect(text).not.toContain('OCT');
+        expect(lab.issues.map(i => i.code)).toContain('dpl-clock-set');
+    });
+
+    it('reads all sixteen digits at the right offsets', () => {
+        // A first attempt counted fifteen and offset every field by one, which
+        // read the sample as the 5th of February 1999 — a wrong date presented
+        // as a fact. The year, month and day are each checked on their own.
+        const lab = setThenPrint('\x02A1020319960855034', new Date(2026, 9, 1));
+        const msg = lab.issues.find(i => i.code === 'dpl-clock-set')?.message ?? '';
+        expect(msg).toContain('1996');
+        expect(msg).toContain('Feb 03');
+        expect(msg).toContain('08:55');
+    });
+
+    it('follows the byte form and the <STX> notation alike', () => {
+        // The notation is normalised inside the tokenizer, and the clock is
+        // read BEFORE it — so a notated stream used to keep the system clock
+        // while the byte form worked.
+        const raw = setThenPrint('\x02A1020319960855034', new Date(2026, 9, 1));
+        const notated = parseDPL(
+            '<STX>A1020319960855034\r<STX>L\r121100001000100<STX>TBCD GHI PQ\rE\r',
+            PAGE, new Date(2026, 9, 1),
+        );
+        const data = (lab: typeof raw) => (lab.elements.find(e => e.kind === 'text') as any).source.data;
+        expect(data(notated)).toBe(data(raw));
+    });
+
+    it('names a weekday that contradicts the date, rather than picking one', () => {
+        // `w` states the weekday separately and CAN disagree: the manual's own
+        // sample has w=1 (Monday) against the 3rd of February 1996, which was a
+        // Saturday — the manual's "Mon." there is its own error, the same class
+        // as its "SUN" for the 21st of December 1998. The preview follows the
+        // date and says so, because a printer holding a date derives the day
+        // name rather than being told it.
+        const disagree = setThenPrint('\x02A1020319960855034', new Date(2026, 9, 1));
+        expect(disagree.issues.find(i => i.code === 'dpl-clock-set')?.message)
+            .toContain('different weekday');
+        // w=6 is Saturday, which AGREES, and must not warn
+        const agrees = setThenPrint('\x02A6020319960855034', new Date(2026, 9, 1));
+        expect(agrees.issues.find(i => i.code === 'dpl-clock-set')?.message)
+            .not.toContain('different weekday');
+    });
+
+    it('keeps the caller\'s clock when the stream sets none', () => {
+        const lab = parseDPL('\x02L\r121100001000100\x02TBCD GHI PQ\rE\r', PAGE, new Date(1998, 11, 21));
+        expect((lab.elements[0] as any).source.data).toContain('DEC 21');
+    });
+});
+
 describe('DPL speed commands (Appendix L Table L-1, p. 243)', () => {
     const msgFor = (cmd: string) =>
         parseDPL(`\x02L\r${cmd}\r141100001000100HI\rE\r`, PAGE).issues[0];
