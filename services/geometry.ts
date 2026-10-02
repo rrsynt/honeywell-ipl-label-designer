@@ -39,6 +39,46 @@ const getFieldData = (field: TextField | BarcodeField, design: Design): string =
 
 
 /**
+ * The horizontal shift, in the field's own text direction (dots), that a text
+ * block's `align` bakes into its origin — the same rule the designer canvas
+ * draws (`blockX = −W/2 / −W`) and IPL already bakes into the print origin.
+ *
+ * No printer language here has a per-line alignment for ordinary text; the only
+ * lever is moving the origin, so a centre/right block is printed by starting it
+ * further left. Returns 0 for left/undefined.
+ */
+export const textAlignShiftDots = (field: Field, boxWidthDots: number): number => {
+    if (field.type !== 'text') return 0;
+    const align = (field as TextField).align;
+    // Half a block width is not always a whole dot, and ^FO/`o` take integers —
+    // a fractional origin (`220.5`) is not a coordinate those commands accept.
+    if (align === 'center') return -Math.round(boxWidthDots / 2);
+    if (align === 'right') return -Math.round(boxWidthDots);
+    return 0;
+};
+
+/**
+ * Applies a text-align shift to a visual top-left, riding the block's own text
+ * axis so a rotated field shifts where the designer drew it. Mirrors the
+ * per-rotation table IPL uses (f0 +x, f1 −y, f2 −x, f3 +y).
+ */
+export const shiftForTextAlign = (
+    origin: { x: number; y: number },
+    field: Field,
+    boxWidthDots: number,
+): { x: number; y: number } => {
+    const s = textAlignShiftDots(field, boxWidthDots);
+    if (s === 0) return origin;
+    const q = ((Math.round(field.rotation / 90) % 4) + 4) % 4;
+    switch (q) {
+        case 1: return { x: origin.x, y: origin.y - s };
+        case 2: return { x: origin.x - s, y: origin.y };
+        case 3: return { x: origin.x, y: origin.y + s };
+        default: return { x: origin.x + s, y: origin.y };
+    }
+};
+
+/**
  * Calculates the UNROTATED bounding box of a single field in millimeters.
  * This is the core measurement function, independent of zoom or rotation.
  */

@@ -24,7 +24,7 @@
 
 import type { Design, Field, TextField, BarcodeField } from '../../types';
 import { DPI_MAP } from '../../constants';
-import { getObjectBoundingBox } from '../geometry';
+import { getObjectBoundingBox, shiftForTextAlign } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
 import { parseMaxiCodeScm } from '../ipl/maxiCodeScm';
@@ -178,7 +178,15 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
 
     for (const field of design.fields) {
         const box = getObjectBoundingBox(field, design);
-        const { x, y, rotation } = placeField(field, box, dpi);
+        const placed = placeField(field, box, dpi);
+        // A text block's `align` has no TSPL parameter for ordinary text, so a
+        // centre/right block starts further back along its text axis — the
+        // designer's rule and IPL's baked origin. Only the origin moves; the
+        // rotation is TSPL's own and stays as placed.
+        const aligned = shiftForTextAlign({ x: placed.x, y: placed.y }, field, dots(box.width));
+        const { rotation } = placed;
+        const x = aligned.x;
+        const y = aligned.y;
 
         // TSPL has a NATIVE ellipse command, so a design ellipse is emitted as
         // one instead of going through the rasterize-and-download path the

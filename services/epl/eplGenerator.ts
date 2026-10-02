@@ -15,7 +15,7 @@
 
 import type { Design, Field, TextField, BarcodeField } from '../../types';
 import { DPI_MAP } from '../../constants';
-import { getObjectBoundingBox } from '../geometry';
+import { getObjectBoundingBox, shiftForTextAlign } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
 import { parseMaxiCodeScm } from '../ipl/maxiCodeScm';
@@ -141,7 +141,10 @@ export const generateEPL = (design: Design): EplGenerateResult => {
 
     for (const field of design.fields) {
         const box = getObjectBoundingBox(field, design);
-        const origin = topLeftDots(field, box, dpi);
+        // A text block's `align` has no EPL parameter — the printer only moves
+        // origins — so a centre/right block starts further back along its text
+        // axis, matching the designer canvas and IPL's baked origin.
+        const origin = shiftForTextAlign(topLeftDots(field, box, dpi), field, dots(box.width));
         const rot = field.rotation / 90;
 
         if (field.type === 'text') {

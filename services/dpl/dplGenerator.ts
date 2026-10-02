@@ -9,7 +9,7 @@
 
 import type { Design, Field, TextField, BarcodeField, PolygonField, TriangleField } from '../../types';
 import { DPI_MAP, FONT_MAP } from '../../constants';
-import { getObjectBoundingBox } from '../geometry';
+import { getObjectBoundingBox, shiftForTextAlign } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
 import { dplMultiplier, clampDplMultiplier, fitDplBitmapFont, DESIGN_OCR_FONT, DPL_FONTS, type DplBitmapFit } from './dplFonts';
@@ -238,8 +238,13 @@ export const generateDPL = (design: Design): DplGenerateResult => {
 
     for (const field of design.fields) {
         const box = getObjectBoundingBox(field, design);
-        const row = rowFor(field.y + box.height);
-        const col = colFor(field.x);
+        // A text block's `align` has no DPL parameter — the printer only moves
+        // an origin — so a centre/right block starts further back along its own
+        // text axis. Applied in the DESIGN's mm space (x right, y down) before
+        // rowFor/colFor flip it, exactly where IPL bakes the same shift.
+        const tl = shiftForTextAlign({ x: field.x, y: field.y }, field, box.width);
+        const row = rowFor(tl.y + box.height);
+        const col = colFor(tl.x);
         const rot = dplRotation(field.rotation);
         const rowStr = String(row).padStart(4, '0');
         const colStr = String(col).padStart(4, '0');

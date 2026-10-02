@@ -21,7 +21,7 @@
 
 import type { Design, Field, TextField, BarcodeField } from '../../types';
 import { DPI_MAP, FONT_MAP } from '../../constants';
-import { getObjectBoundingBox } from '../geometry';
+import { getObjectBoundingBox, shiftForTextAlign } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
 import { charsetWarning } from '../charsetRisk';
@@ -117,7 +117,12 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
 
     for (const field of design.fields) {
         const box = getObjectBoundingBox(field, design);
-        const origin = topLeftDots(field, box, dpi);
+        // `align` on a text block has no stream form — the printer can only move
+        // an origin — so a centre/right block is printed by starting it further
+        // back along its own text axis, exactly what the designer draws and what
+        // IPL already bakes in. Without this the block printed flush-left while
+        // the screen showed it centred.
+        const origin = shiftForTextAlign(topLeftDots(field, box, dpi), field, dots(box.width));
         const ori = ORIENTATION[field.rotation / 90] ?? 'N';
 
         if (field.type === 'text') {
