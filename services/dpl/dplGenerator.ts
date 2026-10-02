@@ -335,6 +335,22 @@ export const generateDPL = (design: Design): DplGenerateResult => {
                 continue;
             }
             if (bf.warning) warnings.push(`"${field.name}": ${bf.warning}`);
+            // A QR's model, error-correction level and mask exist ONLY in DPL's
+            // MANUAL format (W1D), as a prefix on the data
+            // (`[q,][e[m]i,]cdata…`, manual p.199). This generator writes the
+            // AUTO format (W1d), which pins model 2 / ECL M / mask automatic, so
+            // those three controls — all settable in the designer — are not
+            // printed here. Name them rather than drop them in silence.
+            if (field.symbology === '18') {
+                const asked = ([
+                    field.qrModel !== undefined ? `model ${field.qrModel}` : '',
+                    field.qrEcl ? `error correction ${field.qrEcl}` : '',
+                    field.qrMask !== undefined ? `mask ${field.qrMask}` : '',
+                ].filter(Boolean));
+                if (asked.length > 0) {
+                    warnings.push(`"${field.name}": DPL's QR auto format fixes the model (2), error-correction level (M) and mask (automatic), so the ${asked.join(', ')} set on screen is not printed.`);
+                }
+            }
             // eee is the symbol height, in hundredths of an inch. `h_mag` is the
             // bar height in DOTS (the designer draws `h_mag * dotSizePx`, and
             // EPL/TSPL emit it straight as a dot height), so the conversion is

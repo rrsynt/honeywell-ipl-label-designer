@@ -1909,6 +1909,34 @@ describe('DPL Wxx ids: case selects a format variant, and W1Z is MicroPDF417', (
         expect(dplBarcodeFor('Z')?.type.symbology).toBe('12');
     });
 
+    it('NAMES the QR model/ECL/mask it cannot print (W1d pins them)', () => {
+        // Those three live only in W1D's manual-format data prefix, which this
+        // generator does not write — so they are reported, not dropped.
+        const qr = (over: Record<string, unknown>) => generateDPL(design([{
+            id: 1, type: 'barcode', name: 'Q', x: 10, y: 10, rotation: 0,
+            dataSource: { type: 'fixed', data: '1234567890' }, symbology: '18',
+            humanReadable: 'none', h_mag: 40, w_mag: 2, ...over,
+        } as never]));
+        // A bare QR prints at the auto-format defaults without complaint.
+        expect(qr({}).warnings).toEqual([]);
+        // Each one set is named.
+        for (const [over, needle] of [
+            [{ qrModel: 1 }, 'model 1'],
+            [{ qrEcl: 'H' }, 'error correction H'],
+            [{ qrMask: 3 }, 'mask 3'],
+        ] as const) {
+            const w = qr(over).warnings.join(' ');
+            expect(w, JSON.stringify(over)).toMatch(/auto format fixes/);
+            expect(w, JSON.stringify(over)).toContain(needle);
+        }
+        // And a non-QR symbol carrying the keys is unaffected.
+        expect(generateDPL(design([{
+            id: 1, type: 'barcode', name: 'C', x: 10, y: 10, rotation: 0,
+            dataSource: { type: 'fixed', data: '12345' }, symbology: '6',
+            humanReadable: 'below', h_mag: 40, w_mag: 2, qrEcl: 'H',
+        } as never])).warnings.join(' ')).not.toMatch(/auto format fixes/);
+    });
+
     it('does not read the Wxx case as the human-readable flag', () => {
         for (const b of ['W1D', 'W1d', 'W1C', 'W1c', 'W1F', 'W1f', 'W1Z', 'W1z']) {
             expect(dplBarcodeFor(b)?.hri, `${b} prints no human-readable line`).toBe(0);
