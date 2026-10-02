@@ -2385,6 +2385,15 @@ export class IPLViewerParser {
         }
         const kParam = params.find(p => p.key === 'k');
         let pointSize = kParam ? parseInt(kParam.value.split(',')[0], 10) || undefined : undefined;
+        // The resolution the caller renders at. `k` states POINTS, which the
+        // renderer turns into dots itself (× dpi/72) and so needs no dpi here —
+        // but `h`/`w` state DOTS (PRM p.187/p.201), and the pitch-derived size
+        // below is also in dots, so both must be converted with the SAME dpi the
+        // renderer multiplies back by. Dividing by a fixed 203 sized every such
+        // outline field for a 203 dpi machine whatever the reader selected — a
+        // `h17` field drew 20 dots at 203 dpi but 39 at 406, where the stream
+        // asks for 17 (the hardcoded-203 class the DPL parser had; see parseDPL).
+        const dpi = this.printer.driverDpi ?? 203;
         // Border: n>0 = white letters on an n-dot black surround (PRM p.167).
         const borderRaw = this.int(params, 'b', 0);
         const borderDots = borderRaw > 0 ? Math.min(borderRaw, 999) : undefined;
@@ -2434,7 +2443,7 @@ export class IPLViewerParser {
                 // An outline face still needs a canvas size; express the pitch
                 // advance as the equivalent point size, which is the same 0.6 em
                 // relation the fontMetrics tables use for monospace.
-                pointSize: bitmap ? undefined : Math.max(1, Math.round((advance / 0.6) * 72 / 203)),
+                pointSize: bitmap ? undefined : Math.max(1, Math.round((advance / 0.6) * 72 / dpi)),
                 intercharGapDots: spec.gap,
                 borderDots,
                 charRot: this.charRotationOf(params, `H${id ?? ''}`),
@@ -2453,7 +2462,7 @@ export class IPLViewerParser {
             // Convert: pointSize = h (dots) → pt = dots × 72 / dpi. Keep hMag/
             // wMag at 1 so the renderer scales the outline glyph to the box.
             if (pointSize === undefined && hMag > 4) {
-                pointSize = Math.round(hMag * 72 / 203);
+                pointSize = Math.round(hMag * 72 / dpi);
                 hMag = 1;
                 wMag = 1;
             }

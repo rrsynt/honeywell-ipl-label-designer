@@ -90,7 +90,7 @@ const closestIrFont = (heightDots: number): string => {
  */
 const DPL_BITMAP_FONT9_POINTS = [5, 6, 8, 10, 12, 14, 18, 24, 30, 36, 48];
 
-const smoothPointFromSize = (eee: string, heightField: string): number => {
+const smoothPointFromSize = (eee: string, heightField: string, dpi: number): number => {
     // The optional scalable height wins: it is the field the manual says must
     // carry the size for a scalable font.
     const h = (heightField ?? '').trim();
@@ -100,10 +100,14 @@ const smoothPointFromSize = (eee: string, heightField: string): number => {
         if (/^\d{4}$/.test(h)) {
             // Dots, not points: "There are 72.307 points per 1 inch (2.847 mm)"
             // and the manual notes a dot size "will output differently on
-            // printers with different DPI/MMPI resolutions". The preview works
-            // at 203 dpi.
+            // printers with different DPI/MMPI resolutions". So the dot count
+            // must be converted with the resolution the caller renders at —
+            // this font maps to the IR's OUTLINE path (c25), which the renderer
+            // sizes by pointSize × dpi, and dividing by a fixed 203 here drew a
+            // `0040` (40-dot) field 45 dots at 203 dpi but 91 at 406. The same
+            // hardcoded-203 defect the position math had before dpiHint.
             const dots = parseInt(h, 10);
-            if (dots > 0) return Math.max(1, Math.round((dots / 203) * 72.307));
+            if (dots > 0) return Math.max(1, Math.round((dots / dpi) * 72.307));
         }
     }
     const a = /^[Aa](\d{2})$/.exec(eee.trim());
@@ -1488,7 +1492,7 @@ export const parseDPL = (
                     // Font 9 is the AGILE smooth/scalable face, drawn through the
                     // IR's outline path (c25) so the point size can be honoured.
                     font: '25', hMag: hMult, wMag: wMult,
-                    pointSize: smoothPointFromSize(eee, fontHeightField),
+                    pointSize: smoothPointFromSize(eee, fontHeightField, dpiHint),
                     source: { type: 'fixed', data: text },
                 } as TextElement);
                 if (hexAddressing) {

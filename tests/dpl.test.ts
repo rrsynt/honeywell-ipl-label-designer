@@ -1734,3 +1734,31 @@ describe('DPL generator: images, which the parser already drew', () => {
         expect(dpl).toContain('1Y11');
     });
 });
+
+// A scalable-font record's four-digit height is in DOTS, and the manual warns
+// it "will output differently on printers with different DPI/MMPI resolutions".
+// The record maps to the IR's OUTLINE path (c25), which the renderer sizes by
+// pointSize x dpi, so the dot->point conversion must use the render dpi too.
+// It divided by a hardcoded 203: a `0040` (40-dot) field drew 45 dots at 203 dpi
+// but 91 at 406. Same class as the position math this parser already fixed when
+// it took dpiHint — this one site was missed.
+describe('a DPL font-9 dot size draws the same at any dpi', () => {
+    const rec = (eee: string, h: string, data: string) => `1911${eee}0020` + '0200' + h + '0040' + data;
+    const crossDots = (dpi: 203 | 300 | 406): number => {
+        const el = parseDPL(`\x02L\r${rec('S00', '0040', 'Text')}\rE\r`, PAGE, new Date(), dpi).elements[0];
+        return estimateElementSize(el, dpi).crossDots;
+    };
+
+    it('renders ~40 dots for 0040 at 203, 300 and 406 dpi', () => {
+        for (const dpi of [203, 300, 406] as const) {
+            const h = crossDots(dpi);
+            expect(h, `at ${dpi} dpi`).toBeGreaterThanOrEqual(40);
+            expect(h, `at ${dpi} dpi`).toBeLessThanOrEqual(58);
+        }
+    });
+
+    it('is the dot count, not a fixed 203 reader (the old bug)', () => {
+        // Before the fix the height grew with dpi (45 -> 67 -> 91); now it is flat.
+        expect(crossDots(406)).toBeLessThan(crossDots(203) * 1.25);
+    });
+});
