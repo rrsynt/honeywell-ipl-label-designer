@@ -1017,7 +1017,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                         // encoder takes it only for the expanded-stacked variant
                         // (m1=6), which is the one this preview draws.
                         ...(sym === 'RSSEXP' && irVersion === '6'
-                            && Number.isInteger(seg) && seg >= 2 && seg <= 22
+                            && Number.isInteger(seg) && seg >= 2 && seg <= 22 && seg % 2 === 0
                             ? { rssSegments: String(seg) } : {}),
                     } as BarcodeElement));
                 } else if (sym === 'EAN8' || sym === 'EAN13' || sym === 'UPCA' || sym === 'UPCE') {

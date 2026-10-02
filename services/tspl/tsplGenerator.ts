@@ -360,10 +360,17 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                 if (isStacked && field.rssSepHeight !== undefined && Number(field.rssSepHeight) > 2) {
                     warnings.push(`"${field.name}" asks for separator height ${field.rssSepHeight}, which TSPL clamps to 2 (valid values are 1 or 2).`);
                 }
-                const seg = name === 'RSSEXP' ? Number(field.rssSegments ?? 0) : NaN;
+                if (field.rssSegments !== undefined && name !== 'RSSEXP') {
+                    warnings.push(`"${field.name}" is a GS1 DataBar (${name}); segments per row applies only to expanded stacked (RSSEXP), so the segments set on screen is ignored.`);
+                }
+                const seg = name === 'RSSEXP' && field.rssSegments !== undefined ? Number(field.rssSegments) : NaN;
+                const validSeg = Number.isInteger(seg) && seg >= 2 && seg <= 22 && seg % 2 === 0;
+                if (name === 'RSSEXP' && field.rssSegments !== undefined && !validSeg) {
+                    warnings.push(`"${field.name}" asks for ${field.rssSegments} segments per row, which is not an even number from 2 to 22 (TSC manual p. 71). The printer chooses the segment count.`);
+                }
                 const extras = [
                     sepHt !== undefined ? String(sepHt) : null,
-                    Number.isInteger(seg) && seg >= 2 && seg <= 22 ? String(seg) : null,
+                    validSeg ? String(seg) : null,
                 ].filter((v): v is string => v !== null);
                 const mid = [String(pixMult), ...extras].join(',');
                 lines.push(`RSS ${x},${y},"${name}",${rotation},${mid},"${escapeTsplData(data)}"`);
