@@ -14,7 +14,7 @@
 //
 //   * Rotation is CLOCKWISE (p. 77), so the design's counter-clockwise
 //     rotation is negated on the way out. Getting this backwards mirrors every
-//     rotated field — and 0/180 look fine either way, which is what makes it
+//     rotated field â€” and 0/180 look fine either way, which is what makes it
 //     easy to ship unnoticed.
 //   * A quote in the data is written \[ and a backslash \] (p. 77). That is
 //     neither ZPL's doubling nor EPL's backslash-quote.
@@ -80,7 +80,7 @@ const TSPL_BARCODE_FOR: Record<string, string> = {
  *
  * MPDF417 is in the guide's own command list (TSPL Programming Guide,
  * P1139068-01EN Rev A), and services/ipl/barcodes.ts has encoded '19' as
- * micropdf417 for every other language all along — so omitting it here dropped
+ * micropdf417 for every other language all along â€” so omitting it here dropped
  * a symbol this app can draw, under a warning that named its IPL id instead of
  * the symbology.
  */
@@ -111,7 +111,7 @@ const TSPL_2D_COMMAND: Record<string, string> = {
     '24': 'CODABLOCK',
 };
 
-/** EAN/UPC variants, by the DATA LENGTH — which is how TSPL's names map. */
+/** EAN/UPC variants, by the DATA LENGTH â€” which is how TSPL's names map. */
 const tsplEanType = (data: string): string | null => {
     switch (data.replace(/\D/g, '').length) {
         case 13: return 'EAN13';
@@ -139,7 +139,7 @@ const fieldData = (field: TextField | BarcodeField, design: Design): string => {
  * The visual top-left of a field in dots, and the rotation to emit.
  *
  * `box` is the unrotated size in millimetres. TSPL turns CLOCKWISE, so the
- * design's counter-clockwise quarter turns are negated here — the same
+ * design's counter-clockwise quarter turns are negated here â€” the same
  * conversion the parser applies in the other direction.
  */
 const placeField = (
@@ -180,7 +180,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
         const box = getObjectBoundingBox(field, design);
         const placed = placeField(field, box, dpi);
         // A text block's `align` has no TSPL parameter for ordinary text, so a
-        // centre/right block starts further back along its text axis — the
+        // centre/right block starts further back along its text axis â€” the
         // designer's rule and IPL's baked origin. Only the origin moves; the
         // rotation is TSPL's own and stays as placed.
         const aligned = shiftForTextAlign({ x: placed.x, y: placed.y }, field, dots(box.width));
@@ -190,7 +190,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
 
         // TSPL has a NATIVE ellipse command, so a design ellipse is emitted as
         // one instead of going through the rasterize-and-download path the
-        // other languages need — a circle and an ellipse are separate commands
+        // other languages need â€” a circle and an ellipse are separate commands
         // (manual pp. 48-49), told apart by their two axes.
         if (field.type === 'ellipse') {
             const e = field as unknown as { width: number; height: number; thickness: number };
@@ -225,7 +225,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                     const ecc = field.qrEcl ?? 'M';
                     // The bracketed TAIL carries the model and mask:
                     //   QRCODE x,y,ECC,cell,mode,rotation,[J,][model,][mask,][area,]"content"
-                    // (TSC guide p. 40) — M1/M2 change the SYMBOL, S0-S8 the
+                    // (TSC guide p. 40) â€” M1/M2 change the SYMBOL, S0-S8 the
                     // PATTERN. The parser already reads both back into qrModel
                     // and qrMask; the generator wrote neither, so the designer's
                     // "QR Model" and "Mask" controls were dropped in TSPL while
@@ -242,15 +242,15 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                 } else if (cmd === 'MPDF417') {
                     // NOT the same shape as PDF417. The TSC manual gives
                     //   MPDF417 x,y,rotate,[Wn,][Hn,][Cn,]"content"
-                    // — there is no positional width or height. Wn and Hn are
+                    // â€” there is no positional width or height. Wn and Hn are
                     // the module's width and height (defaults 1 and 10), and
                     // Cn is the column count. Writing the PDF417 box here put
                     // the width where the rotation belongs, so a printer would
                     // have rotated the symbol by 150 degrees.
                     const w = Math.max(1, Math.round(field.w_mag ?? 1));
                     const h = Math.max(1, Math.round(field.h_mag ?? 10));
-                    // Cn is the COLUMN COUNT — the third optional member, domain
-                    // 0-4 with 0 = automatic (TSC guide p. 60) — and the parser
+                    // Cn is the COLUMN COUNT â€” the third optional member, domain
+                    // 0-4 with 0 = automatic (TSC guide p. 60) â€” and the parser
                     // reads it back into `microColumns` (the designer's "Data
                     // Columns"). The generator wrote only Wn and Hn, so a fixed
                     // column count was silently dropped and the printer chose.
@@ -280,7 +280,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                     // AZTEC x,y,rotate,[size,]ecp,]flg,]menu,]multi,]rev,]"content"
                     // (TSC manual p. 59). The parameters after the rotation are
                     // POSITIONAL and optional, so an unset `size` still has to
-                    // be written if `ecp` is present — a gap in a positional
+                    // be written if `ecp` is present â€” a gap in a positional
                     // list shifts every later value.
                     const size = Math.max(1, Math.min(20, Math.round(field.w_mag ?? 6) || 6));
                     const ecp = (field as { aztecEcp?: string }).aztecEcp;
@@ -296,9 +296,9 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                     lines.push(`CODABLOCK ${x},${y},${rotation},${head}${modW},"${escapeTsplData(data)}"`);
                 } else if (cmd === 'MAXICODE') {
                     // MAXICODE x,y,mode,[class,country,post,]\"content\" (TSC
-                    // manual p. 54). The symbol is FIXED SIZE — the command has
+                    // manual p. 54). The symbol is FIXED SIZE â€” the command has
                     // no width, height or module parameter at all, only the
-                    // start point — so the design's box does not appear here.
+                    // start point â€” so the design's box does not appear here.
                     //
                     // Modes 2 and 3 carry the class, country and postal code as
                     // PARAMETERS, while the design holds them inside the data
@@ -320,7 +320,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                         // TSPL has no "automatic selection": the mode is a
                         // required parameter, and unlike EPL it documents no
                         // fallback. A design with no mode therefore cannot be
-                        // written as authored — mode 4 is the standard symbol
+                        // written as authored â€” mode 4 is the standard symbol
                         // that carries a plain message, which is what such a
                         // design's data is.
                         warnings.push(`"${field.name}" is a MaxiCode with no mode set; TSPL has no automatic selection, so it prints as mode 4 (standard symbol).`);
@@ -335,7 +335,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
             }
             if (sym === '20') {
                 // GS1 DataBar has its OWN command in TSPL (RSS, manual p. 71),
-                // not a BARCODE type — and this generator used to leave it off
+                // not a BARCODE type â€” and this generator used to leave it off
                 // the label under "type 20, which this TSPL subset cannot
                 // draw", a claim the manual's own section disproves. The
                 // encoder has produced it for IPL and EPL all along.
@@ -350,9 +350,16 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                 // state. Name the difference rather than drop it in silence.
                 const expected = (RSS_HEIGHT_FOR[name] ?? 33) * pixMult;
                 if (Math.abs((field.h_mag ?? expected) - expected) > 1) {
-                    warnings.push(`"${field.name}" is a GS1 DataBar ${name}, whose bar height TSPL computes from the module width (${RSS_HEIGHT_FOR[name] ?? 33} × ${pixMult} = ${expected} dots). The design asks for ${field.h_mag}; the printer's figure is used.`);
+                    warnings.push(`"${field.name}" is a GS1 DataBar ${name}, whose bar height TSPL computes from the module width (${RSS_HEIGHT_FOR[name] ?? 33} Ã— ${pixMult} = ${expected} dots). The design asks for ${field.h_mag}; the printer's figure is used.`);
                 }
-                const sepHt = name === 'RSS14S' || name === 'RSS14SO' ? Math.max(1, Math.min(2, Number(field.rssSepHeight ?? 1) || 1)) : undefined;
+                const isStacked = name === 'RSS14S' || name === 'RSS14SO' || name === 'RSSEXP';
+                const sepHt = isStacked ? Math.max(1, Math.min(2, Number(field.rssSepHeight ?? 1) || 1)) : undefined;
+                if (field.rssSepHeight !== undefined && !isStacked) {
+                    warnings.push(`"${field.name}" is a linear GS1 DataBar (${name}), which has no separator rows; the separator height set on screen is ignored.`);
+                }
+                if (isStacked && field.rssSepHeight !== undefined && Number(field.rssSepHeight) > 2) {
+                    warnings.push(`"${field.name}" asks for separator height ${field.rssSepHeight}, which TSPL clamps to 2 (valid values are 1 or 2).`);
+                }
                 const seg = name === 'RSSEXP' ? Number(field.rssSegments ?? 0) : NaN;
                 const extras = [
                     sepHt !== undefined ? String(sepHt) : null,
@@ -370,7 +377,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
             const code39HostChecked = sym === '0' && field.code39_checkDigit === 'host-verifies';
             const type = sym === '7' ? tsplEanType(data) : (code39HostChecked ? '39C' : TSPL_BARCODE_FOR[sym]);
             if (field.code39_checkDigit === 'printer-generated' && sym === '0') {
-                // TSPL has no "printer adds the code" Code 39 type — '39C' is the
+                // TSPL has no "printer adds the code" Code 39 type â€” '39C' is the
                 // host-supplied+verified one. Plain '39' prints the data as given,
                 // so the digit the designer asked the printer to compute is not
                 // added. Named rather than silent.
@@ -387,7 +394,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
             // adds the interpretive row on top, so using it over-tallened the
             // symbol by one text row whenever the HRI was on.
             const heightDots = Math.max(1, field.h_mag || 50);
-            // TSPL's human readable is 0 none / 1 left / 2 center / 3 right —
+            // TSPL's human readable is 0 none / 1 left / 2 center / 3 right â€”
             // ALL below the bar, and there is no above at all. A design asking
             // for "above" gets it below WITH a warning: dropping it would lose
             // the digits, which is worse than moving them. TSPL is the ONE
@@ -412,7 +419,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
             const h = dots(field.height);
             const t = Math.max(1, dots(field.thickness));
             // TSPL boxes DO take a corner radius (manual p. 47), so a rounded
-            // box survives here — unlike EPL, where it had to be warned about.
+            // box survives here â€” unlike EPL, where it had to be warned about.
             const radius = field.cornerRadius ? Math.max(1, dots(field.cornerRadius)) : 0;
             lines.push(`BOX ${x},${y},${x + w},${y + h},${t}${radius ? `,${radius}` : ''}`);
             continue;
@@ -430,12 +437,12 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
 
         if (field.type === 'image') {
             // TSPL's BITMAP carries its dots as RAW BINARY bytes after the
-            // last comma (manual p. 45) — unlike DPL's `<STX>I F` and ZPL's
+            // last comma (manual p. 45) â€” unlike DPL's `<STX>I F` and ZPL's
             // `^GF`, which send the same pixels as ASCII hex. Every path this
             // app sends on is UTF-8 text (the bridge posts text/plain, the
-            // server says charset=utf-8), and UTF-8 turns any byte ≥ 0x80 into
+            // server says charset=utf-8), and UTF-8 turns any byte â‰¥ 0x80 into
             // more than one byte, so a raw-binary BITMAP would reach the
-            // printer corrupted — a logo that comes out as garbage, not an
+            // printer corrupted â€” a logo that comes out as garbage, not an
             // error. TSPL has no hex image form to fall back on, so the image
             // is NAMED rather than sent wrong.
             warnings.push(`"${field.name}" is an image, and TSPL's BITMAP sends its dots as raw binary, which the text transport to the printer would corrupt. TSPL has no hex image form, so the image was left off the label.`);
@@ -445,7 +452,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
         warnings.push(`"${field.name}" is a ${field.type}, which TSPL output does not support yet. It was left off the label.`);
     }
 
-    // PRINT copies,sets — the copies come from the printer settings, exactly as
+    // PRINT copies,sets â€” the copies come from the printer settings, exactly as
     // the ZPL generator's ^PQ and the EPL one's P do.
     lines.push(`PRINT ${Math.max(1, design.printerSettings.quantity)},1`);
     const charset = charsetWarning(design, 'tspl');

@@ -23,7 +23,7 @@
 //
 //   1. TSPL's rotation is CLOCKWISE (manual p. 77: "90: degrees, in clockwise
 //      direction"), while the IR's quadrant is counter-clockwise. The value is
-//      negated here — carrying it across unchanged would mirror every rotated
+//      negated here â€” carrying it across unchanged would mirror every rotated
 //      field.
 //   2. TSPL's escape is neither ZPL's doubling nor EPL's backslash-quote: a
 //      quote is written \[ and a literal backslash \] (manual p. 77, "please
@@ -40,12 +40,12 @@ import { buildMaxiCodeScm } from '../ipl/maxiCodeScm';
 /**
  * TSPL's resident fonts, in dots (manual pp. 77-78).
  *
- *   0  Monotype CG Triumvirate Bold Condensed — the scalable one
+ *   0  Monotype CG Triumvirate Bold Condensed â€” the scalable one
  *   1  8 x 12     4  24 x 32     7  21 x 27 OCR-B
  *   2  12 x 20    5  32 x 48     8  14 x 25 OCR-A
  *   3  16 x 24    6  14 x 19 OCR-B
  *
- * The .TTF/.EFT/.FNT names (ROMAN.TTF, 1.EFT, A.FNT …) are downloads or
+ * The .TTF/.EFT/.FNT names (ROMAN.TTF, 1.EFT, A.FNT â€¦) are downloads or
  * emulations of other languages and are reported rather than guessed at.
  */
 export const TSPL_FONT_SIZES: Record<string, { width: number; height: number }> = {
@@ -76,7 +76,7 @@ interface TsplBarcode {
     code39Mode?: string;
     /** True for '25C', whose mod-10 check digit the PRINTER appends (manual
      *  p. 13). The viewer has no encoder option for it, so it is named rather
-     *  than drawn — a plausible-looking wrong check digit is worse than none. */
+     *  than drawn â€” a plausible-looking wrong check digit is worse than none. */
     checkDigitUndrawn?: boolean;
 }
 
@@ -98,7 +98,7 @@ const TSPL_BARCODE_TYPES: Record<string, TsplBarcode> = {
     '39C': { symbology: '0', code39Mode: '2' },
     '93': { symbology: '1' },
     // EAN/UPC. The add-on variants have no separate IR encoder, so they paint
-    // as the main symbol — reported so the difference is not silent.
+    // as the main symbol â€” reported so the difference is not silent.
     EAN13: { symbology: '7', eanUpcVersion: 2 },
     'EAN13+2': { symbology: '7', eanUpcVersion: 2 },
     'EAN13+5': { symbology: '7', eanUpcVersion: 2 },
@@ -146,7 +146,7 @@ const BLOCK_ALIGN: Record<number, 'left' | 'center' | 'right'> =
  * already produces for IPL and EPL; only the TSPL names were missing.
  *
  * RSSEXP maps to the EXPANDED-STACKED variant (m1=6). The manual gives it a
- * segment width, and that is exactly the parameter m1=6 takes — the plain
+ * segment width, and that is exactly the parameter m1=6 takes â€” the plain
  * expanded form (m1=5) has no segment control at all, so resolving to 5 would
  * make the sixth parameter unwritable.
  */
@@ -162,7 +162,7 @@ const TSPL_RSS_VERSION: Record<string, string> = {
 /**
  * Commands that are printer settings or jobs, not geometry.
  *
- * Expected in a real TSPL program, and they put nothing on the label — so
+ * Expected in a real TSPL program, and they put nothing on the label â€” so
  * reporting them would drown the issues panel on every ordinary stream.
  *
  * A command belongs here only if it cannot change WHERE the ink lands.
@@ -173,12 +173,12 @@ const TSPL_RSS_VERSION: Record<string, string> = {
  * each saying what it does to the image.
  */
 const PRINTER_SETTINGS = new Set([
-    // BLINEDETECT is how the guide spells it — one D, its own command list at
+    // BLINEDETECT is how the guide spells it â€” one D, its own command list at
     // the front of "TSPL Programming Guide" (P1139068-01EN Rev A). The list
     // here carried BLINDDETECT, with two, which could NEVER match: the tokenizer
     // takes the name verbatim and the switch has no such case, so the real
     // command was reported as unrecognized while the misspelling silenced
-    // nothing. Both spellings are accepted now — firmware in the wild is known
+    // nothing. Both spellings are accepted now â€” firmware in the wild is known
     // to honour the doubled D, and neither touches the drawn image.
     'GAP', 'GAPDETECT', 'BLINEDETECT', 'BLINDDETECT', 'SPEED', 'DENSITY', 'DIRECTION',
     'CODEPAGE', 'FEED', 'BACKFEED', 'BACKUP',
@@ -186,7 +186,7 @@ const PRINTER_SETTINGS = new Set([
     'SET', 'SETPEEL', 'SETTEAR', 'SETCUTTER', 'SETAUTODUMP', 'SETCOUNTER',
     'SETRIBBON', 'SETPARTIAL_CUTTER', 'SETBACK', 'AUTOBAUD', 'KILL', 'DOWNLOAD',
     // 'ERASE' used to be here. It is in the guide's command list and it CLEARS
-    // a rectangular area of the image — the same family as IPL's LE and EPL's
+    // a rectangular area of the image â€” the same family as IPL's LE and EPL's
     // LW, both of which this project already reports rather than silences.
     // Sitting here it produced no element AND no issue, so a label whose
     // overprint had been erased previewed with the overprint still on it and
@@ -245,7 +245,7 @@ export const unescapeTspl = (s: string): string => {
  * Split TSPL source into commands, one per non-empty line.
  *
  * A command's parameters and its payload share one comma-separated list, and
- * the payload is QUOTED — so a comma inside the quotes is data, exactly as in
+ * the payload is QUOTED â€” so a comma inside the quotes is data, exactly as in
  * EPL. The quoted runs are lifted out first (replaced by placeholders) so the
  * remaining text can be split on commas without a state machine, then the
  * payloads are put back in order.
@@ -260,8 +260,8 @@ export const tokenizeTspl = (source: string): TsplCommand[] => {
         // Two separate passes, and the order matters. A scan finds where each
         // quoted run ENDS, working on the RAW text where the only special thing
         // is the backslash pair that keeps a quote inside the data. Only then
-        // is the payload unescaped. Doing it in one pass — unescaping while
-        // still looking for the closing quote — cannot work: \[ turns into a
+        // is the payload unescaped. Doing it in one pass â€” unescaping while
+        // still looking for the closing quote â€” cannot work: \[ turns into a
         // real ", which is indistinguishable from the delimiter and truncates
         // the field (that bug produced `say "hi\` for `say \[hi\]`).
         const quoted: string[] = [];
@@ -291,10 +291,10 @@ export const tokenizeTspl = (source: string): TsplCommand[] => {
             params += ch;
             i++;
         }
-        // The command name is the leading token, up to the first whitespace —
+        // The command name is the leading token, up to the first whitespace â€”
         // NOT a run of letters. TSPL names may contain digits (`PDF417`), so a
         // letters-only rule read that line as a command called "PDF" with a
-        // parameter "417 10,10,…" and drew nothing. Every TSPL command in the
+        // parameter "417 10,10,â€¦" and drew nothing. Every TSPL command in the
         // manual is written with a space before its parameters, which is what
         // makes "up to the first space" the right rule here (EPL needs the
         // opposite, because its names never carry digits).
@@ -306,7 +306,7 @@ export const tokenizeTspl = (source: string): TsplCommand[] => {
         // SETPARTIAL_CUTTER, so that name was meant to be recognized and
         // silently ignored like its SET* neighbours. Without it the name failed
         // this test and was reported as "not a command this parser recognizes"
-        // — the opposite of the stated intent, and inconsistent with the very
+        // â€” the opposite of the stated intent, and inconsistent with the very
         // list that names it.
         if (name === '' || !/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) {
             out.push({ name: '', params: '', quoted, raw: line });
@@ -371,7 +371,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
     const settings: ViewerLabel['settings'] = {};
     let nextId = 1;
     // SIZE/GAP are printer settings, but they are also what tells the viewer
-    // how big the label is — without them the preview has no canvas.
+    // how big the label is â€” without them the preview has no canvas.
     let widthDots: number | null = null;
     let heightDots: number | null = null;
     const dpi = 203;   // TSPL states its 200-dpi dot math; the viewer labels it.
@@ -414,7 +414,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
         switch (cmd.name) {
             case 'SIZE': {
                 // SIZE <width>,<height> (manual p. 1). The manual's own example
-                // writes "SIZE 50 mm,25 mm" — a SPACE before the unit.
+                // writes "SIZE 50 mm,25 mm" â€” a SPACE before the unit.
                 widthDots = lengthToDots(p[0], dpi) || widthDots;
                 heightDots = lengthToDots(p[1], dpi) || heightDots;
                 break;
@@ -431,7 +431,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 // makes the quoted-payload handling load-bearing here.
                 //
                 // Positions are read straight off `p`, which already has the
-                // quoted runs put back where they were — so p[2] IS the font
+                // quoted runs put back where they were â€” so p[2] IS the font
                 // and p[3] IS the rotation. An earlier version filtered the
                 // quoted values out and then indexed the remainder, which
                 // forgot that x and y are in the list too: the rotation was
@@ -444,14 +444,14 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 const fontName = (p[2] ?? '').trim();
                 // The content is the LAST parameter, not p[6]: an optional
                 // alignment may precede it, and reading a fixed index took the
-                // alignment as the content — `TEXT 10,10,"2",0,1,1,1,"HELLO"`
+                // alignment as the content â€” `TEXT 10,10,"2",0,1,1,1,"HELLO"`
                 // printed "1" and lost "HELLO" without a word. BARCODE, QRCODE
                 // and PDF417 all read the last parameter for this reason; TEXT
                 // was the only one that did not.
                 const content = p[p.length - 1] ?? '';
                 // Anything between the multipliers and the content is the
                 // alignment: 0 left, 1 center, 2 right. The renderer has no
-                // slot for it, so it is named rather than dropped — the text
+                // slot for it, so it is named rather than dropped â€” the text
                 // still prints, just from its own left edge.
                 const rawAlign = p.length > 7 ? p[6] : '';
                 const align = rawAlign === '' ? NaN : Math.trunc(num(rawAlign, NaN));
@@ -490,7 +490,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
             }
 
             case 'BAR': {
-                // BAR x,y,width,height (manual p. 37) — a filled bar.
+                // BAR x,y,width,height (manual p. 37) â€” a filled bar.
                 if (p.length < 4) { issue('warning', 'tspl-bar-params', `BAR needs x,y,width,height. Found ${p.length}. Skipped.`, 'BAR'); break; }
                 const w = Math.max(1, Math.trunc(num(p[2], 1)));
                 const h = Math.max(1, Math.trunc(num(p[3], 1)));
@@ -538,7 +538,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 if (mapped.checkDigitUndrawn) {
                     // '25C' makes the printer append a mod-10 check digit; this
                     // viewer draws the field's data without it. Named, not
-                    // silently dropped — the same call IPL c2,m1 and EPL 2C make.
+                    // silently dropped â€” the same call IPL c2,m1 and EPL 2C make.
                     issue('info', 'tspl-i2of5-check-digit',
                         `Barcode type "${type}" is Interleaved 2 of 5 with a mod-10 check digit the printer appends (TSPL manual p. 13); this preview draws the field's data without it.`, 'BARCODE');
                 }
@@ -565,14 +565,14 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     symbology: mapped.symbology,
                     heightDots, moduleDots: narrow,
                     // TSPL's human readable is 0 none / 1 left / 2 center /
-                    // 3 right, ALL below the bar — the IR's 1 means "below",
+                    // 3 right, ALL below the bar â€” the IR's 1 means "below",
                     // and there is no above in TSPL at all.
                     //
                     // The 2 and 3 are horizontal ALIGNMENTS of the line, and
                     // the IR has no slot for them: hri is just none/below/above.
                     // Collapsing them to 1 drew the digits from the symbol's
                     // left edge with no word about it, so the difference is
-                    // named instead. Nothing is lost about WHERE the line is —
+                    // named instead. Nothing is lost about WHERE the line is â€”
                     // only its alignment across the symbol.
                     hri: hriMode === 0 ? 0 : 1,
                     ratio: wide / narrow <= 2.2 ? 2 : wide / narrow < 2.8 ? 0 : 1,
@@ -585,13 +585,13 @@ export const parseTSPL = (code: string): ViewerLabel => {
             }
 
             case 'ERASE': {
-                // ERASE x,y,width,height — clears a rectangular area of the
+                // ERASE x,y,width,height â€” clears a rectangular area of the
                 // image. This preview paints elements in order onto a white
                 // sheet and has no way to clear a region afterwards, so drawing
                 // it would be a different label: whatever it was meant to
                 // remove would still be there. Reported as a warning, not the
                 // generic info, because the label is visibly wrong rather than
-                // merely missing a feature — the same call this project made
+                // merely missing a feature â€” the same call this project made
                 // for IPL's LE and EPL's LW.
                 if (p.length < 4) {
                     issue('warning', 'tspl-erase-params', `ERASE needs x,y,width,height. Found ${p.length}. Skipped.`, 'ERASE');
@@ -643,7 +643,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 // p4 is the mode: A = automatic, M = manual (it then takes
                 // character/data/codeword counts and an optional mask). The
                 // encoder here picks the encoding itself, so M is reported
-                // rather than carried — the symbol's content is what the
+                // rather than carried â€” the symbol's content is what the
                 // stream asked for either way, but the module STREAM can
                 // differ, and a mask the user asked for is not applied.
                 const mode = (p[4] ?? '').trim().toUpperCase();
@@ -655,8 +655,8 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 // manual and its members are letter-prefixed:
                 //
                 //   [justification]  J1-J9, placement only
-                //   [model]          M1 original, M2 enhanced — DIFFERENT SYMBOL
-                //   [mask]           S0-S8, default S7 — DIFFERENT PATTERN
+                //   [model]          M1 original, M2 enhanced â€” DIFFERENT SYMBOL
+                //   [mask]           S0-S8, default S7 â€” DIFFERENT PATTERN
                 //   [area]           Xn, maximum barcode area in dots
                 //
                 // M1/M2 and S0-S8 both change what is encoded, and none of it
@@ -694,7 +694,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 };
                 if (model === '1') {
                     // M1 is the original QR model and no encoder here produces
-                    // it — the same limitation IPL's c18,m1 documents. Saying so
+                    // it â€” the same limitation IPL's c18,m1 documents. Saying so
                     // is the point: passing M1 through silently would draw a
                     // model-2 symbol under a stream asking for model 1.
                     issue('info', 'tspl-qr-model1',
@@ -742,7 +742,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 const rotation = quadrantFromClockwise(p[5]);
                 const xmul = Math.max(1, Math.trunc(num(p[6], 1) || 1));
                 const ymul = Math.max(1, Math.trunc(num(p[7], 1) || 1));
-                // The optional tail is [space,] [align,] [fit,] — it sits in
+                // The optional tail is [space,] [align,] [fit,] â€” it sits in
                 // FIXED POSITIONS 9, 10 and 11, and can only be omitted from
                 // the END (you cannot write `fit` without `space` and `align`).
                 // So the slots are read positionally with their documented
@@ -774,7 +774,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     boxHeightDots: Math.max(1, Math.trunc(num(p[3], 20))),
                     ...(spaceDots !== undefined ? { spaceDots } : {}),
                     // BLOCK numbers the alignments 0/1 left, 2 centre, 3 right
-                    // (manual p. 80) — NOT the 0 left, 1 centre, 2 right its own
+                    // (manual p. 80) â€” NOT the 0 left, 1 centre, 2 right its own
                     // TEXT command uses. Carried as a NAME so the two cannot be
                     // confused for one another.
                     ...(align !== undefined ? { align: BLOCK_ALIGN[align] } : {}),
@@ -834,7 +834,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 // ELLIPSE x,y,width,height,thickness (p. 49)
                 // Both give the UPPER-LEFT corner of the bounding box, not the
                 // centre, which is the one thing about them that is easy to get
-                // backwards — the manual says "x-coordinate of upper left
+                // backwards â€” the manual says "x-coordinate of upper left
                 // corner" for both.
                 const isCircle = cmd.name === 'CIRCLE';
                 if (p.length < 4) {
@@ -859,8 +859,8 @@ export const parseTSPL = (code: string): ViewerLabel => {
             case 'AZTEC': {
                 // AZTEC x,y,rotate,[size,]ecp,]flg,]menu,]multi,]rev,] "content"
                 // (TSC manual p. 59). Every parameter after the rotation is
-                // OPTIONAL and its meaning is POSITIONAL — the manual's own
-                // example is `AZTEC 10,10,0,"ABCD…"` with none of them.
+                // OPTIONAL and its meaning is POSITIONAL â€” the manual's own
+                // example is `AZTEC 10,10,0,"ABCDâ€¦"` with none of them.
                 //
                 // `ecp` is not a preference: it selects the symbol FORMAT
                 // (compact / full-range / rune) as well as the correction
@@ -896,7 +896,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     ...(ecp !== undefined ? { aztecEcp: ecp } : {}),
                 } as BarcodeElement));
                 if (azOpts[2] !== undefined && azOpts[2] !== '' && azOpts[2] !== '0') {
-                    // "1: input uses <Esc>n for FLG(n), <Esc><Esc> for <Esc>" —
+                    // "1: input uses <Esc>n for FLG(n), <Esc><Esc> for <Esc>" â€”
                     // it changes how the DATA is unescaped, not the symbol.
                     issue('info', 'tspl-aztec-flg',
                         'AZTEC flg=1 makes the printer read "<Esc>n" sequences in the data (FLG(n) / literal <Esc>); this preview decodes the content as written.', 'AZTEC');
@@ -928,7 +928,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
             case 'CODABLOCK': {
                 // CODABLOCK x,y,rotation,[row height,]module width,]"content"
                 // (TSC manual p. 50). Row height defaults to 8 and module width
-                // to 2, and the printed row height is their PRODUCT — so the
+                // to 2, and the printed row height is their PRODUCT â€” so the
                 // two are not interchangeable and both are kept.
                 if (p.length < 4) {
                     issue('warning', 'tspl-codablock-params', `CODABLOCK needs x,y,rotation,"content". Found ${p.length}. Skipped.`, 'CODABLOCK');
@@ -966,7 +966,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 //
                 // This command was reported as "not part of the supported TSPL
                 // subset" even though services/ipl/barcodes.ts has encoded the
-                // IR's '20' as databar for every other language all along — the
+                // IR's '20' as databar for every other language all along â€” the
                 // same shape as DMATRIX and MAXICODE. What was missing was only
                 // the name table, so the symbol was left off the label under a
                 // message implying the language could not draw it.
@@ -982,7 +982,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 const sym = (p[2] ?? '').trim().toUpperCase();
                 const content = p[p.length - 1] ?? '';
                 const pixMult = Math.max(1, Math.min(10, Math.trunc(num(p[4], 2) || 2)));
-                const sepHt = Math.max(1, Math.min(2, Math.trunc(num(p[5], 1) || 1)));
+                const sepHt = p.length > 6 ? Math.max(1, Math.min(2, Math.trunc(num(p[5], 1) || 1))) : undefined;
                 // The 6th slot means a different thing per variant (manual p. 71):
                 // segment width for RSSEXP, linear height for the composites,
                 // absent otherwise. Content is always the LAST parameter, so the
@@ -996,7 +996,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     source: { type: 'fixed' as const, data: content },
                 };
                 // The manual gives a printer-computed bar height per type
-                // ("RSS14 33 x pixMult", "RSSLIM 13 x pixMult", …), stored in
+                // ("RSS14 33 x pixMult", "RSSLIM 13 x pixMult", â€¦), stored in
                 // dots so the preview draws the documented size.
                 const heights: Record<string, number> = {
                     RSS14: 33, RSS14T: 13, RSS14S: 13, RSS14SO: 33, RSSLIM: 13, RSSEXP: 33,
@@ -1012,7 +1012,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                         rssVersion: irVersion,
                         // sepHt is the separator row of the STACKED variants;
                         // the encoder takes it only for those (see barcodes.ts).
-                        ...(sym === 'RSS14S' || sym === 'RSS14SO' ? { rssSepHeight: String(sepHt) } : {}),
+                        ...(sepHt !== undefined && (sym === 'RSS14S' || sym === 'RSS14SO' || sym === 'RSSEXP') ? { rssSepHeight: String(sepHt) } : {}),
                         // RSSEXP's sixth parameter is the segment width, and the
                         // encoder takes it only for the expanded-stacked variant
                         // (m1=6), which is the one this preview draws.
@@ -1047,7 +1047,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
             }
 
             case 'MPDF417': {
-                // MPDF417 x,y,rotate,[Wn,][Hn,][Cn,]"content" — the TSC
+                // MPDF417 x,y,rotate,[Wn,][Hn,][Cn,]"content" â€” the TSC
                 // manual's own syntax. It is NOT the PDF417 box: there is no
                 // positional width or height, and W/H are letter-prefixed
                 // module dimensions (defaults 1 and 10).
@@ -1055,7 +1055,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 // Reading it as PDF417 put the WIDTH where the rotation
                 // belongs, so MPDF417 10,10,100,50,0,"DATA" came out rotated
                 // 100 quadrants. The round trip did not catch it because the
-                // generator wrote the same wrong shape back — two sides agreeing
+                // generator wrote the same wrong shape back â€” two sides agreeing
                 // on a reading the manual does not support.
                 if (p.length < 3) {
                     issue('warning', 'tspl-mpdf417-params', `MPDF417 needs x,y,rotate. Found ${p.length}. Skipped.`, 'MPDF417');
@@ -1100,7 +1100,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     hri: 0,
                     source: { type: 'fixed', data: content },
                     // Cn is "number of columns ... 0: Automode, 1-4 the column
-                    // count", the same 0-4 domain as IPL's c19,m1 — and the IR
+                    // count", the same 0-4 domain as IPL's c19,m1 â€” and the IR
                     // already carries it for that command. Cn was the one
                     // member of this command's option block still unread, so a
                     // stream fixing the column count got an auto-sized symbol.
@@ -1146,8 +1146,8 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     const hit = opts.find(s => s.startsWith(letter));
                     return hit ? hit.slice(1) : undefined;
                 };
-                // W and H override the positional width/height. Their ranges —
-                // W is 2-9 and H is 4-99 — bound the OPTION only: the manual
+                // W and H override the positional width/height. Their ranges â€”
+                // W is 2-9 and H is 4-99 â€” bound the OPTION only: the manual
                 // gives those numbers for the letter-prefixed values, while the
                 // positional height is a plain dot count with no such ceiling.
                 // Clamping the positional value would silently shrink any
@@ -1194,7 +1194,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
             }
 
             case 'PRINT': {
-                // PRINT copies[,sets] (manual p. 24) — a job concern, but the
+                // PRINT copies[,sets] (manual p. 24) â€” a job concern, but the
                 // viewer reads it so a preview can say how many labels.
                 settings.quantity = Math.max(1, Math.trunc(num(p[0], 1)));
                 break;
@@ -1205,7 +1205,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 // manual p. 54). Modes 2 and 3 are Structured Carrier Messages:
                 // the class, country and postal code are SEPARATE PARAMETERS
                 // and the manual spells the postal code for mode 2 as
-                // "06810,7317" — a comma inside the field, which the parameter
+                // "06810,7317" â€” a comma inside the field, which the parameter
                 // splitter therefore cuts into two. They are reassembled here
                 // into the AIM SCM the encoder needs, because a bare payload
                 // under those modes makes it throw and the symbol would vanish.
@@ -1281,7 +1281,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 // "DMATRIX 10,110,400,400,"DMATRIX EXAMPLE 1"") is the common
                 // one. The bracketed options are the manual's own terse list:
                 //
-                //   c#  escape control char (how the DATA is escaped — NOT a
+                //   c#  escape control char (how the DATA is escaped â€” NOT a
                 //       symbol property, so it is REPORTED, not guessed)
                 //   x#  module size in dots
                 //   r#  rotation 0/90/180/270 (clockwise, like every TSPL command)
@@ -1338,7 +1338,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 // Named, not silenced. Their neighbours in the settings list are
                 // sensor and job settings; these four sit in the same family as
                 // DIRECTION, which this parser already warns about for exactly
-                // this reason — a command that changes WHERE the image lands.
+                // this reason â€” a command that changes WHERE the image lands.
                 // Leaving them silent while warning about DIRECTION was an
                 // inconsistency in this file, not a judgement about them.
                 //
@@ -1351,7 +1351,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 // in this file is not in the repo, so the precise mechanic of
                 // each command is stated as the reason to look, not as a
                 // measured result. What IS verified is that this preview does
-                // not apply them — so if they move the image, the preview is
+                // not apply them â€” so if they move the image, the preview is
                 // wrong, and this line is the only thing that says so.
                 //
                 // Keyed on the values, not the command: a stream of many labels
@@ -1370,18 +1370,18 @@ export const parseTSPL = (code: string): ViewerLabel => {
 
             case 'DIRECTION':
                 // 0 or 1: whether the label is laid out sideways. The IR has no
-                // slot for it, and guessing would move every field — say so.
+                // slot for it, and guessing would move every field â€” say so.
                 once('direction', 'info', 'tspl-direction',
-                    'DIRECTION rotates the whole label by 90°. This viewer draws the label as laid out, so the preview is turned compared with the print.', 'DIRECTION');
+                    'DIRECTION rotates the whole label by 90Â°. This viewer draws the label as laid out, so the preview is turned compared with the print.', 'DIRECTION');
                 break;
 
             case 'CODEPAGE': {
                 // CODEPAGE n selects the international character set (manual
-                // p. 17) — the same byte means a different glyph under each
-                // (0xE4 is 'ä' in Windows-1252, a box-drawing glyph in 437).
+                // p. 17) â€” the same byte means a different glyph under each
+                // (0xE4 is 'Ã¤' in Windows-1252, a box-drawing glyph in 437).
                 // The viewer decodes high bytes as Latin-1, so it draws the
                 // wrong character for any page other than a Latin-1-compatible
-                // one — silent until now, because CODEPAGE sat in
+                // one â€” silent until now, because CODEPAGE sat in
                 // PRINTER_SETTINGS with the sensor settings.
                 const n = (p[0] ?? '').trim().toUpperCase();
                 const latin1ish = n === '' || n === '1252' || n === '8859-1' || n === 'LATIN1' || n === 'LATIN 1';
@@ -1396,19 +1396,19 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 // BITMAP x,y,width,height,mode,<bitmap data> (TSC manual p. 45):
                 //   width  = image width IN BYTES  (so * 8 gives the dots)
                 //   height = image height IN DOTS  (the row count)
-                //   mode   = 0 OVERWRITE / 1 OR / 2 XOR — a compositing mode,
+                //   mode   = 0 OVERWRITE / 1 OR / 2 XOR â€” a compositing mode,
                 //            which this viewer does not model; the ink is drawn.
                 // The data is RAW BINARY, one byte per 8 dots, MSB (bit 7)
                 // leftmost and top row first. The manual's own hex dump (p. 46)
                 // is `00 00 00 00 00 07 FF 03 FF ...` and the 16 rows it lists
-                // read left-to-right from the high bit — the exact shape the
+                // read left-to-right from the high bit â€” the exact shape the
                 // renderer's `graphic` element already reads for ZPL's ^GF.
                 //
                 // This REPLACED a claim that was false: "the tokenizer reads
                 // parameters, not binary tails, so the bitmap is not captured."
-                // tokenizeTspl keeps the whole line up to the newline — the
+                // tokenizeTspl keeps the whole line up to the newline â€” the
                 // binary tail never goes through the quote/comment logic the
-                // message blamed — so the bytes were present all along and the
+                // message blamed â€” so the bytes were present all along and the
                 // parser simply never read them (PUTBMP, below, is the one that
                 // is genuinely a file name).
                 const wBytes = Math.max(0, Math.trunc(num(p[2], 0)));
@@ -1419,7 +1419,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 }
                 // The tail is read from the RAW line, not from splitParams:
                 // splitParams cut the payload on every comma, and a bitmap byte
-                // CAN be 0x2C — rejoining would be lossy for that byte and the
+                // CAN be 0x2C â€” rejoining would be lossy for that byte and the
                 // ';'/'"' handling would have mangled the run before we saw it.
                 // The raw line holds the bytes exactly as sent. Skip the name
                 // and the five parameters (the sixth comma field is the data).
@@ -1451,7 +1451,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 // Each of these says WHAT the command is and WHY it cannot be
                 // drawn. A generic "not part of the supported subset" reads as
                 // "this app chose not to", which was wrong for DMATRIX,
-                // MAXICODE, RSS, AZTEC and CODABLOCK in turn — every one of
+                // MAXICODE, RSS, AZTEC and CODABLOCK in turn â€” every one of
                 // them turned out to be drawable. The remaining ones are
                 // genuinely outside what a stream can express here.
                 if (cmd.name === 'PUTBMP' || cmd.name === 'PUTPCX') {
@@ -1459,7 +1459,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                         `${cmd.name} tells the printer to load an image FILE by name from its own storage (manual pp. 61-63). The file is not in the stream, so there is nothing to draw.`, cmd.name);
                 } else if (cmd.name === 'TLC39') {
                     issue('info', 'tspl-tlc39-unsupported',
-                        'TLC39 is a composite symbol — Code 39 carrying a MicroPDF417 (manual p. 44) — and no encoder here produces that pairing, so it is not drawn.', 'TLC39');
+                        'TLC39 is a composite symbol â€” Code 39 carrying a MicroPDF417 (manual p. 44) â€” and no encoder here produces that pairing, so it is not drawn.', 'TLC39');
                 } else {
                     issue('info', 'tspl-unsupported', `${cmd.name} is not part of the supported TSPL subset, so it has no effect here.`, cmd.name);
                 }
