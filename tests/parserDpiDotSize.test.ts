@@ -25,17 +25,17 @@ const crossDots = (el: unknown, dpi: number): number => estimateElementSize(el a
 
 describe('a declared dot size draws the same at 203, 300 and 406 dpi', () => {
     // ZPL: ^A0N,50,50 declares a 50-dot-tall field.
-    const zpl = (dpi: number) =>
+    const zpl = (dpi: 203 | 300 | 406) =>
         crossDots(parseZPL('^XA^PW800^LL520^FO50,50^A0N,50,50^FDtext^FS^XZ', dpi).elements[0], dpi);
 
     // IPL: c25 h17 declares a 17-dot base height (no k, so h drives the size).
-    const ipl = (dpi: number) => {
+    const ipl = (dpi: 203 | 300 | 406) => {
         const code = '<STX><ESC>P<ETX><STX>E1;F1<ETX><STX>H0;o10,10;c25;h17;w17;d3,HELLO<ETX><STX>R<ETX>';
         return crossDots(parseViewerIPL(code, { dpi }).elements[0], dpi);
     };
 
     // DPL: font 9 with a four-digit height field, in DOTS (0040 = 40).
-    const dpl = (dpi: number) => {
+    const dpl = (dpi: 203 | 300 | 406) => {
         const rec = `1911S000020` + '0200' + '0040' + '0040' + 'Text';
         return crossDots(parseDPL(`\x02L\r${rec}\rE\r`, 406, new Date(), dpi).elements[0], dpi);
     };
@@ -68,7 +68,7 @@ describe('a declared dot size draws the same at 203, 300 and 406 dpi', () => {
     it('does not touch a BITMAP field, which is already in dots', () => {
         // The control: c2 is a bitmap cell, so h17 is magnification-like dots and
         // the render ignores pointSize — identical at every dpi, before and after.
-        const bitmap = (dpi: number) => {
+        const bitmap = (dpi: 203 | 300 | 406) => {
             const code = '<STX><ESC>P<ETX><STX>E1;F1<ETX><STX>H0;o10,10;c2;h3;w3;d3,HELLO<ETX><STX>R<ETX>';
             return crossDots(parseViewerIPL(code, { dpi }).elements[0], dpi);
         };

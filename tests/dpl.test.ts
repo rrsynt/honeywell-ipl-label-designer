@@ -1762,3 +1762,44 @@ describe('a DPL font-9 dot size draws the same at any dpi', () => {
         expect(crossDots(406)).toBeLessThan(crossDots(203) * 1.25);
     });
 });
+
+// The bar height a design asks for (`h_mag`, in DOTS) must survive the export:
+// DPL states it in `eee` as hundredths of an inch, and the parser reads that
+// back as a dot count. The generator divided by 25.4 instead of multiplying, so
+// every bar code came out ~3.94x too tall — and the round-trip test above never
+// looked at the height, which is why it went unnoticed.
+// The bar height a design asks for (`h_mag`, in DOTS) must survive the export:
+// DPL states it in `eee` as hundredths of an inch, and the parser reads that
+// back as a dot count. The generator divided by 25.4 instead of multiplying, so
+// every bar code came out ~3.94x too tall — and the round-trip test above never
+// looked at the height, which is why it went unnoticed.
+describe('a DPL bar code keeps the height the design asked for', () => {
+    const withDpi = (dpi: 203 | 300, over: Record<string, unknown>): Design => {
+        const d = design([barcodeField(over)]);
+        (d.printerSettings as { dpi: number }).dpi = dpi;
+        return d;
+    };
+    /** eee is characters 4-6: rot(1) letter(1) c(1) d(1), then eee. */
+    const eeeOf = (d: Design): string => {
+        const { dpl } = generateDPL(d);
+        return dpl.split('\r').find(l => /^\d/.test(l))!.slice(4, 7);
+    };
+
+    it('writes eee in hundredths of an inch and reads the dot height back', () => {
+        for (const dpi of [203, 300] as const) {
+            for (const hMag of [50, 120]) {
+                const d = withDpi(dpi, { h_mag: hMag });
+                const bc = parseDPL(generateDPL(d).dpl, PAGE, new Date(), dpi)
+                    .elements.find(e => e.kind === 'barcode') as { heightDots?: number };
+                expect(bc.heightDots, `h_mag ${hMag} at ${dpi} dpi`).toBeCloseTo(hMag, -1);
+            }
+        }
+    });
+
+    it('a 0.40 in bar is eee=040 on every dpi, since the inch is physical', () => {
+        // 0.40 in is 81 dots at 203 dpi and 120 at 300; the RECORD is the same
+        // because DPL measures in inches, not dots.
+        expect(eeeOf(withDpi(203, { h_mag: Math.round(0.4 * 203) }))).toBe('040');
+        expect(eeeOf(withDpi(300, { h_mag: Math.round(0.4 * 300) }))).toBe('040');
+    });
+});

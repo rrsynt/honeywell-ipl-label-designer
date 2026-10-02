@@ -274,8 +274,16 @@ export const generateDPL = (design: Design): DplGenerateResult => {
                 continue;
             }
             if (bf.warning) warnings.push(`"${field.name}": ${bf.warning}`);
-            // eee is the symbol height, also in hundredths of an inch.
-            const heightUnits = Math.max(1, Math.min(999, Math.round((field.h_mag / dpi / 25.4) * 100 * 100) || 40));
+            // eee is the symbol height, in hundredths of an inch. `h_mag` is the
+            // bar height in DOTS (the designer draws `h_mag * dotSizePx`, and
+            // EPL/TSPL emit it straight as a dot height), so the conversion is
+            // dots -> inches -> hundredths: `h_mag / dpi * 100`. This divided by
+            // 25.4 instead of multiplying, so every bar code exported ~3.94x too
+            // tall — measured, a 50-dot (0.25 in) bar wrote `eee=097` and read
+            // back as 197 dots. The parser inverts it as `units / 100 * dpi`, so
+            // a physical height now round-trips at ANY dpi: 0.40 in is `040` on
+            // both a 203 and a 300 dpi machine.
+            const heightUnits = Math.max(1, Math.min(999, Math.round((field.h_mag / dpi) * 100) || 40));
             // c is the wide bar, d the narrow bar; for module-based codes the
             // manual requires them to match.
             const narrow = dplMultiplier(Math.max(1, field.w_mag));
