@@ -9,7 +9,7 @@
 
 import type { Design, Field, TextField, BarcodeField, PolygonField, TriangleField } from '../../types';
 import { DPI_MAP, FONT_MAP } from '../../constants';
-import { getObjectBoundingBox, shiftForTextAlign } from '../geometry';
+import { getObjectBoundingBox, shiftForTextAlign, printableFields } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
 import { dplMultiplier, clampDplMultiplier, fitDplBitmapFont, DESIGN_OCR_FONT, DPL_FONTS, type DplBitmapFit } from './dplFonts';
@@ -194,7 +194,7 @@ export const generateDPL = (design: Design): DplGenerateResult => {
     const imageName = new Map<number, string>();
     const imageSkipReason = new Map<number, string>();
     let imageSeq = 0;
-    for (const field of design.fields) {
+    for (const field of printableFields(design)) {
         if (field.type !== 'image') continue;
         const rows = field.bitmap;
         if (rows.length === 0 || !rows[0]) {
@@ -236,7 +236,7 @@ export const generateDPL = (design: Design): DplGenerateResult => {
     // label-level ones; D11 is the dot-size multiplier every example uses.
     lines.push(`D11`);
 
-    for (const field of design.fields) {
+    for (const field of printableFields(design)) {
         const box = getObjectBoundingBox(field, design);
         // A text block's `align` has no DPL parameter — the printer only moves
         // an origin — so a centre/right block starts further back along its own

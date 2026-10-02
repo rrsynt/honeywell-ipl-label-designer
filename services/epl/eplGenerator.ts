@@ -15,7 +15,7 @@
 
 import type { Design, Field, TextField, BarcodeField } from '../../types';
 import { DPI_MAP } from '../../constants';
-import { getObjectBoundingBox, shiftForTextAlign } from '../geometry';
+import { getObjectBoundingBox, shiftForTextAlign, printableFields } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
 import { parseMaxiCodeScm } from '../ipl/maxiCodeScm';
@@ -139,7 +139,7 @@ export const generateEPL = (design: Design): EplGenerateResult => {
     lines.push(`q${dots(landscape ? height : width)}`);
     lines.push(`Q${dots(landscape ? width : height)},${Math.max(0, Math.round((design.printerSettings.mediaSenseMode === 'continuous' ? 0 : 3)))}`);
 
-    for (const field of design.fields) {
+    for (const field of printableFields(design)) {
         const box = getObjectBoundingBox(field, design);
         // A text block's `align` has no EPL parameter — the printer only moves
         // origins — so a centre/right block starts further back along its text

@@ -39,6 +39,16 @@ const getFieldData = (field: TextField | BarcodeField, design: Design): string =
 
 
 /**
+ * The fields a generator should print: `visible: false` means "hidden on the
+ * canvas AND not printed" — the designer draws nothing for it, the IPL
+ * generator filters it out (`visibleFields`), and csvJob's export path skips
+ * it. ZPL/EPL/TSPl/DPL iterated `design.fields` directly, so a hidden field
+ * still reached their streams while the screen and the IPL tab showed it gone.
+ */
+export const printableFields = (design: Design): Field[] =>
+    design.fields.filter(f => f.visible !== false);
+
+/**
  * The horizontal shift, in the field's own text direction (dots), that a text
  * block's `align` bakes into its origin — the same rule the designer canvas
  * draws (`blockX = −W/2 / −W`) and IPL already bakes into the print origin.
