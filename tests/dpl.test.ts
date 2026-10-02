@@ -1874,3 +1874,21 @@ describe('DPL generator maps the design font to a resident face', () => {
         expect(Math.abs((FONT_MAP[el.font]?.baseHeight ?? 0) - 9)).toBeLessThanOrEqual(2);
     });
 });
+
+// A box's `cornerRadius` is drawn on the canvas (canvasDrawer roundRect) and
+// IPL rasterizes it, ZPL writes ^GB's rounding and TSPL has BOX's radius slot.
+// DPL's box record is Bhhhvvvbbbsss — width, height and two edge thicknesses,
+// with NO radius field (manual BOX***/BOX****) — so a rounded box printed
+// square, silently. EPL already warned for its own box; DPL now does too.
+describe('DPL warns when a rounded box cannot be drawn', () => {
+    const boxField = (over: Record<string, unknown> = {}) => ({
+        id: 1, type: 'box' as const, name: 'X', x: 5, y: 5, rotation: 0 as const,
+        width: 20, height: 10, thickness: 2, ...over,
+    });
+    it('names the field, and stays quiet for a square box', () => {
+        expect(generateDPL(design([boxField()])).warnings).toEqual([]);
+        const rounded = generateDPL(design([boxField({ cornerRadius: 3 })]));
+        expect(rounded.warnings.join(' ')).toMatch(/rounded corners/);
+        expect(rounded.warnings.join(' ')).toContain('X');
+    });
+});

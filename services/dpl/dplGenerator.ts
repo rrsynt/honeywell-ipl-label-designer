@@ -345,6 +345,16 @@ export const generateDPL = (design: Design): DplGenerateResult => {
             const w = Math.round((field.width / 25.4) * 100);
             const h = Math.round((field.height / 25.4) * 100);
             const t = Math.max(1, Math.round((field.thickness / 25.4) * 100));
+            // DPL's box record is the three fields below — width, height and,
+            // for each axis, an EDGE THICKNESS. The manual's BOX***/BOX****
+            // both list only those ("bbb = thickness of bottom and top box
+            // edges; sss = thickness of box sides"), so there is no corner
+            // radius to write. The canvas draws one anyway, so a rounded box
+            // would print square with no word about it — the same case EPL
+            // warns for.
+            if (field.cornerRadius) {
+                warnings.push(`"${field.name}" has rounded corners, which DPL's box record cannot draw. It prints as a square box.`);
+            }
             // "BOX***: Bhhhvvvbbbsss" — width, height, top/bottom thickness,
             // side thickness, all three digits.
             const obj = `B${String(w).padStart(3, '0')}${String(h).padStart(3, '0')}${String(t).padStart(3, '0')}${String(t).padStart(3, '0')}`;
