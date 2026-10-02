@@ -234,7 +234,21 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                     // have rotated the symbol by 150 degrees.
                     const w = Math.max(1, Math.round(field.w_mag ?? 1));
                     const h = Math.max(1, Math.round(field.h_mag ?? 10));
-                    lines.push(`MPDF417 ${x},${y},${rotation},W${w},H${h},"${escapeTsplData(data)}"`);
+                    // Cn is the COLUMN COUNT — the third optional member, domain
+                    // 0-4 with 0 = automatic (TSC guide p. 60) — and the parser
+                    // reads it back into `microColumns` (the designer's "Data
+                    // Columns"). The generator wrote only Wn and Hn, so a fixed
+                    // column count was silently dropped and the printer chose.
+                    // A value outside 0-4 is not a column count, so it is left
+                    // off and named rather than handed to an encoder that would
+                    // refuse the symbol (the same rule the parser applies).
+                    const cols = field.microColumns;
+                    const useCols = cols !== undefined && cols >= 0 && cols <= 4;
+                    if (cols !== undefined && !useCols) {
+                        warnings.push(`"${field.name}" asks for ${cols} MicroPDF417 data columns, which is outside the printer's 0-4 range (0 = automatic). The printer chooses the column count.`);
+                    }
+                    const cPart = useCols ? `,C${Math.round(cols)}` : '';
+                    lines.push(`MPDF417 ${x},${y},${rotation},W${w},H${h}${cPart},"${escapeTsplData(data)}"`);
                 } else if (cmd === 'DMATRIX') {
                     // DMATRIX x,y,width,height,[x#,r#][,a#],"content" (TSC
                     // manual p. 51). Positional width/height are the barcode

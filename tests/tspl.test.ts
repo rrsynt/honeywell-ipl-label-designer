@@ -910,6 +910,38 @@ describe('MicroPDF417 works in TSPL (2026-09-30)', () => {
         }
     });
 
+    it('carries a MicroPDF417 COLUMN COUNT — Cn was written by nobody and read by the parser', () => {
+        // MPDF417 x,y,rotate,[Wn,][Hn,][Cn,]content (TSC guide p. 60). The
+        // generator wrote Wn and Hn but never Cn, so the designer's "Data
+        // Columns" (microColumns) was dropped while the PARSER already read Cn
+        // back into that same key — a round-trip that changed the design.
+        const design = (cols?: number): Design => ({
+            name: 'T', labelSettings: { width: 100, height: 50, columns: 1, rows: 1, unit: 'mm', orientation: 'portrait' },
+            printerSettings: { model: 'TTP-244', dpi: 203, quantity: 1, mediaType: 'direct-thermal', mediaSenseMode: 'gap', printSpeed: 6, darkness: 10 },
+            fields: [{
+                id: 1, type: 'barcode', name: 'M', x: 10, y: 10, rotation: 0,
+                dataSource: { type: 'fixed', data: '1234567890' }, symbology: '19',
+                humanReadable: 'none', h_mag: 10, w_mag: 1, microColumns: cols,
+            }],
+            dataSources: [], nextId: 9, guides: { horizontal: [], vertical: [] },
+        } as unknown as Design);
+        const colsOf = (s: string) => /,C(\d),/.exec(s + ',')?.[1];
+
+        // Every in-range value is written and reads back.
+        for (const c of [0, 1, 2, 3, 4]) {
+            const out = generateTSPL(design(c));
+            expect(colsOf(out.tspl), `C${c} written`).toBe(String(c));
+            expect((parseTSPL(out.tspl).elements[0] as any).microColumns, `C${c} read back`).toBe(String(c));
+            expect(out.warnings, `C${c} is valid`).toEqual([]);
+        }
+        // Absent = the printer decides, and no Cn is written.
+        expect(colsOf(generateTSPL(design(undefined)).tspl)).toBeUndefined();
+        // Out of range is not a column count: left off and NAMED, not passed on.
+        const bad = generateTSPL(design(7));
+        expect(colsOf(bad.tspl)).toBeUndefined();
+        expect(bad.warnings.join(' ')).toMatch(/outside the printer's 0-4 range/);
+    });
+
     it('MAXICODE: TSPL writes the SCM fields as PARAMETERS, so they are reassembled', () => {
         // TSC manual p. 54:
         //   MAXICODE x,y,mode,class,country,post,"content"
