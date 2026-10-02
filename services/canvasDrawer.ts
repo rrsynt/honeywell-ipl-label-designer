@@ -149,7 +149,7 @@ export const getFieldBoundingBox = (ctx: CanvasRenderingContext2D, field: Field,
                 });
                 // Advance-based width (cell + gap, last gap dropped) — the same
                 // formula the viewer renderer and geometry.ts use (audit T1).
-                width = bitmapTextWidthDots((field as TextField).font, maxChars, (field as TextField).w_mag) * dotSizePx;
+                width = bitmapTextWidthDots((field as TextField).font, maxChars, (field as TextField).w_mag, (field as TextField).intercharGapDots) * dotSizePx;
             } else { // Outline font
                 // An uploaded face is stored under its own name, which FONT_MAP
                 // does not know, so it resolves to the stack it was registered

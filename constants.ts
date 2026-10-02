@@ -406,12 +406,14 @@ export const fontAdvanceDots = (fontId: string): number => {
 
 /** Row width in dots for `charCount` bitmap chars at magnification wMag —
  *  the last gap is dropped, matching the viewer renderer's advance math
- *  exactly (services/ipl/renderer.ts estimateElementSize). */
-export const bitmapTextWidthDots = (fontId: string, charCount: number, wMag = 1): number => {
+ *  exactly (services/ipl/renderer.ts estimateElementSize). An optional
+ *  gapOverrideDots overrides the font's default gap (c n,m). */
+export const bitmapTextWidthDots = (fontId: string, charCount: number, wMag = 1, gapOverrideDots?: number): number => {
     if (charCount <= 0) return 0;
     const f = FONT_MAP[fontId];
-    const gap = f && f.type === 'bitmap' ? (f.gapWidth ?? 2) : 2;
-    return Math.max(0, charCount * fontAdvanceDots(fontId) * wMag - gap * wMag);
+    const gap = gapOverrideDots !== undefined ? gapOverrideDots : (f && f.type === 'bitmap' ? (f.gapWidth ?? 2) : 2);
+    const cellWidth = f && f.type === 'bitmap' ? (f.baseWidth ?? 7) : 7;
+    return Math.max(0, charCount * (cellWidth + gap) * wMag - gap * wMag);
 };
 
 export const BARCODE_MAP: { [key: string]: string } = {

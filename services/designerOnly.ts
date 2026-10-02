@@ -1,4 +1,4 @@
-import type { BarcodeField, Design, PrinterLanguage } from '../types';
+import type { BarcodeField, Design, PrinterLanguage, TextField } from '../types';
 
 /**
  * Properties the DESIGNER draws but no printer language can carry. The screen
@@ -55,6 +55,21 @@ export const designerOnlyWarnings = (language: PrinterLanguage, design: Design):
             f.type === 'barcode' && (f as BarcodeField).hriFontSize !== undefined && f.humanReadable !== 'none');
         if (sized.length > 0) {
             out.push(`${sized.map(f => `"${f.name}"`).join(', ')}: the human-readable line is sized from the printer's own default in this language, so the size set on screen (${sized[0].type === 'barcode' ? (sized[0] as BarcodeField).hriFontSize : ''}pt) is not printed. (IPL carries it.)`);
+        }
+    }
+
+    // An intercharacter gap (c n,m). IPL carries it on its text field — the
+    // `c` command takes `c n,m`, which iplGenerator emits (`c0,5`) — and the
+    // canvas draws the gap between characters. The other four generators
+    // (ZPL, EPL, TSPL, DPL) never write it (their text commands have no
+    // intercharacter gap parameter), so the spacing set on screen is not
+    // printed there and the text comes out at the font's own default spacing.
+    if (language !== 'ipl') {
+        const gapped = shown.filter(f =>
+            f.type === 'text' && (f as TextField).intercharGapDots !== undefined);
+        if (gapped.length > 0) {
+            const one = gapped.length === 1;
+            out.push(`${gapped.map(f => `"${f.name}"`).join(', ')}: intercharacter gap is only supported in IPL (c n,m), so the character spacing set on screen ${one ? 'is' : 'are'} not printed in this language. (IPL carries it.)`);
         }
     }
 

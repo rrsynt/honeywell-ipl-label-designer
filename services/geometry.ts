@@ -115,7 +115,7 @@ export function getObjectBoundingBox(field: Field, design: Design): { width: num
                 // Same advance (cell + gap, last gap dropped) the viewer
                 // renderer paints with — cell-only width made the designer
                 // under-measure by 1-2 dots per char (audit T1).
-                width = bitmapTextWidthDots(field.font, maxChars, field.w_mag) * mmPerDot;
+                width = bitmapTextWidthDots(field.font, maxChars, field.w_mag, field.intercharGapDots) * mmPerDot;
 
             } else { // Outline font
                 const fontSizePx = (field.fontSize * POINTS_TO_MM) * dpi / 25.4;
@@ -128,13 +128,16 @@ export function getObjectBoundingBox(field: Field, design: Design): { width: num
                 // vendored Liberation fonts are metric-matched to the viewer
                 // table (Batch U); only via the stack do all three agree.
                 ctx.font = `normal ${fontSizePx}px ${FONT_FAMILIES[fontFamily as keyof typeof FONT_FAMILIES] ?? fontFamily}`;
-                
+
                 const lineHeightMm = (fontSizePx * 1.15) * mmPerDot; // Match canvasDrawer (Batch V: unified with the viewer print path)
                 height = (lines.length * lineHeightMm) - (lineHeightMm * 0.2); // Match canvasDrawer
-                
+
+                const gapDots = field.intercharGapDots ?? 0;
                 let maxWidth = 0;
                 lines.forEach(line => {
-                    const measuredWidth = ctx.measureText(line).width;
+                    const measuredWidth = line.length > 0
+                        ? ctx.measureText(line).width + gapDots * Math.max(0, line.length - 1)
+                        : 0;
                     maxWidth = Math.max(maxWidth, measuredWidth);
                 });
                 width = maxWidth * mmPerDot;
