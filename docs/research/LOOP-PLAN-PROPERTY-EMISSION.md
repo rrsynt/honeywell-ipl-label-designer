@@ -96,13 +96,13 @@ hijau saat perbaikannya dimatikan** — jadi test itu belum mengunci apa pun.
 - [x] Pastikan test mengunci DUA arah: RSSEXP memakai sepHt, versi linear TIDAK (dan memperingatkan)
 - [x] Audit `rssSepHeight` (c20,m2 — tinggi baris pemisah versi bertumpuk) di kelima generator
 - [x] Audit `rssSegments` (c20,m3 — segmen per baris, expanded-stacked) di kelima generator
-- [ ] Audit `microColumns` dan `microRows` (c19,m1/m2 — MicroPDF417) di kelima generator
-- [ ] Perbaiki tiap properti yang terkonfirmasi hilang, satu commit per perbaikan
-- [ ] Untuk yang memang tidak bisa dibawa bahasa tertentu: pastikan `designerOnlyWarnings` melaporkannya (jangan senyap)
+- [x] Audit `microColumns` dan `microRows` (c19,m1/m2 — MicroPDF417) di kelima generator
+- [x] Perbaiki tiap properti yang terkonfirmasi hilang, satu commit per perbaikan
+- [x] Untuk yang memang tidak bisa dibawa bahasa tertentu: pastikan `designerOnlyWarnings` melaporkannya (jangan senyap)
 
 ### B. Properti teks yang belum diverifikasi lintas generator
 
-- [ ] Audit `intercharGapDots` (celah antar-karakter `c n,m`) di kelima generator
+- [x] Audit `intercharGapDots` (celah antar-karakter `c n,m`) di kelima generator
 - [ ] Verifikasi `fontSize`, `h_mag`, `w_mag` benar-benar terkirim di kelima generator (bukan hanya IPL)
 
 ### C. Penutup
