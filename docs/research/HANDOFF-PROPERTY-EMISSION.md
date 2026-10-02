@@ -4,33 +4,58 @@ Tanggal: 2026-10-02
 
 ## 1. Unit Pekerjaan yang Selesai pada Iterasi Ini
 Milestone B:
-- **Audit `intercharGapDots` (c n,m — celah antar-karakter pada TextField) di kelima generator**:
-  - **IPL**: Mendukung penuh via `c n[,m]` (PRM p. 195/203) baik untuk font bitmap (c0-c7) maupun outline (c20-c99), termasuk nilai negatif untuk overlap karakter. Emisi dan round-trip parser IPL diverifikasi.
-  - **ZPL, EPL, TSPL, DPL**: Tidak memiliki parameter celah antar-karakter pada perintah teks masing-masing (`^A...^FD`, `A...`, `TEXT ...`, dan DPL standard text record). Terukur: aliran keluaran ke-4 bahasa ini **byte-identik** saat `intercharGapDots` diubah.
-  - **Cacat yang Ditemukan**:
-    1. Kanvas desainer (`canvasDrawer.ts`) menggambar teks dengan celah antar-karakter kustom tersebut, tetapi saat mengekspor ke ZPL/EPL/TSPL/DPL, `designerOnlyWarnings` **diam tanpa peringatan**.
-    2. `getObjectBoundingBox` pada `services/geometry.ts` sebelumnya mengabaikan `intercharGapDots` baik untuk font bitmap maupun outline, sehingga perhitungan lebar bounding box salah dan fungsi pergeseran alignment (`shiftForTextAlign`) menggeser teks rata kanan/tengah (`align: 'right' | 'center'`) berdasarkan lebar yang tidak sesuai dengan yang digambar.
-    3. `canvasDrawer.ts` sebelumnya memanggil `bitmapTextWidthDots` tanpa menyertakan `intercharGapDots`.
-  - **Perbaikan yang Diterapkan**:
-    1. `services/designerOnly.ts`: Menambahkan peringatan untuk bahasa non-IPL (`language !== 'ipl'`) jika field teks memiliki `intercharGapDots !== undefined`: `"<name>": intercharacter gap is only supported in IPL (c n,m), so the character spacing set on screen is not printed in this language. (IPL carries it.)`.
-    2. `constants.ts`: Menambahkan parameter opsional `gapOverrideDots?: number` pada `bitmapTextWidthDots` agar advance font bitmap memperhitungkan celah kustom `c n,m`.
-    3. `services/geometry.ts`: Memperbarui `getObjectBoundingBox` pada `case 'text'` agar memperhitungkan `field.intercharGapDots` untuk font bitmap dan outline.
-    4. `services/canvasDrawer.ts`: Meneruskan `(field as TextField).intercharGapDots` ke `bitmapTextWidthDots`.
-    5. `tests/intercharGapAudit.test.ts`: Menambahkan 17 pengujian yang memverifikasi kontrol positif, emisi IPL, round-trip IPL, byte-identical pada ZPL/EPL/TSPL/DPL, peringatan `designerOnlyWarnings`, dan perhitungan bounding box / alignment.
+- **Verifikasi `fontSize`, `h_mag`, `w_mag` benar-benar terkirim di kelima generator (bukan hanya IPL)**:
+  - **Hasil Audit Lintas Generator**:
+    1. **Font Bitmap pada `TextField` (`font: '0'`, `'1'`, `'2'`, `'7'`)**:
+       - `h_mag`: Terkirim pada kelima generator:
+         - **IPL**: Emisi parameter `;h${field.h_mag};` (`h1` -> `h3`).
+         - **ZPL**: Emisi `^A0N,${baseHeight * h_mag},...` (`^A0N,9,...` -> `^A0N,27,...`).
+         - **EPL**: Emisi pengali vertikal `p6` pada perintah `A` (`A...,1,1,N,...` -> `A...,1,3,N,...`).
+         - **TSPL**: Emisi pengali vertikal `p6` (`y-multiplication`) pada perintah `TEXT` (`TEXT ...,1,1,"..."` -> `TEXT ...,1,3,"..."`).
+         - **DPL**: Menghitung `cellH = baseHeight * h_mag` dan mencocokkan resident font serta pengali tinggi `dplMultiplier`.
+       - `w_mag`: Terkirim pada kelima generator:
+         - **IPL**: Emisi parameter `;w${field.w_mag};` (`w1` -> `w4`).
+         - **ZPL**: Emisi `^A0N,...,${baseWidth * w_mag}` (`^A0N,...,7` -> `^A0N,...,28`).
+         - **EPL**: Emisi pengali horizontal `p5` pada perintah `A` (`A...,1,1,N,...` -> `A...,4,1,N,...`).
+         - **TSPL**: Emisi pengali horizontal `p5` (`x-multiplication`) pada perintah `TEXT` (`TEXT ...,1,1,"..."` -> `TEXT ...,4,1,"..."`).
+         - **DPL**: Menghitung `cellW = baseWidth * w_mag` dan mencocokkan resident font serta pengali lebar `dplMultiplier`.
+       - `fontSize`: Diabaikan secara seragam oleh kelima generator saat font bitmap aktif (aliran byte identik saat `fontSize` diubah), konsisten dengan UI desainer (`FieldEditor.tsx`) yang menyembunyikan input ukuran poin untuk font bitmap dan hanya menampilkan "Height Mag" & "Width Mag".
+    2. **Font Outline pada `TextField` (`font: '20'`, `'21'`, `'25'`, dll.)**:
+       - `fontSize`:
+         - **IPL**: Emisi `;b0;k${field.fontSize};`.
+         - **ZPL**: Emisi `^A0N,${dots(fontSize)},${dots(fontSize)}`.
+         - **DPL**: Emisi record font 9 scalable dengan point size pada slot `Axx` dan `PxxxPxxx`.
+         - **EPL**: Tidak memiliki font outline skalabel bawaan; generator memperingatkan fallback ke font resident 1: `"<name>" uses a font with no EPL equivalent. It prints with resident font 1, which is a different size and shape.`.
+         - **TSPL**: `TSPL_FONT_FOR` hanya memetakan font bitmap 0, 1, 2; generator memperingatkan fallback ke font resident 2: `"<name>" uses a font with no TSPL equivalent. It prints with resident font 2, which is a different size and shape.`.
+       - `h_mag` & `w_mag`: Diabaikan secara benar oleh IPL dan ZPL untuk font outline (IPL tidak menulis parameter `;h` / `;w`, ZPL menggunakan ukuran poin `dots(fontSize * 25.4 / 72)`).
+    3. **`BarcodeField` (1D Barcodes)**:
+       - `h_mag`: Terkirim pada kelima generator (IPL `h`, ZPL slot tinggi `^B3`/`^BC`, EPL parameter `p7`, TSPL parameter `p4`, DPL unit `(h_mag / dpi) * 100`).
+       - `w_mag`: Terkirim pada kelima generator (IPL `w`, ZPL `^BY`, EPL parameter `p5`, TSPL parameter `p7`, DPL pengali `narrow`).
+    4. **Geometri & Bounding Box**:
+       - `getObjectBoundingBox` pada `services/geometry.ts` memperhitungkan `h_mag` dan `w_mag` untuk font bitmap, dan memperhitungkan `fontSize` untuk font outline.
+    5. **Test Suite**:
+       - Ditambahkan file pengujian komprehensif `tests/fontSizeMagAudit.test.ts` (27 tes) yang memverifikasi kontrol positif, emisi `h_mag`/`w_mag` bitmap, pengabaian `fontSize` bitmap, emisi `fontSize` outline, emisi `h_mag`/`w_mag` barcode, dan perhitungan bounding box.
 
 ### Bukti Injeksi (Rule 8)
-- **Injeksi 1**: Mematikan blok peringatan `intercharGapDots` di `designerOnly.ts` (`const gapped = shown.filter(f => false);`) → **1 test gagal** (`designerOnlyWarnings reports intercharGapDots on non-IPL languages > warns on ZPL, EPL, TSPL, and DPL when intercharGapDots is set`).
-- **Injeksi 2**: Mematikan `intercharGapDots` pada font bitmap di `geometry.ts` (`bitmapTextWidthDots(field.font, maxChars, field.w_mag)`) → **2 test gagal** (`getObjectBoundingBox expands bitmap text width with positive intercharGapDots` dan `shiftForTextAlign with right alignment shifts further when intercharGapDots widens text`).
-- **Injeksi 3**: Mematikan `intercharGapDots` pada font outline di `geometry.ts` (`const gapDots = 0;`) → **1 test gagal** (`getObjectBoundingBox expands outline text width with intercharGapDots`).
-- **Pemulihan**: Semua injeksi dipulihkan ke file asli → seluruh 17 test audit hijau, total test suite: **1960 tes / 120 file hijau**, `tsc --noEmit` bersih.
+- **Injeksi 1 (IPL bitmap magnification)**: Memaksa `params.push('h1', 'w1')` di `iplGenerator.ts` → **2 test gagal** (`IPL: emits h command with field.h_mag value` dan `IPL: emits w command with field.w_mag value`).
+- **Injeksi 2 (ZPL outline font sizing)**: Memaksa `dots(12 * (25.4 / 72))` di `zplGenerator.ts` → **1 test gagal** (`ZPL: calculates ^A0 dot height and width from fontSize`).
+- **Injeksi 3 (EPL vertical multiplier)**: Memaksa `p6 = 1` di `eplGenerator.ts` → **1 test gagal** (`EPL: sets vertical multiplier p6 in A command`).
+- **Injeksi 4 (TSPL horizontal multiplier)**: Memaksa `p5 = 1` di `tsplGenerator.ts` → **1 test gagal** (`TSPL: sets x-multiplication parameter in TEXT command`).
+- **Injeksi 5 (DPL outline point size)**: Memaksa `pts = '12'` di `dplGenerator.ts` → **1 test gagal** (`DPL: emits scalable font 9 record with point size in A and P slots`).
+- **Pemulihan**: Semua injeksi dipulihkan ke file asli → seluruh 27 test audit hijau, total test suite: **1987 tes / 121 file hijau**, `tsc --noEmit` bersih.
 
 ---
 
-## 2. Status Penutupan Milestone Sebelumnya
-- Milestone A0 `microColumns` dan `microRows` (c19,m1/m2 — MicroPDF417) telah diselesaikan dan dikomit pada commit `8f730a2` (TSPL warning untuk microRows > 0) dan `127d5c8` (DPL Table G-6/G-7 emisi & parser round-trip, test suite 15 test di `tests/microPdfAudit.test.ts`). Checkbox di `LOOP-PLAN-PROPERTY-EMISSION.md` telah disinkronkan.
+## 2. Status Penutupan Milestone B
+- [x] Audit `intercharGapDots` (celah antar-karakter `c n,m`) di kelima generator
+- [x] Verifikasi `fontSize`, `h_mag`, `w_mag` benar-benar terkirim di kelima generator (bukan hanya IPL)
+
+Semua item pada Milestone B telah selesai diverifikasi dan dikunci dengan pengujian otomatis.
 
 ---
 
 ## 3. Unit Pekerjaan Berikutnya
 Sesuai `docs/research/LOOP-PLAN-PROPERTY-EMISSION.md`:
-- `[ ] Verifikasi fontSize, h_mag, w_mag benar-benar terkirim di kelima generator (bukan hanya IPL)`
+### C. Penutup
+- `[ ] Perbarui memori method-property-emission-audit dengan hasil akhir`
+- `[ ] Tulis ringkasan hasil di docs/research/ (properti apa yang bersih, apa yang diperbaiki)`

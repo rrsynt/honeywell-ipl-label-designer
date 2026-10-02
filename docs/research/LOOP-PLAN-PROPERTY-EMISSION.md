@@ -103,7 +103,7 @@ hijau saat perbaikannya dimatikan** — jadi test itu belum mengunci apa pun.
 ### B. Properti teks yang belum diverifikasi lintas generator
 
 - [x] Audit `intercharGapDots` (celah antar-karakter `c n,m`) di kelima generator
-- [ ] Verifikasi `fontSize`, `h_mag`, `w_mag` benar-benar terkirim di kelima generator (bukan hanya IPL)
+- [x] Verifikasi `fontSize`, `h_mag`, `w_mag` benar-benar terkirim di kelima generator (bukan hanya IPL)
 
 ### C. Penutup
 
