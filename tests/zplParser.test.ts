@@ -298,28 +298,43 @@ describe('parseZPL', () => {
     });
 
     it('reads a matrix barcode\'s magnification from its own parameter, not ^BY', () => {
-        // ^BQ and ^BX put the MAGNIFICATION where the 1D commands put the
-        // human-readable flag, and ^BY does not apply to them at all. Measured
-        // against Labelary (8 dpmm): ^BQN,2,2 -> 42px, ^BQN,2,6 -> 126px,
-        // ^BQN,2,10 -> 210px, all exactly 21 modules across, so the value moves
-        // the MODULE and not the symbol; ^BXN,2 -> 24px and ^BXN,6 -> 72px, 12
-        // modules. The old code took p[1] as an HRI flag and used ^BY's module
-        // for both, so every size read back as ^BY's — and for ^BX, whose p[1]
-        // is the only place its size is stated, that ignored it outright.
+        // ^BY does not apply to the matrix commands at all; each states its
+        // magnification in its own slot. Measured pixel-exact against Labelary
+        // (8 dpmm), varying one slot at a time:
+        //   ^BXN,2,200 -> 24px and ^BXN,6,200 -> 72px (12 modules) => ^BX p[1].
+        //   ^BQN,2,5 -> 105px, ^BQN,2,6 -> 126px (21 modules) => ^BQ p[2], see
+        //   the dedicated ^BQ test below — ^BQ's p[1] is its MODEL, not a size.
         const modOf = (zpl: string) => (parseZPL(zpl).elements[0] as BarcodeElement)?.moduleDots;
-        for (const [mag, px] of [[2, 42], [6, 126], [10, 210]]) {
-            expect(modOf(`^XA^FO0,0^BQN,${mag},5^FDQA,HI^FS^XZ`), `^BQ mag ${mag} (Labelary ${px}px = 21 modules)`)
-                .toBe(mag);
-        }
         for (const [mag, px] of [[2, 24], [6, 72]]) {
             expect(modOf(`^XA^FO0,0^BXN,${mag},200^FDHI^FS^XZ`), `^BX mag ${mag} (Labelary ${px}px = 12 modules)`)
                 .toBe(mag);
         }
         // ^BY must not change either one — that is the whole correction.
-        expect(modOf('^XA^FO0,0^BY4^BQN,2,5^FDQA,HI^FS^XZ')).toBe(2);
         expect(modOf('^XA^FO0,0^BY4^BXN,2,200^FDHI^FS^XZ')).toBe(2);
         // The control: ^BY IS what sizes a 1D barcode, so it must still apply.
         expect(modOf('^XA^FO0,0^BY4^BCN,Y,Y,N,N^FD123^FS^XZ')).toBe(4);
+    });
+
+    it('^BQ is o,MODEL,MAGNIFICATION — a different layout from ^BX', () => {
+        // Pixel-exact against Labelary, one slot varied at a time:
+        //   ^BQN,2,5 -> 105px  ^BQN,2,6 -> 126px   ^BQN,2,9 -> 189px (21 modules each)
+        //   ^BQN,6,5 -> 105px  ^BQN,5,6 -> 126px   -> the size follows p[2], NOT p[1]
+        //   ^BQN,1,5 -> NO INK ^BQN,2,5 -> renders -> p[1] is the MODEL
+        // Reading p[1] for both commands (the old code) sized a QR by its model
+        // number, so ^BQN,2,6 and ^BQN,2,10 both read back magnification 2.
+        const qr = (p: string) => parseZPL(`^XA^FO0,0^BQ${p}^FD1234567890^FS^XZ`).elements[0] as BarcodeElement;
+
+        for (const [px, mag] of [[105, 5], [126, 6], [189, 9]] as const) {
+            expect(qr(`N,2,${mag}`).moduleDots, `^BQN,2,${mag} (Labelary ${px}px = 21 modules)`).toBe(mag);
+        }
+        // p[1] is the model and must not be mistaken for a size: holding the
+        // magnification at 5 while the model changes keeps the size at 5.
+        for (const model of [1, 2, 3, 6]) {
+            expect(qr(`N,${model},5`).moduleDots, `model ${model} must not resize`).toBe(5);
+        }
+        // ...and the model is carried, so the design round-trips.
+        expect(qr('N,1,5').qrModel).toBe('1');
+        expect(qr('N,2,5').qrModel).toBe('2');
     });
 
     it('warns about a barcode it cannot draw instead of dropping it quietly', () => {

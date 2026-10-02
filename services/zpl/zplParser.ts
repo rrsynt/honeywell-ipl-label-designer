@@ -145,7 +145,7 @@ export const parseZPL = (code: string, dpi = 203): ViewerLabel => {
     let rotation = 0;          // ^FW, in IPL quadrants
     let fieldRotation: number | null = null; // a per-command orientation overrides ^FW
     let font: { h: number; w: number } | null = null;
-    let pendingBarcode: { symbology: string; heightDots: number; moduleDots: number; hri: 0 | 1; code39Mode?: string } | null = null;
+    let pendingBarcode: { symbology: string; heightDots: number; moduleDots: number; hri: 0 | 1; code39Mode?: string; qrModel?: string } | null = null;
     let byModule = 2;
     let byRatio = 3;           // ^BY wide:narrow, default 3.0
     let byHeight = 10;
@@ -266,6 +266,7 @@ export const parseZPL = (code: string, dpi = 203): ViewerLabel => {
                 ...(qrEcl ? { qrEcl } : {}),
             };
             if (pendingBarcode.code39Mode) el.code39Mode = pendingBarcode.code39Mode;
+            if (pendingBarcode.qrModel) el.qrModel = pendingBarcode.qrModel;
             // The anchor is derived from the size the RENDERER measures, not an
             // estimate of our own. The two diverging is exactly what put a
             // rotated field's top-left somewhere other than its ^FO point.
@@ -513,21 +514,28 @@ export const parseZPL = (code: string, dpi = 203): ViewerLabel => {
                 const r = ROT[(p[0] ?? '').trim().toUpperCase()];
                 fieldRotation = r === undefined ? null : r;
                 // A 1D barcode's p[1] is its human-readable flag and p[2] is its
-                // height. The MATRIX commands put their MAGNIFICATION there
-                // instead — and ^BY does not apply to them at all. Measured
-                // against Labelary: ^BQN,2,2 renders 42px, ^BQN,2,6 renders
-                // 126px and ^BQN,2,10 renders 210px — exactly 21 modules wide
-                // each time, i.e. the magnification moves the MODULE, not the
-                // symbol. ^BXN,2 is 24px and ^BXN,6 is 72px, 12 modules.
+                // height. The MATRIX commands put their MAGNIFICATION in their
+                // own slot — and ^BY does not apply to them at all.
                 //
-                // Reading those commands like the 1D ones took p[1] as a height
-                // flag, so every matrix symbol came out at ^BY's module size:
-                // our own generator's ^BQN,2,2 read back with module 2 while
-                // ^BQN,2,10 also read back as 2. The preview drew both at the
-                // same size, and the ^BX case is the worse one — that field is
-                // the only place a DataMatrix's size is stated, so it was
-                // ignored outright.
-                const matrixMag = Math.max(1, Math.trunc(num(p[1], 2)));
+                // ^BQ AND ^BX DO NOT SHARE A LAYOUT EITHER. Measured pixel-exact
+                // against Labelary (the ZPL oracle), varying ONE slot at a time:
+                //
+                //   ^BQ o,e,m   o=orientation, e=MODEL (1|2), m=MAGNIFICATION
+                //     ^BQN,2,5  -> 105px     ^BQN,2,6 -> 126px   (p[2] = mag)
+                //     ^BQN,6,5  -> 105px     ^BQN,5,6 -> 126px   (p[1] does NOT)
+                //     ^BQN,1,5  -> no ink    ^BQN,2,5 -> renders  (p[1] = model)
+                //   ^BX o,m,s   o=orientation, m=MAGNIFICATION, s=shape/quality
+                //     ^BXN,2,200 -> 24px  (12 modules)   ^BXN,6,200 -> 72px
+                //
+                // So magnification is p[2] for ^BQ and p[1] for ^BX. Reading
+                // p[1] for both (this used to) sized every ^BQ by its MODEL
+                // number: ^BQN,2,6 and ^BQN,2,10 both came back 2, so a QR's
+                // magnification was ignored. (An earlier md5-based reading said
+                // a 4th ^BQ parameter changed the symbol; a PIXEL comparison
+                // shows base/H/Z are identical, so it does not exist. Compare
+                // pixels, not file bytes — a re-encoded PNG differs by hash.)
+                const magIdx = cmd.name === 'BQ' ? 2 : 1;
+                const matrixMag = Math.max(1, Math.trunc(num(p[magIdx], 2)));
                 // The 1D commands do NOT share a parameter order. ^BC and ^B2
                 // are ^B<cmd>o,h,f,g — height SECOND. ^B3 is ^B3o,e,h,f,g —
                 // check digit second, height THIRD, HRI fourth.
@@ -570,6 +578,9 @@ export const parseZPL = (code: string, dpi = 203): ViewerLabel => {
                     moduleDots: Math.max(1, module),
                     hri: cmd.name === 'BQ' || cmd.name === 'BX' ? 0 : hri,
                     code39Mode,
+                    // ^BQ p[1] is the QR MODEL (1 or 2); carried so the design
+                    // round-trips and the preview can honour it.
+                    ...(cmd.name === 'BQ' ? { qrModel: String(Math.max(1, Math.trunc(num(p[1], 2)))) } : {}),
                 };
                 break;
             }

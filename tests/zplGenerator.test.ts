@@ -288,6 +288,15 @@ describe('ZPL emits the QR error-correction level as an ^FD prefix', () => {
             expect(generateZPL(designOf(qr({ qrEcl: ecl }))).zpl, ecl).toContain(`^FD${ecl},1234567890`);
         }
     });
+    it('writes the QR MODEL into the ^BQ model slot', () => {
+        // ^BQ is o,MODEL,MAGNIFICATION (pixel-measured against Labelary:
+        // ^BQN,1,5 and ^BQN,2,5 render differently). The generator hardcoded
+        // model 2, so a Model 1 design printed as Model 2.
+        expect(generateZPL(designOf(qr({ qrModel: 1 }))).zpl).toContain('^BQN,1,');
+        expect(generateZPL(designOf(qr({ qrModel: 2 }))).zpl).toContain('^BQN,2,');
+        expect(generateZPL(designOf(qr())).zpl, 'default is model 2').toContain('^BQN,2,');
+    });
+
     it('writes a bare data field when no level is set', () => {
         const z = generateZPL(designOf(qr())).zpl;
         expect(z).toContain('^FD1234567890');

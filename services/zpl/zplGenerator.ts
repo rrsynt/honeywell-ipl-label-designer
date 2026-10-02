@@ -60,7 +60,7 @@ export interface ZplGenerateResult {
  * was emitted as `^B2N,Y,N,N,N`: a request for a ONE-DOT bar height, which
  * prints an invisible symbol. The slots below are the measured ones.
  */
-const ZPL_BARCODE: Record<string, (hri: 'Y' | 'N', height: number, e: 'Y' | 'N') => string> = {
+const ZPL_BARCODE: Record<string, (hri: 'Y' | 'N', height: number, e: 'Y' | 'N', qrModel: 1 | 2) => string> = {
     // ^B3 o,e,h,f,g — e is the mod-43 CHECK DIGIT flag, then HEIGHT, then HRI.
     '0': (hri, height, e) => `^B3N,${e},${height},${hri},N`, // Code 39
     // ^B2 o,h,f,g and ^BC o,h,f,g — HEIGHT second, HRI third. The old table put
@@ -72,7 +72,13 @@ const ZPL_BARCODE: Record<string, (hri: 'Y' | 'N', height: number, e: 'Y' | 'N')
     '2': (hri, height) => `^B2N,${height},${hri},N,N`, // Interleaved 2 of 5
     '6': (hri, height) => `^BCN,${height},${hri},N,N`, // Code 128
     '17': (_hri, height) => `^BXN,${Math.max(1, Math.round(height / 10))},200`, // DataMatrix
-    '18': (_hri, height) => `^BQN,2,${Math.max(1, Math.round(height / 25))}`,   // QR
+    // ^BQ o,e,m — the SECOND parameter is the QR MODEL (1 or 2). Pixel-exact
+    // against Labelary: ^BQN,1,5 draws nothing here while ^BQN,2,5 draws the
+    // symbol, and holding the model at 2 while the third parameter changes
+    // scales it (^BQN,2,5 -> 105px, ^BQN,2,6 -> 126px). The generator hardcoded
+    // 2, so the designer's "QR Model" control was silently dropped and a Model 1
+    // design printed as Model 2.
+    '18': (_hri, height, _e, qrModel) => `^BQN,${qrModel},${Math.max(1, Math.round(height / 25))}`, // QR
 };
 
 const fieldData = (field: TextField | BarcodeField, design: Design): string => {
@@ -166,8 +172,10 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
             // at all, so the designer's "Error Correction" control (qrEcl) was
             // silently dropped and every symbol printed at the printer default.
             const qrEcl = field.symbology === '18' && field.qrEcl ? `${field.qrEcl.toUpperCase()},` : '';
+            // Model 1 or 2; the design's field is `1 | 2 | undefined`, default 2.
+            const qrModel: 1 | 2 = field.qrModel === 1 ? 1 : 2;
             const fd = `${qrEcl}${fieldData(field, design)}`;
-            lines.push(`^FO${origin.x},${origin.y}`, `^BY${Math.max(1, field.w_mag)}`, `${emit(hri, h, e)}^FD${escapeFd(fd)}^FS`);
+            lines.push(`^FO${origin.x},${origin.y}`, `^BY${Math.max(1, field.w_mag)}`, `${emit(hri, h, e, qrModel)}^FD${escapeFd(fd)}^FS`);
             continue;
         }
         if (field.type === 'box') {
