@@ -28,7 +28,7 @@ import type {
 } from '../ipl/types';
 import { estimateElementSize } from '../ipl/renderer';
 import { DPL_FONTS, DPL_SMOOTH_FONT, dplMultiplierValue, dplDefaultHeightDots, DPL_SPEED_IPS } from './dplFonts';
-import { dplBarcodeFor, DPL_CODE_PAGE_IDS, DPL_CHAR_MAP_IDS } from './dplBarcodes';
+import { dplBarcodeFor, DPL_CODE_PAGE_IDS, DPL_CHAR_MAP_IDS, DPL_MICRO_PDF_TABLE } from './dplBarcodes';
 import { substituteDplDateTime } from './dplDateTime';
 import { FONT_MAP } from '../../constants';
 
@@ -1431,6 +1431,25 @@ export const parseDPL = (
             if ((bc.type.symbology === '6' || bc.type.symbology === '15') && /^[ABC]/.test(barcodeData)) {
                 barcodeData = barcodeData.slice(1);
             }
+            let microColumns: string | undefined;
+            let microRows: string | undefined;
+            if (bc.type.symbology === '19') {
+                // Table G-6: MicroPDF417 prefix is h i j k 0
+                // h = columns (1-4), i = row/EC index (0-9, A), j=0, k=0, 0=0
+                if (/^[1-4][0-9A-Fa-f]000/.test(barcodeData)) {
+                    const hChar = barcodeData[0];
+                    const iChar = barcodeData[1].toUpperCase();
+                    const hi = hChar + iChar;
+                    const entry = DPL_MICRO_PDF_TABLE.find(e => e.hi === hi);
+                    if (entry) {
+                        microColumns = String(entry.cols);
+                        microRows = String(entry.rows);
+                    } else {
+                        microColumns = hChar;
+                    }
+                    barcodeData = barcodeData.slice(5);
+                }
+            }
             // Appendix P: "For the printer to generate this checksum, a `V' must
             // be placed in the data stream in the position the checksum is
             // requested ... a checksum will be generated using the next five
@@ -1457,6 +1476,8 @@ export const parseDPL = (
                 // are their own symbols. Without it the variant is guessed from
                 // the digit count, which fails on the manual's own records.
                 ...(bc.type.eanVariant !== undefined ? { eanUpcVersion: bc.type.eanVariant } : {}),
+                ...(microColumns !== undefined ? { microColumns } : {}),
+                ...(microRows !== undefined ? { microRows } : {}),
                 hri: bc.hri,
                 source: { type: 'fixed', data: barcodeData },
             } as BarcodeElement);

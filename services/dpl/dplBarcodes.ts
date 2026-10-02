@@ -179,3 +179,114 @@ export const dplBarcodeFor = (
     const isUpper = letter === letter.toUpperCase() && letter !== letter.toLowerCase();
     return { type, hri: isUpper && !type.noHumanReadable ? 1 : 0, consumed: 1 };
 };
+
+export interface DplMicroPdfEntry {
+    hi: string;
+    cols: number;
+    rows: number;
+    iChar: string;
+    maxBin: number;
+    maxAlpha: number;
+    maxNum: number;
+}
+
+/**
+ * Appendix G Table G-7: MicroPDF417 Characteristics Index (manual p. 133 / 143).
+ * Lists all 34 valid symbol configurations (columns x rows), their selection
+ * indices (h, i), and maximum data capacity.
+ */
+export const DPL_MICRO_PDF_TABLE: readonly DplMicroPdfEntry[] = [
+    { hi: '10', cols: 1, rows: 11, iChar: '0', maxBin: 3, maxAlpha: 6, maxNum: 8 },
+    { hi: '11', cols: 1, rows: 14, iChar: '1', maxBin: 7, maxAlpha: 12, maxNum: 17 },
+    { hi: '12', cols: 1, rows: 17, iChar: '2', maxBin: 10, maxAlpha: 18, maxNum: 26 },
+    { hi: '13', cols: 1, rows: 20, iChar: '3', maxBin: 13, maxAlpha: 22, maxNum: 32 },
+    { hi: '14', cols: 1, rows: 24, iChar: '4', maxBin: 18, maxAlpha: 30, maxNum: 44 },
+    { hi: '15', cols: 1, rows: 28, iChar: '5', maxBin: 22, maxAlpha: 38, maxNum: 55 },
+    { hi: '20', cols: 2, rows: 8, iChar: '0', maxBin: 8, maxAlpha: 14, maxNum: 20 },
+    { hi: '21', cols: 2, rows: 11, iChar: '1', maxBin: 14, maxAlpha: 24, maxNum: 35 },
+    { hi: '22', cols: 2, rows: 14, iChar: '2', maxBin: 21, maxAlpha: 36, maxNum: 52 },
+    { hi: '23', cols: 2, rows: 17, iChar: '3', maxBin: 27, maxAlpha: 46, maxNum: 67 },
+    { hi: '24', cols: 2, rows: 20, iChar: '4', maxBin: 33, maxAlpha: 56, maxNum: 82 },
+    { hi: '25', cols: 2, rows: 23, iChar: '5', maxBin: 38, maxAlpha: 67, maxNum: 93 },
+    { hi: '26', cols: 2, rows: 26, iChar: '6', maxBin: 43, maxAlpha: 72, maxNum: 105 },
+    { hi: '30', cols: 3, rows: 6, iChar: '0', maxBin: 6, maxAlpha: 10, maxNum: 14 },
+    { hi: '31', cols: 3, rows: 8, iChar: '1', maxBin: 10, maxAlpha: 18, maxNum: 26 },
+    { hi: '32', cols: 3, rows: 10, iChar: '2', maxBin: 15, maxAlpha: 26, maxNum: 38 },
+    { hi: '33', cols: 3, rows: 12, iChar: '3', maxBin: 20, maxAlpha: 34, maxNum: 49 },
+    { hi: '34', cols: 3, rows: 15, iChar: '4', maxBin: 27, maxAlpha: 46, maxNum: 67 },
+    { hi: '35', cols: 3, rows: 20, iChar: '5', maxBin: 39, maxAlpha: 66, maxNum: 96 },
+    { hi: '36', cols: 3, rows: 26, iChar: '6', maxBin: 54, maxAlpha: 90, maxNum: 132 },
+    { hi: '37', cols: 3, rows: 32, iChar: '7', maxBin: 68, maxAlpha: 114, maxNum: 167 },
+    { hi: '38', cols: 3, rows: 38, iChar: '8', maxBin: 82, maxAlpha: 138, maxNum: 202 },
+    { hi: '39', cols: 3, rows: 44, iChar: '9', maxBin: 97, maxAlpha: 162, maxNum: 237 },
+    { hi: '40', cols: 4, rows: 4, iChar: '0', maxBin: 8, maxAlpha: 14, maxNum: 20 },
+    { hi: '41', cols: 4, rows: 6, iChar: '1', maxBin: 13, maxAlpha: 22, maxNum: 32 },
+    { hi: '42', cols: 4, rows: 8, iChar: '2', maxBin: 20, maxAlpha: 34, maxNum: 49 },
+    { hi: '43', cols: 4, rows: 10, iChar: '3', maxBin: 27, maxAlpha: 46, maxNum: 67 },
+    { hi: '44', cols: 4, rows: 12, iChar: '4', maxBin: 34, maxAlpha: 58, maxNum: 85 },
+    { hi: '45', cols: 4, rows: 15, iChar: '5', maxBin: 45, maxAlpha: 76, maxNum: 111 },
+    { hi: '46', cols: 4, rows: 20, iChar: '6', maxBin: 63, maxAlpha: 106, maxNum: 155 },
+    { hi: '47', cols: 4, rows: 26, iChar: '7', maxBin: 85, maxAlpha: 142, maxNum: 208 },
+    { hi: '48', cols: 4, rows: 32, iChar: '8', maxBin: 106, maxAlpha: 178, maxNum: 261 },
+    { hi: '49', cols: 4, rows: 38, iChar: '9', maxBin: 128, maxAlpha: 214, maxNum: 313 },
+    { hi: '4A', cols: 4, rows: 44, iChar: 'A', maxBin: 150, maxAlpha: 250, maxNum: 366 },
+];
+
+export const dplMicroPdfParams = (
+    field: { name?: string; microColumns?: number; microRows?: number },
+    data: string,
+): { h: string; i: string; warning?: string } => {
+    const isNum = /^\d+$/.test(data);
+    const isAlpha = /^[ -~]*$/.test(data);
+    const cap = (e: DplMicroPdfEntry) => isNum ? e.maxNum : isAlpha ? e.maxAlpha : e.maxBin;
+    const len = isNum || isAlpha ? data.length : new TextEncoder().encode(data).length;
+
+    const cols = field.microColumns;
+    const rows = field.microRows;
+
+    let warning: string | undefined;
+
+    // Both specified: validate combination against Table G-7
+    if (cols !== undefined && cols > 0 && rows !== undefined && rows > 0) {
+        const exact = DPL_MICRO_PDF_TABLE.find(e => e.cols === cols && e.rows === rows);
+        if (exact) {
+            if (len > cap(exact)) {
+                warning = `"${field.name}": data length (${len}) exceeds maximum capacity (${cap(exact)}) for MicroPDF417 ${cols}x${rows}.`;
+            }
+            return { h: String(exact.cols), i: exact.iChar, ...(warning ? { warning } : {}) };
+        }
+        warning = `"${field.name}": MicroPDF417 size ${cols}x${rows} is not in Table G-7; defaulted to automatic sizing.`;
+    }
+
+    // MicroColumns specified (1-4)
+    if (cols !== undefined && cols >= 1 && cols <= 4) {
+        const candidates = DPL_MICRO_PDF_TABLE.filter(e => e.cols === cols && cap(e) >= len);
+        if (candidates.length > 0) {
+            const chosen = candidates[0];
+            return { h: String(chosen.cols), i: chosen.iChar, ...(warning ? { warning } : {}) };
+        }
+        const maxForCol = DPL_MICRO_PDF_TABLE.filter(e => e.cols === cols).pop()!;
+        return {
+            h: String(maxForCol.cols),
+            i: maxForCol.iChar,
+            warning: warning ?? `"${field.name}": data length (${len}) exceeds maximum capacity for ${cols} column(s).`,
+        };
+    }
+
+    if (cols !== undefined && (cols < 0 || cols > 4)) {
+        warning = `"${field.name}" asks for ${cols} MicroPDF417 data columns, which is outside the printer's 1-4 range. Defaulted to automatic sizing.`;
+    }
+
+    // Auto-select smallest symbol in table that can fit the data
+    const fit = DPL_MICRO_PDF_TABLE.find(e => cap(e) >= len);
+    if (fit) {
+        return { h: String(fit.cols), i: fit.iChar, ...(warning ? { warning } : {}) };
+    }
+
+    const largest = DPL_MICRO_PDF_TABLE[DPL_MICRO_PDF_TABLE.length - 1];
+    return {
+        h: String(largest.cols),
+        i: largest.iChar,
+        warning: warning ?? `"${field.name}": data length (${len}) exceeds maximum MicroPDF417 capacity (366 numeric / 250 alphanumeric).`,
+    };
+};

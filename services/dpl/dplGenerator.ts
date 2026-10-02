@@ -13,7 +13,7 @@ import { getObjectBoundingBox, shiftForTextAlign, printableFields } from '../geo
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
 import { dplMultiplier, clampDplMultiplier, fitDplBitmapFont, DESIGN_OCR_FONT, DPL_FONTS, type DplBitmapFit } from './dplFonts';
-import { DPL_BARCODES } from './dplBarcodes';
+import { DPL_BARCODES, dplMicroPdfParams } from './dplBarcodes';
 import { charsetWarning } from '../charsetRisk';
 
 export interface DplGenerateResult {
@@ -358,6 +358,15 @@ export const generateDPL = (design: Design): DplGenerateResult => {
                 if (asked.length > 0) {
                     warnings.push(`"${field.name}": DPL's QR auto format fixes the model (2), error-correction level (M) and mask (automatic), so the ${asked.join(', ')} set on screen is not printed.`);
                 }
+            }
+            if (field.symbology === '19') {
+                // Table G-6: ... c d eee ffff gggg h i j k 0 m...m
+                // eee is 000 (No effect). h = columns, i = row/EC index, j=0, k=0, 0=0.
+                const mp = dplMicroPdfParams(field, data);
+                if (mp.warning) warnings.push(mp.warning);
+                const narrow = dplMultiplier(Math.max(1, field.w_mag));
+                lines.push(`${rot}${bf.field}${narrow}${narrow}000${rowStr}${colStr}${mp.h}${mp.i}000${data}`);
+                continue;
             }
             // eee is the symbol height, in hundredths of an inch. `h_mag` is the
             // bar height in DOTS (the designer draws `h_mag * dotSizePx`, and
