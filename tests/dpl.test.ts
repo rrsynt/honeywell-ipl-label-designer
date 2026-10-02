@@ -1892,3 +1892,52 @@ describe('DPL warns when a rounded box cannot be drawn', () => {
         expect(rounded.warnings.join(' ')).toContain('X');
     });
 });
+
+// The `Wxx` ids use their CASE for a FORMAT VARIANT, not the human-readable
+// flag (Table 8-4): W1d QR = Auto format, W1D QR = Manual format; W1c plain
+// DataMatrix, W1C "w/ Byte Count"; W1f plain Aztec, W1F with a byte count.
+// And W1z/W1Z is MicroPDF417 — a DIFFERENT symbol from the single-letter
+// `z`/`Z`, which is PDF417. Two defects lived here: the case was read (and
+// written) as HRI, and W1Z was mapped to PDF417, so a PDF417 design exported
+// as a MicroPDF417 symbol and a MicroPDF417 stream read back as PDF417.
+describe('DPL Wxx ids: case selects a format variant, and W1Z is MicroPDF417', () => {
+    it('reads W1Z/W1z as MicroPDF417, not PDF417', () => {
+        expect(dplBarcodeFor('W1Z')?.type.symbology, 'W1Z is MicroPDF417').toBe('19');
+        expect(dplBarcodeFor('W1z')?.type.symbology).toBe('19');
+        // The single-letter z/Z stays PDF417 — that is the whole distinction.
+        expect(dplBarcodeFor('z')?.type.symbology, 'z is PDF417').toBe('12');
+        expect(dplBarcodeFor('Z')?.type.symbology).toBe('12');
+    });
+
+    it('does not read the Wxx case as the human-readable flag', () => {
+        for (const b of ['W1D', 'W1d', 'W1C', 'W1c', 'W1F', 'W1f', 'W1Z', 'W1z']) {
+            expect(dplBarcodeFor(b)?.hri, `${b} prints no human-readable line`).toBe(0);
+        }
+    });
+
+    it('ROUND TRIP: each 2D symbol survives as itself', () => {
+        const bc = (sym: string) => ({
+            id: 1, type: 'barcode' as const, name: 'X', x: 10, y: 10, rotation: 0 as const,
+            dataSource: { type: 'fixed' as const, data: '1234567890' }, symbology: sym,
+            humanReadable: 'none' as const, h_mag: 40, w_mag: 2,
+        });
+        for (const sym of ['12', '19', '17', '18', '23']) {
+            const { dpl } = generateDPL(design([bc(sym)]));
+            const back = parseDPL(dpl, PAGE, new Date(), 203).elements[0] as { symbology: string };
+            expect(back.symbology, `design ${sym} round-trips`).toBe(sym);
+        }
+    });
+
+    it('writes the PLAIN lower-case form, since it emits no byte-count prefix', () => {
+        const bc = (sym: string) => ({
+            id: 1, type: 'barcode' as const, name: 'X', x: 10, y: 10, rotation: 0 as const,
+            dataSource: { type: 'fixed' as const, data: '1234567890' }, symbology: sym,
+            humanReadable: 'none' as const, h_mag: 40, w_mag: 2,
+        });
+        const rec = (sym: string) => generateDPL(design([bc(sym)])).dpl.split('\r').find(l => /^\d/.test(l))!;
+        expect(rec('18').slice(0, 4), 'QR auto format is W1d').toBe('1W1d');
+        expect(rec('17').slice(0, 4)).toBe('1W1c');
+        expect(rec('19').slice(0, 4), 'MicroPDF417 plain is W1z').toBe('1W1z');
+        expect(rec('12').slice(0, 2), 'PDF417 is the single letter z').toBe('1z');
+    });
+});

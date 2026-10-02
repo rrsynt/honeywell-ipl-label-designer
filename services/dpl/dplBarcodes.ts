@@ -143,10 +143,15 @@ export const DPL_CHAR_MAP_IDS: Record<string, string> = {
  * additional characters to specify the Bar Code/Font ID").
  */
 export const DPL_W_BARCODES: Record<string, DplBarcodeType> = {
-    W1C: { symbology: '17', name: 'DataMatrix' },
-    W1D: { symbology: '18', name: 'QR Code' },
-    W1F: { symbology: '23', name: 'Aztec' },
-    W1Z: { symbology: '12', name: 'PDF417' },
+    W1C: { symbology: '17', name: 'DataMatrix', noHumanReadable: true },
+    W1D: { symbology: '18', name: 'QR Code', noHumanReadable: true },
+    W1F: { symbology: '23', name: 'Aztec', noHumanReadable: true },
+    // W1z / W1Z is MicroPDF417 — NOT the single-letter `z`/`Z`, which is
+    // PDF417 (Table 8-4: "z PDF417", "Z PDF417 w/ Byte Count", "W1z
+    // MicroPDF417", "W1Z MicroPDF417 w/ Byte Count"). Mapping W1Z to PDF417
+    // made a MicroPDF417 stream read back as the wrong symbol, and made the
+    // generator export a PDF417 design as a MicroPDF417 one.
+    W1Z: { symbology: '19', name: 'MicroPDF417', noHumanReadable: true },
 };
 
 /**
@@ -161,9 +166,12 @@ export const dplBarcodeFor = (
         const key = b.slice(0, 3).toUpperCase();
         const type = DPL_W_BARCODES[key];
         if (!type) return null;
-        // W1C is the upper-case (human-readable) form, W1c the lower.
-        const upper = b[2] === b[2].toUpperCase() && b[2] !== b[2].toLowerCase();
-        return { type, hri: upper && !type.noHumanReadable ? 1 : 0, consumed: 3 };
+        // For the `Wxx` ids the case is NOT the human-readable flag — it picks
+        // a FORMAT VARIANT (Table 8-4): W1d QR = Auto format, W1D QR = Manual
+        // format; W1c DataMatrix plain, W1C "w/ Byte Count"; W1f Aztec plain,
+        // W1F with a byte count. None of these 2D symbols prints a human-
+        // readable line at all, so no `Wxx` form carries HRI.
+        return { type, hri: 0, consumed: 3 };
     }
     const letter = b[0];
     const type = DPL_BARCODES[letter.toUpperCase()];

@@ -41,10 +41,13 @@ const DPL_LETTER_FOR: Record<string, { letter: string; wId?: string; name: strin
     // '7' (EAN/UPC) is NOT here: B/C/F/G are one id in the IR, so the letter is
     // derived from the data length in bFieldFor, not fixed.
     '11': { letter: 'P', name: 'Postnet' },
-    '12': { letter: 'Z', name: 'PDF417', wId: 'W1Z' },
+    // Single-letter `z` is PDF417 (Table 8-4). W1z/W1Z is MicroPDF417 — a
+    // DIFFERENT symbol — so PDF417 is NOT a W form.
+    '12': { letter: 'Z', name: 'PDF417' },
     '14': { letter: 'U', name: 'UPS MaxiCode' },
     '17': { letter: 'C', name: 'DataMatrix', wId: 'W1C' },
     '18': { letter: 'D', name: 'QR Code', wId: 'W1D' },
+    '19': { letter: 'z', name: 'MicroPDF417', wId: 'W1Z' },
     '23': { letter: 'F', name: 'Aztec', wId: 'W1F' },
 };
 
@@ -84,10 +87,18 @@ const bFieldFor = (sym: string, hri: boolean, data = ''): { field: string; warni
     }
     if (!entry) return null;
     if (entry.wId) {
-        // "The column labeled..." — the W forms carry their own case rule:
-        // W1C (upper C) prints human readable, W1c does not.
-        const field = hri ? entry.wId : entry.wId.slice(0, 2) + entry.wId[2].toLowerCase();
-        return { field };
+        // The `Wxx` case is a FORMAT VARIANT, not the human-readable flag
+        // (Table 8-4): W1d is QR Auto format while W1D is Manual format, W1c is
+        // plain DataMatrix while W1C adds a byte count, etc. We always write the
+        // PLAIN (lower-case) form — the one whose data is just the data — since
+        // the generator emits neither a byte-count prefix nor a manual-format
+        // QR prefix. None of these 2D symbols prints a human-readable line, so
+        // HRI never selects a form here.
+        const field = entry.wId.slice(0, 2) + entry.wId[2].toLowerCase();
+        const warning = hri
+            ? `DPL's ${entry.name} has no human-readable form, so the line is not printed.`
+            : undefined;
+        return { field, ...(warning ? { warning } : {}) };
     }
     // Postnet, MaxiCode and PDF417 have no human-readable form at all, so the
     // lowercase letter is the ONLY valid spelling; asking for text would give
