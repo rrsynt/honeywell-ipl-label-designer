@@ -171,6 +171,26 @@ describe('designerOnlyWarnings — screen-only properties are named, not dropped
         expect(designerOnlyWarnings('tspl', d)).toEqual([]);
     });
 
+    it('says the HRI size is not printed on the languages that cannot size it', () => {
+        // Measured: hriFontSize leaves the ZPL/EPL/TSPL/DPL streams
+        // byte-identical (the only change being the box height it adds to a 2D
+        // symbol). IPL carries it on its interpretive field — `I1;c21;k10`.
+        const d = designOf([barcodeField({ hriFontSize: 20 })]);
+        for (const lang of ['zpl', 'epl', 'tspl', 'dpl'] as const) {
+            const w = designerOnlyWarnings(lang, d);
+            expect(w, lang).toHaveLength(1);
+            expect(w[0], lang).toContain('"B"');
+            expect(w[0], lang).toContain('not printed');
+        }
+        // IPL DOES print it, so it must not be warned there.
+        expect(designerOnlyWarnings('ipl', d)).toEqual([]);
+    });
+
+    it('stays silent about the HRI size when none is set, or HRI is off', () => {
+        expect(designerOnlyWarnings('zpl', designOf([barcodeField()]))).toEqual([]);
+        expect(designerOnlyWarnings('zpl', designOf([barcodeField({ hriFontSize: 20, humanReadable: 'none' })]))).toEqual([]);
+    });
+
     it('names multi-up stock, which no language can gang', () => {
         const d = designOf([barcodeField()]);
         d.labelSettings = { ...d.labelSettings, columns: 2, rows: 1 };

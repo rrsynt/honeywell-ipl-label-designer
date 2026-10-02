@@ -1,4 +1,4 @@
-import type { Design, PrinterLanguage } from '../types';
+import type { BarcodeField, Design, PrinterLanguage } from '../types';
 
 /**
  * Properties the DESIGNER draws but no printer language can carry. The screen
@@ -40,6 +40,21 @@ export const designerOnlyWarnings = (language: PrinterLanguage, design: Design):
             const one = misaligned.length === 1;
             const where = language === 'ipl' ? 'IPL, ZPL and EPL' : 'this language';
             out.push(`${misaligned.map(f => `"${f.name}"`).join(', ')}: the human-readable line is anchored at the start of the bar code in ${where}, so the alignment set on screen ${one ? 'is' : 'are'} not printed. (TSPL carries it.)`);
+        }
+    }
+
+    // The point size of the human-readable line. IPL carries it on its
+    // interpretive field — the `I` command takes `k n`, which iplGenerator
+    // emits (`I1;c21;k10`) — and the canvas draws the size it is given. The
+    // other four generators never write it (measured: changing hriFontSize
+    // leaves their streams byte-identical, the only difference being the box
+    // height it contributes to a 2D symbol), so a size set on screen is not
+    // printed there and the line comes out at the printer's own default.
+    if (language !== 'ipl') {
+        const sized = shown.filter(f =>
+            f.type === 'barcode' && (f as BarcodeField).hriFontSize !== undefined && f.humanReadable !== 'none');
+        if (sized.length > 0) {
+            out.push(`${sized.map(f => `"${f.name}"`).join(', ')}: the human-readable line is sized from the printer's own default in this language, so the size set on screen (${sized[0].type === 'barcode' ? (sized[0] as BarcodeField).hriFontSize : ''}pt) is not printed. (IPL carries it.)`);
         }
     }
 
