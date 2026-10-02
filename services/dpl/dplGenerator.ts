@@ -335,6 +335,14 @@ export const generateDPL = (design: Design): DplGenerateResult => {
                 continue;
             }
             if (bf.warning) warnings.push(`"${field.name}": ${bf.warning}`);
+            // DPL's bar-code records have no parameter that moves the
+            // human-readable line: the upper-case letter plainly prints the line
+            // below the bars. An "above" request therefore prints below — name
+            // it, the way EPL and TSPL do, so it is not a silent difference
+            // from the screen.
+            if (field.humanReadable === 'above') {
+                warnings.push(`"${field.name}" asks for the human-readable line above the bar code. DPL can only print it below, so it will print below.`);
+            }
             // A QR's model, error-correction level and mask exist ONLY in DPL's
             // MANUAL format (W1D), as a prefix on the data
             // (`[q,][e[m]i,]cdata…`, manual p.199). This generator writes the

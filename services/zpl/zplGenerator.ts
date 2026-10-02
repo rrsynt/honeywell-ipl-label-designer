@@ -154,6 +154,13 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
             const emit = ZPL_BARCODE[field.symbology];
             if (!emit) { warnings.push(`"${field.name}" is barcode type ${field.symbology}, which this ZPL subset cannot draw. It was left off the label.`); continue; }
             const hri = field.humanReadable === 'none' ? 'N' : 'Y';
+            // ZPL has no parameter that moves the human-readable line: the HRI
+            // flag is Y/N only and the printer always anchors the text below the
+            // bars. An "above" request therefore prints below — name it, the way
+            // EPL and TSPL do, so it is not a silent difference from the screen.
+            if (field.humanReadable === 'above') {
+                warnings.push(`"${field.name}" asks for the human-readable line above the bar code. ZPL can only print it below, so it will print below.`);
+            }
             // The HEIGHT slot is the BAR height. The field's h_mag is that height
             // in dots; box.height adds the interpretive row on top, which the
             // printer lays outside the bars, so using it would over-tall the
