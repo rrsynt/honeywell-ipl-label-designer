@@ -551,3 +551,33 @@ describe('transformBatchColumn', () => {
         expect(transformBatchColumn(batch, 'nope', 'UPPER(value)')).toBe(batch);
     });
 });
+
+// The canvas hides a field whose `suppress` matches; the non-batch IPL stream
+// must agree. It did NOT for a FIXED (or date/time) field: processDataSource
+// wrote `d3,<data>` straight out with no check, so a fixed field hidden on
+// screen still printed. The variable/linked path already went through
+// dataOrSuppressed, which is why only these branches slipped.
+describe('a suppressed fixed field prints nothing (canvas and stream agree)', () => {
+    const fixedDesign = (suppress?: string): Design => {
+        const d = designWith('Dest');
+        d.fields = [{
+            id: 1, type: 'text', name: 'T', x: 10, y: 10, rotation: 0,
+            dataSource: { type: 'fixed', data: 'HELLO' }, font: '0', fontSize: 12, h_mag: 1, w_mag: 1, suppress,
+        } as Field];
+        d.nextId = 2;
+        return d;
+    };
+
+    it('omits the data when the condition holds, and keeps it otherwise', async () => {
+        const matches = 'IF(value, "EQ", "HELLO", "yes", "")';
+        const noMatch = 'IF(value, "EQ", "NOPE", "yes", "")';
+
+        const suppressed = await generateIPL(fixedDesign(matches));
+        expect(suppressed, 'the canvas hides it').not.toContain('HELLO');
+        expect(fieldIsSuppressed(fixedDesign(matches).fields[0], fixedDesign(matches)), 'canvas agrees').toBe(true);
+
+        const shown = await generateIPL(fixedDesign(noMatch));
+        expect(shown, 'no match prints').toContain('HELLO');
+        expect(await generateIPL(fixedDesign(undefined)), 'absent condition prints').toContain('HELLO');
+    });
+});

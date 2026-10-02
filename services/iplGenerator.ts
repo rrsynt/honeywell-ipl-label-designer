@@ -526,7 +526,25 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
         
         const processDataSource = (field: TextField | BarcodeField) => {
             const dataSource = field.dataSource;
-            if (dataSource.type === 'fixed') return `d3,${dataSource.data.replace(/\n/g, '<SUB><CR>')}`;
+            // A field whose own `suppress` condition holds prints NOTHING.
+            // ONLY the field-level rule applies here — a GROUP condition
+            // chooses which FORMAT prints (formatForLabel), so the group's own
+            // format must keep the field's baked data or the row that does
+            // print it would come out blank. Judged on the same value the
+            // canvas uses (suppressionValueFor).
+            //
+            // Only the FIXED and date/time branches need it: they write
+            // `d3,<data>` straight out, so a fixed field whose `suppress`
+            // matched was hidden on screen yet still printed. The variable and
+            // linked fields return `d0,255` and defer to variableFieldsForPrint,
+            // which goes through dataOrSuppressed below — checking them HERE
+            // would be wrong, because it would skip their registration and the
+            // batch print block would never emit them at all.
+            const suppressed = !!field.suppress && field.suppress.trim() !== ''
+                && isSuppressed(field.suppress, suppressionValueFor(field, design)).suppress;
+            if (dataSource.type === 'fixed') {
+                return suppressed ? 'd3,' : `d3,${dataSource.data.replace(/\n/g, '<SUB><CR>')}`;
+            }
             // Date/time have no IPL command: `dn` documents only n=0..3
             // (PRM p.184 "Field Data, Define Source"), so the old d4/d5 output
             // was undefined data on a real printer, and our own viewer answered
@@ -534,7 +552,7 @@ export const generateIPL = async (design: Design, batchData?: BatchData): Promis
             // every printer prints that correctly, and re-generating refreshes
             // it. The designer keeps its live preview either way.
             if (dataSource.type === 'date' || dataSource.type === 'time') {
-                return `d3,${getFormattedDateTime(dataSource.type, dataSource.format)}`;
+                return suppressed ? 'd3,' : `d3,${getFormattedDateTime(dataSource.type, dataSource.format)}`;
             }
             
             // Registered once. A field that lives in more than one format (the
