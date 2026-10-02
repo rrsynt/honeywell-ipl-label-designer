@@ -120,16 +120,82 @@ export const nearestSmoothPoint = (points: number): number =>
         Math.abs(p - points) < Math.abs(best - points) ? p : best, DPL_SMOOTH_SIZES[0]);
 
 /**
+ * The resident fonts a general text field may be matched to. Fonts 7 and 8 are
+ * the OCR faces (OCR-A size I, OCR-B size III) — they are only correct for a
+ * field that is actually OCR, so a size fit must not pick them: matching a
+ * plain field whose height happens to land near 41 or 47 dots to an OCR face
+ * would silently change every glyph. They are reached only through an explicit
+ * design-font match (see DESIGN_OCR_FONT).
+ */
+const DPL_FITTABLE_FONTS = ['0', '1', '2', '3', '4', '5', '6'] as const;
+
+/** A design OCR font id -> the DPL OCR face that IS that font. */
+export const DESIGN_OCR_FONT: Record<string, string> = { '23': '7', '24': '8' };
+
+export interface DplBitmapFit {
+    /** DPL `b`: the resident font id. */
+    font: string;
+    /** DPL `c`: the integer width multiplier. */
+    widthMul: number;
+    /** DPL `d`: the integer height multiplier. */
+    heightMul: number;
+    /** |achieved - requested| / requested, for the height. */
+    heightError: number;
+    widthError: number;
+}
+
+/**
+ * Match a design text cell to a DPL resident font + integer multipliers.
+ *
+ * The design's cell is in DOTS (the designer draws `baseHeight * h_mag`); DPL
+ * sizes a text field as `font height * multiplier`, and the multiplier is an
+ * INTEGER 1-61. So the height is matched first — the axis both tables can agree
+ * on, the same rule the EPL table uses — and the width multiplier is then fit
+ * on the SAME font, because a DPL record names one font for both axes.
+ *
+ * The returned errors are RELATIVE, so the caller can report how far off DPL
+ * forces it to be: DPL's smallest resident font is 10 dots, so a design cell
+ * below that (c7 is 7) has no exact match at all and must be flagged rather
+ * than shipped as if it were the right size.
+ */
+export const fitDplBitmapFont = (widthDots: number, heightDots: number): DplBitmapFit => {
+    const wantH = Math.max(1, heightDots);
+    const wantW = Math.max(1, widthDots);
+    const clampMul = clampDplMultiplier;
+    const relErr = (got: number, want: number) => Math.abs(got - want) / want;
+    let best: DplBitmapFit | null = null;
+    for (const id of DPL_FITTABLE_FONTS) {
+        const m = DPL_FONTS[id];
+        const hMul = clampMul(wantH / m.height);
+        const wMul = clampMul(wantW / m.width);
+        const heightError = relErr(m.height * hMul, wantH);
+        const widthError = relErr(m.width * wMul, wantW);
+        // ONE font serves both axes, so the choice is scored on the WORSE of the
+        // two — picking on height alone chose a font 43% too wide whenever a
+        // taller narrow cell met a short wide face.
+        const score = Math.max(heightError, widthError);
+        if (!best || score < Math.max(best.heightError, best.widthError)) {
+            best = { font: id, widthMul: wMul, heightMul: hMul, heightError, widthError };
+        }
+    }
+    return best!;
+};
+
+/**
  * The multiplier alphabet (manual p. 134): "Values 1-9, A-Z, and a-z represent
  * multiplication factors from 1 - 61". 1-9 are themselves, then A-Z are 10-35
  * and a-z are 36-61.
  */
 export const dplMultiplier = (value: number): string => {
-    const n = Math.max(1, Math.min(61, Math.round(value)));
+    const n = clampDplMultiplier(value);
     if (n <= 9) return String(n);
     if (n <= 35) return String.fromCharCode(65 + (n - 10));   // A-Z
     return String.fromCharCode(97 + (n - 36));                // a-z
 };
+
+/** The multiplier alphabet's range: "values 1-61" (manual p. 134). */
+export const clampDplMultiplier = (value: number): number =>
+    Math.max(1, Math.min(61, Math.round(value)));
 
 export const dplMultiplierValue = (ch: string): number => {
     const c = ch.charCodeAt(0);

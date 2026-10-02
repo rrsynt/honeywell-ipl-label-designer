@@ -8,11 +8,11 @@
 // a DPL stream cannot say (see dplParser).
 
 import type { Design, Field, TextField, BarcodeField, PolygonField, TriangleField } from '../../types';
-import { DPI_MAP } from '../../constants';
+import { DPI_MAP, FONT_MAP } from '../../constants';
 import { getObjectBoundingBox } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
-import { dplMultiplier } from './dplFonts';
+import { dplMultiplier, clampDplMultiplier, fitDplBitmapFont, DESIGN_OCR_FONT, DPL_FONTS, type DplBitmapFit } from './dplFonts';
 import { DPL_BARCODES } from './dplBarcodes';
 import { charsetWarning } from '../charsetRisk';
 
@@ -246,16 +246,61 @@ export const generateDPL = (design: Design): DplGenerateResult => {
 
         if (field.type === 'text') {
             const data = fieldData(field, design);
-            // Font 9 (smooth/scalable) needs the two extra size fields; the
-            // bitmap fonts 0-8 must NOT carry them or the record shifts.
-            const smooth = field.fontSize >= 14;
-            const b = smooth ? '9' : '2';
-            if (smooth) {
+            // Which DPL face is chosen is decided by the DESIGN FONT, not by its
+            // point size. The branch used to be `fontSize >= 14`, so a bitmap
+            // field (whose font size the designer does not even show) became
+            // "smooth" the moment anything set fontSize to 14, and an outline
+            // field below 14pt collapsed onto a resident bitmap cell — the size
+            // and the face both wrong, silently. Every other generator here
+            // maps `field.font`; this one never read it.
+            const meta = FONT_MAP[field.font];
+            const isOutline = meta?.type === 'outline';
+            if (isOutline || !meta) {
+                // Outline (and uploaded) faces -> font 9, the scalable CG
+                // Triumvirate, sized in POINTS through the two extra fields the
+                // bitmap fonts must not carry. An uploaded face has no better
+                // home and is reported below.
+                const b = '9';
                 const pts = String(Math.max(4, Math.min(72, Math.round(field.fontSize))));
                 lines.push(`${rot}${b}${dplMultiplier(field.w_mag)}${dplMultiplier(field.h_mag)}A${pts.padStart(2, '0')}${rowStr}${colStr}P${pts.padStart(3, '0')}P${pts.padStart(3, '0')}${data}`);
-            } else {
-                lines.push(`${rot}${b}${dplMultiplier(field.w_mag)}${dplMultiplier(field.h_mag)}000${rowStr}${colStr}${data}`);
+                if (!meta) {
+                    warnings.push(`"${field.name}" uses an uploaded font. DPL prints it with the smooth CG Triumvirate face, which is a different shape.`);
+                }
+                continue;
             }
+            // A bitmap design cell maps to the nearest RESIDENT font by height,
+            // with the integer multiplier carrying the design's own h_mag/w_mag
+            // — the same "height ranks the table" rule the EPL generator uses.
+            // DPL's smallest face is 10 dots, so a smaller cell (c7 is 7) cannot
+            // be matched exactly; that is reported rather than shipped.
+            const cellW = (meta.baseWidth ?? 7) * (field.w_mag || 1);
+            const cellH = (meta.baseHeight ?? 9) * (field.h_mag || 1);
+            // An OCR design font IS an OCR DPL face, so match it by identity
+            // rather than by size — a size fit must never pick an OCR face for
+            // ordinary text (see fitDplBitmapFont).
+            const ocr = DESIGN_OCR_FONT[field.font];
+            const relErr = (got: number, want: number) => Math.abs(got - want) / want;
+            let fit: DplBitmapFit;
+            if (ocr) {
+                const fm = DPL_FONTS[ocr];
+                const widthMul = clampDplMultiplier(cellW / fm.width);
+                const heightMul = clampDplMultiplier(cellH / fm.height);
+                fit = {
+                    font: ocr, widthMul, heightMul,
+                    heightError: relErr(fm.height * heightMul, cellH),
+                    widthError: relErr(fm.width * widthMul, cellW),
+                };
+            } else {
+                fit = fitDplBitmapFont(cellW, cellH);
+            }
+            // One message covers both cases honestly: the face is right, but DPL
+            // may still not be able to reproduce this exact cell with an integer
+            // multiplier (its smallest face is 10 dots, and OCR faces have fixed
+            // cells). Report the achieved size so the reader can judge.
+            if (fit.heightError > 0.15 || fit.widthError > 0.15) {
+                warnings.push(`"${field.name}" is a ${meta.baseWidth}x${meta.baseHeight} dot cell (${cellW}x${cellH} at its magnification), which DPL's resident fonts do not match exactly; the closest is font ${fit.font} at ${DPL_FONTS[fit.font].width * fit.widthMul}x${DPL_FONTS[fit.font].height * fit.heightMul} dots.`);
+            }
+            lines.push(`${rot}${fit.font}${dplMultiplier(fit.widthMul)}${dplMultiplier(fit.heightMul)}000${rowStr}${colStr}${data}`);
             continue;
         }
 

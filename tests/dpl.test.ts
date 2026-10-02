@@ -23,6 +23,7 @@ import { substituteDplDateTime, isDplDateMarker } from '../services/dpl/dplDateT
 import { buildBwipSpec } from '../services/ipl/barcodes';
 import { detectSourceLanguage } from '../components/IPLViewerModal';
 import { estimateElementSize } from '../services/ipl/renderer';
+import { FONT_MAP } from '../constants';
 import type { Design } from '../types';
 
 /** 4x2in media at 203 dpi — the size the manual's own examples assume. */
@@ -419,10 +420,13 @@ describe('DPL generator', () => {
         expect(dpl.startsWith('\x02L\r'), 'opens label formatting').toBe(true);
         expect(dpl.trimEnd().endsWith('E'), 'and prints').toBe(true);
         expect(warnings).toEqual([]);
-        // a=1 (0 degrees) b=2 (font) c/d multipliers eee=000 ffff gggg data
+        // a=1 (0 degrees) b=font c/d multipliers eee=000 ffff gggg data. The
+        // default field is design font 0 (a 7x9 dot cell), which is DPL resident
+        // font 0 (7x10) at 1x — NOT the hardcoded font 2 this used to emit, which
+        // is a 15x27 cell (~2x too big). See the font-mapping tests below.
         const record = dpl.split('\r').find(l => /^\d/.test(l))!;
         expect(record[0]).toBe('1');
-        expect(record[1]).toBe('2');
+        expect(record[1]).toBe('0');
         expect(record.slice(15)).toBe('HELLO');
     });
 
@@ -1801,5 +1805,72 @@ describe('a DPL bar code keeps the height the design asked for', () => {
         // because DPL measures in inches, not dots.
         expect(eeeOf(withDpi(203, { h_mag: Math.round(0.4 * 203) }))).toBe('040');
         expect(eeeOf(withDpi(300, { h_mag: Math.round(0.4 * 300) }))).toBe('040');
+    });
+});
+
+// The DPL generator used to emit every text field as resident font 2 (a 15x27
+// cell), ignoring `field.font` entirely — and picked smooth-vs-bitmap by
+// `fontSize >= 14` rather than by the font's type. So a c7 design (5x7 dots)
+// printed ~4x too tall, an outline field under 14pt collapsed onto a bitmap
+// cell, and a bitmap field with fontSize >= 14 became "smooth". Every other
+// generator maps `field.font`; this pins DPL doing the same.
+describe('DPL generator maps the design font to a resident face', () => {
+    const recOf = (over: Record<string, unknown>) => {
+        const { dpl, warnings } = generateDPL(design([textField(over)]));
+        const rec = dpl.split('\r').find(l => /^\d/.test(l))!;
+        return { b: rec[1], c: rec[2], d: rec[3], warnings };
+    };
+
+    it('matches a bitmap cell to the nearest resident font by size', () => {
+        // c0 is 7x9; DPL font 0 is 7x10 — the closest face, at 1x.
+        expect(recOf({ font: '0', h_mag: 1, w_mag: 1 }).b).toBe('0');
+        // c2 is 10x14; no DPL face matches both axes, so it is REPORTED.
+        const c2 = recOf({ font: '2', h_mag: 1, w_mag: 1 });
+        expect(c2.warnings.join(' ')).toMatch(/do not match exactly/);
+    });
+
+    it('does not let the multipliers blow the size up', () => {
+        // c0 at 1x fits font 0 at 1x/1x — the old code wrote font 2 (27 dots
+        // tall) for a 9-dot cell.
+        const r = recOf({ font: '0', h_mag: 1, w_mag: 1 });
+        expect(dplMultiplierValue(r.d), 'height multiplier stays 1x').toBe(1);
+    });
+
+    it('sends an OUTLINE font to the smooth face at its point size', () => {
+        // c25 is outline; at 20pt it must be font 9, whatever the design font.
+        const r = recOf({ font: '25', fontSize: 20, h_mag: 1, w_mag: 1 });
+        expect(r.b, 'outline -> smooth (9)').toBe('9');
+        // and an outline field below 14pt is STILL smooth — the old branch sent
+        // it to a 15x27 bitmap cell.
+        expect(recOf({ font: '25', fontSize: 10, h_mag: 1, w_mag: 1 }).b).toBe('9');
+    });
+
+    it('keeps an OCR design font on the matching DPL OCR face', () => {
+        // c23 is OCR-A, c24 is OCR-B; DPL has faces 7 (OCR-A) and 8 (OCR-B).
+        expect(recOf({ font: '23', h_mag: 1, w_mag: 1 }).b).toBe('7');
+        expect(recOf({ font: '24', h_mag: 1, w_mag: 1 }).b).toBe('8');
+        // The face is right, but DPL's OCR cell is fixed (22x47), so a 7x9
+        // design cell cannot be reproduced exactly and that is REPORTED — the
+        // identity match must not silence the size warning.
+        expect(recOf({ font: '23', h_mag: 1, w_mag: 1 }).warnings.join(' ')).toMatch(/do not match exactly/);
+    });
+
+    it('does not turn a BITMAP font into smooth just because fontSize is high', () => {
+        // The bitmap editor hides fontSize, but a field can still carry 20.
+        expect(recOf({ font: '0', fontSize: 20, h_mag: 1, w_mag: 1 }).b, 'still a bitmap face').not.toBe('9');
+    });
+
+    it('reports an uploaded face, which has no resident equivalent', () => {
+        const r = recOf({ font: 'SomeUploadedFace', h_mag: 1, w_mag: 1 });
+        expect(r.b).toBe('9');
+        expect(r.warnings.join(' ')).toMatch(/uploaded font/);
+    });
+
+    it('ROUND TRIP: the face family survives for a matched cell', () => {
+        // c0 -> font 0 -> back to a bitmap cell of the same height.
+        const { dpl } = generateDPL(design([textField({ font: '0', h_mag: 1, w_mag: 1 })]));
+        const el = parseDPL(dpl, PAGE, new Date(), 203).elements.find(e => e.kind === 'text') as any;
+        expect(FONT_MAP[el.font]?.type, 'comes back a bitmap face').toBe('bitmap');
+        expect(Math.abs((FONT_MAP[el.font]?.baseHeight ?? 0) - 9)).toBeLessThanOrEqual(2);
     });
 });
