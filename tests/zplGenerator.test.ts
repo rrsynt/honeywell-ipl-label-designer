@@ -265,3 +265,37 @@ describe('generateZPL', () => {
         expect(zpl).not.toContain('^GF');
     });
 });
+
+// ZPL carries a QR's error-correction level as a PREFIX ON THE FIELD DATA
+// (`^FDH,<data>`), not as a ^BQ parameter — confirmed against Labelary, the ZPL
+// oracle: the prefix changes the rendered symbol, while a 4th ^BQ parameter
+// does not. The generator wrote no prefix, so the designer's "Error Correction"
+// control (qrEcl) was dropped and every QR printed at the printer's default.
+describe('ZPL emits the QR error-correction level as an ^FD prefix', () => {
+    const qr = (over: Record<string, unknown> = {}) => ({
+        id: 1, type: 'barcode' as const, name: 'Q', x: 10, y: 10, rotation: 0 as const,
+        dataSource: { type: 'fixed' as const, data: '1234567890' }, symbology: '18',
+        humanReadable: 'none', h_mag: 40, w_mag: 2, ...over,
+    });
+    const designOf = (f: unknown) => ({
+        name: 'z', labelSettings: { width: 60, height: 40, columns: 1, rows: 1, unit: 'mm', orientation: 'portrait' },
+        printerSettings: { model: 'PD43', dpi: 203, quantity: 1, mediaType: 'direct-thermal', mediaSenseMode: 'gap', printSpeed: 6, darkness: 10, language: 'zpl' },
+        fields: [f], dataSources: [], nextId: 9, guides: { horizontal: [], vertical: [] },
+    } as never);
+
+    it('prefixes the data with the level', () => {
+        for (const ecl of ['H', 'L', 'M', 'Q'] as const) {
+            expect(generateZPL(designOf(qr({ qrEcl: ecl }))).zpl, ecl).toContain(`^FD${ecl},1234567890`);
+        }
+    });
+    it('writes a bare data field when no level is set', () => {
+        const z = generateZPL(designOf(qr())).zpl;
+        expect(z).toContain('^FD1234567890');
+        expect(z, 'no stray prefix').not.toMatch(/\^FD[HLMQ],/);
+    });
+    it('does NOT prefix a non-QR symbol that happens to carry the key', () => {
+        const z = generateZPL(designOf(qr({ symbology: '6', qrEcl: 'H' }))).zpl;
+        expect(z).toContain('^FD1234567890');
+        expect(z).not.toContain('^FDH,');
+    });
+});

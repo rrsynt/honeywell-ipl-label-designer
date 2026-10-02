@@ -158,7 +158,16 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
             // Code 39's printer-generated check digit is ^B3's e flag. The ZPL
             // side has no host-verify mode, so 'host-verifies' maps to N.
             const e: 'Y' | 'N' = field.symbology === '0' && field.code39_checkDigit === 'printer-generated' ? 'Y' : 'N';
-            lines.push(`^FO${origin.x},${origin.y}`, `^BY${Math.max(1, field.w_mag)}`, `${emit(hri, h, e)}^FD${escapeFd(fieldData(field, design))}^FS`);
+            // QR's error-correction level is not a ^BQ parameter — it is a
+            // PREFIX on the field DATA. Probed against Labelary (the ZPL
+            // oracle): ^BQN,2,5^FDH,<data> renders different bytes from
+            // ^FDL,<data> and from a bare ^FD<data>, while adding a 4th ^BQ
+            // parameter changes nothing faithful. The generator wrote no prefix
+            // at all, so the designer's "Error Correction" control (qrEcl) was
+            // silently dropped and every symbol printed at the printer default.
+            const qrEcl = field.symbology === '18' && field.qrEcl ? `${field.qrEcl.toUpperCase()},` : '';
+            const fd = `${qrEcl}${fieldData(field, design)}`;
+            lines.push(`^FO${origin.x},${origin.y}`, `^BY${Math.max(1, field.w_mag)}`, `${emit(hri, h, e)}^FD${escapeFd(fd)}^FS`);
             continue;
         }
         if (field.type === 'box') {

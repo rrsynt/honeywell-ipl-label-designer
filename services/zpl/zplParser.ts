@@ -242,6 +242,18 @@ export const parseZPL = (code: string, dpi = 203): ViewerLabel => {
             return;
         }
         if (pendingBarcode) {
+            // A QR's error-correction level rides on the field DATA as a
+            // prefix — `^FDH,<data>` — not on ^BQ (confirmed with Labelary: the
+            // prefix changes the rendered symbol, a 4th ^BQ parameter does
+            // not). Without stripping it here the level would be read as part
+            // of the payload: the prefix would print as literal text and be
+            // ENCODED into the symbol, so the QR would carry "H," in its data.
+            let bcData = data;
+            let qrEcl: string | undefined;
+            if (pendingBarcode.symbology === 'qrcode') {
+                const m = /^([HLMQhlmq]),/.exec(bcData);
+                if (m) { qrEcl = m[1].toUpperCase(); bcData = bcData.slice(m[0].length); }
+            }
             const el: BarcodeElement = {
                 kind: 'barcode', id: nextId++, ox: origin.x, oy: origin.y, f,
                 symbology: pendingBarcode.symbology,
@@ -250,7 +262,8 @@ export const parseZPL = (code: string, dpi = 203): ViewerLabel => {
                 // IR ratio codes: 0 = 2.5:1, 1 = 3:1, 2 = 2:1. ^BY's default is 3.
                 ratio: byRatio <= 2.2 ? 2 : byRatio < 2.8 ? 0 : 1,
                 hri: pendingBarcode.hri,
-                source: { type: 'fixed', data },
+                source: { type: 'fixed', data: bcData },
+                ...(qrEcl ? { qrEcl } : {}),
             };
             if (pendingBarcode.code39Mode) el.code39Mode = pendingBarcode.code39Mode;
             // The anchor is derived from the size the RENDERER measures, not an

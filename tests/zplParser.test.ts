@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import './golden/setup';
 import { parseZPL, unescapeFd } from '../services/zpl/zplParser';
+import { generateZPL } from '../services/zpl/zplGenerator';
 import { resolveLabelAtBatch } from '../services/ipl/odometer';
 import { elementVisualBox, estimateElementSize } from '../services/ipl/renderer';
 import type { TextElement, BarcodeElement, BoxElement, LineElement } from '../services/ipl/types';
@@ -590,5 +591,48 @@ describe('a ZPL field draws the dot size the stream declared, at any dpi', () =>
         const code = '^XA^PW800^LL520^FO50,50^BY2^BCN,60,Y,N,N^FD123456^FS^XZ';
         expect(drawnCrossDots(code, 203)).toBe(drawnCrossDots(code, 300));
         expect(drawnCrossDots(code, 300)).toBe(drawnCrossDots(code, 406));
+    });
+});
+
+// The other half of the QR error-correction prefix: a stream's `^FDH,<data>`
+// must not have the prefix read as payload — it would print as literal text and
+// be ENCODED into the symbol. Stripped into the IR's `qrEcl` instead.
+describe('a QR ^FD error-correction prefix is read as a level, not as data', () => {
+    const qr = (fd: string) => parseZPL(`^XA^FO20,20^BQN,2,5^FD${fd}^FS^XZ`).elements[0] as BarcodeElement;
+
+    it('strips the prefix and carries the level', () => {
+        for (const [fd, ecl] of [['H,1234567890', 'H'], ['L,1234567890', 'L'], ['Q,x', 'Q'], ['M,x', 'M']] as const) {
+            const el = qr(fd);
+            expect(el.qrEcl, fd).toBe(ecl);
+            expect(el.source.type === 'fixed' && el.source.data, fd).toBe(fd.slice(2));
+        }
+    });
+
+    it('leaves ordinary QR data alone', () => {
+        const el = qr('1234567890');
+        expect(el.qrEcl).toBeUndefined();
+        expect(el.source.type === 'fixed' && el.source.data).toBe('1234567890');
+        // and a lowercase business payload that merely starts with a letter
+        const el2 = qr('Hello, world');
+        expect(el2.qrEcl, 'only H/L/M/Q + comma counts').toBeUndefined();
+        expect(el2.source.type === 'fixed' && el2.source.data).toBe('Hello, world');
+    });
+
+    it('does not touch a non-QR symbol whose data starts that way', () => {
+        const el = parseZPL('^XA^FO20,20^BCN,60,Y,N,N^FDH,123^FS^XZ').elements[0] as BarcodeElement;
+        expect(el.qrEcl).toBeUndefined();
+        expect(el.source.type === 'fixed' && el.source.data).toBe('H,123');
+    });
+
+    it('ROUND TRIP: emit then parse keeps the level and the data apart', () => {
+        const { zpl } = generateZPL({
+            name: 'z', labelSettings: { width: 60, height: 40, columns: 1, rows: 1, unit: 'mm', orientation: 'portrait' },
+            printerSettings: { model: 'PD43', dpi: 203, quantity: 1, mediaType: 'direct-thermal', mediaSenseMode: 'gap', printSpeed: 6, darkness: 10, language: 'zpl' },
+            fields: [{ id: 1, type: 'barcode', name: 'Q', x: 10, y: 10, rotation: 0, dataSource: { type: 'fixed', data: '9876543210' }, symbology: '18', humanReadable: 'none', h_mag: 40, w_mag: 2, qrEcl: 'H' }],
+            dataSources: [], nextId: 9, guides: { horizontal: [], vertical: [] },
+        } as never);
+        const el = parseZPL(zpl, 203).elements[0] as BarcodeElement;
+        expect(el.qrEcl).toBe('H');
+        expect(el.source.type === 'fixed' && el.source.data).toBe('9876543210');
     });
 });
