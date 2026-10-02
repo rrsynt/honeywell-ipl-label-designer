@@ -107,5 +107,5 @@ hijau saat perbaikannya dimatikan** — jadi test itu belum mengunci apa pun.
 
 ### C. Penutup
 
-- [x] Perbarui memori `method-property-emission-audit` dengan hasil akhir
-- [x] Tulis ringkasan hasil di `docs/research/` (properti apa yang bersih, apa yang diperbaiki)
+- [ ] Perbarui memori `method-property-emission-audit` dengan hasil akhir
+- [ ] Tulis ringkasan hasil di `docs/research/` (properti apa yang bersih, apa yang diperbaiki)
