@@ -581,6 +581,38 @@ describe('TSPL generator', () => {
         expect(pdf).toContain('"12345"');
     });
 
+    it('writes the QR model and mask into the QRCODE option tail', () => {
+        // QRCODE x,y,ECC,cell,mode,rotation,[J,][model,][mask,][area,]"content"
+        // (TSC guide p. 40). The PARSER already read M1/M2 and S0-S8 back into
+        // qrModel/qrMask (2026-09-30), but the GENERATOR wrote neither — so the
+        // designer's "QR Model" and "Mask" controls were dropped here while the
+        // round trip silently changed the design.
+        const qrOf = (over: Record<string, unknown>) =>
+            generateTSPL(design([barcodeField({ symbology: '18', name: 'QR', w_mag: 3, ...over })]));
+        const lineOf = (s: string) => s.split('\n').find(l => l.startsWith('QRCODE'))!;
+
+        // Absent: no tail at all.
+        expect(lineOf(qrOf({}).tspl)).not.toMatch(/,M[12],|,S\d,/);
+        // Model and mask are written...
+        expect(lineOf(qrOf({ qrModel: 1 }).tspl)).toContain(',M1,');
+        expect(lineOf(qrOf({ qrMask: 3 }).tspl)).toContain(',S3,');
+        expect(lineOf(qrOf({ qrModel: 2, qrMask: 5 }).tspl)).toContain(',M2,S5,');
+        // ...and read back, so the design survives the round trip.
+        for (const [over, model, mask] of [
+            [{ qrModel: 1 }, '1', undefined],
+            [{ qrMask: 3 }, undefined, '3'],
+            [{ qrModel: 2, qrMask: 5 }, '2', '5'],
+        ] as const) {
+            const el = parseTSPL(qrOf(over).tspl).elements[0] as { qrModel?: string; qrMask?: string };
+            expect(el.qrModel, JSON.stringify(over)).toBe(model);
+            expect(el.qrMask, JSON.stringify(over)).toBe(mask);
+        }
+        // Out of range is not a mask: left off and NAMED, not passed on.
+        const bad = qrOf({ qrMask: 9 });
+        expect(lineOf(bad.tspl)).not.toContain(',S9,');
+        expect(bad.warnings.join(' ')).toMatch(/outside the printer's S0-S8 range/);
+    });
+
     it('draws Data Matrix with DMATRIX and MaxiCode with MAXICODE', () => {
         // The TSC TSPL manual documents DMATRIX (p. 51) and MAXICODE (p. 54),
         // and this app draws other TSPL 2D commands (QRCODE p. 65, PDF417

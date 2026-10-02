@@ -223,7 +223,22 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                 const cell = Math.max(1, Math.round(field.w_mag ?? 3));
                 if (cmd === 'QRCODE') {
                     const ecc = field.qrEcl ?? 'M';
-                    lines.push(`QRCODE ${x},${y},${ecc},${cell},A,${rotation},"${escapeTsplData(data)}"`);
+                    // The bracketed TAIL carries the model and mask:
+                    //   QRCODE x,y,ECC,cell,mode,rotation,[J,][model,][mask,][area,]"content"
+                    // (TSC guide p. 40) — M1/M2 change the SYMBOL, S0-S8 the
+                    // PATTERN. The parser already reads both back into qrModel
+                    // and qrMask; the generator wrote neither, so the designer's
+                    // "QR Model" and "Mask" controls were dropped in TSPL while
+                    // the round trip changed the design.
+                    const tail: string[] = [];
+                    if (field.qrModel === 1 || field.qrModel === 2) tail.push(`M${field.qrModel}`);
+                    const mask = field.qrMask;
+                    if (mask !== undefined && mask >= 0 && mask <= 8) tail.push(`S${Math.round(mask)}`);
+                    else if (mask !== undefined) {
+                        warnings.push(`"${field.name}" asks for QR mask ${mask}, which is outside the printer's S0-S8 range. The printer chooses the mask.`);
+                    }
+                    const tailStr = tail.length ? `,${tail.join(',')}` : '';
+                    lines.push(`QRCODE ${x},${y},${ecc},${cell},A,${rotation}${tailStr},"${escapeTsplData(data)}"`);
                 } else if (cmd === 'MPDF417') {
                     // NOT the same shape as PDF417. The TSC manual gives
                     //   MPDF417 x,y,rotate,[Wn,][Hn,][Cn,]"content"
