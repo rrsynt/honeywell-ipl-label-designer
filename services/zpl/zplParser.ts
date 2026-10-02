@@ -16,6 +16,16 @@
 //    the IPL anchor (see types.ts ElementBase), and elementVisualBox derives the
 //    top-left back from it — so this parser converts one into the other.
 //  - ^A0 is font 0, the printer's scalable font. Its height/width are in dots.
+//
+// `dpi` is the resolution the caller will RENDER at. ZPL states every size in
+// dots, and the IR stores an outline field's `pointSize`, which the renderer
+// turns back into dots as `pointSize / 72 * dpi`. For that round trip to give
+// the stream's own dot count, the conversion here must divide by the SAME dpi:
+// a `^A0N,50,50` read as 50 * 72 / 203 = 18pt drew 75 dots at 300 dpi where the
+// stream asked for 50. Hardcoding 203, as this did, sized every ZPL text field
+// for a 203 dpi machine whatever the reader selected — the same defect the DPL
+// parser carried before it took a dpi (see parseDPL). The default keeps the
+// single-argument callers (tests) working at their reference resolution.
 
 import type { ViewerLabel, ViewerElement, TextElement, BarcodeElement, LineElement, BoxElement, ViewerIssue, EllipseElement, DiagonalElement } from '../ipl/types';
 import { estimateElementSize, elementVisualBox } from '../ipl/renderer';
@@ -113,7 +123,7 @@ export interface ZplParseResult {
  * yields the FIRST one plus an info issue naming how many were skipped — batch
  * jobs are a Fase 6 concern, and guessing which label to draw would hide data.
  */
-export const parseZPL = (code: string): ViewerLabel => {
+export const parseZPL = (code: string, dpi = 203): ViewerLabel => {
     const issues: ViewerIssue[] = [];
     const elements: ViewerElement[] = [];
 
@@ -216,7 +226,7 @@ export const parseZPL = (code: string): ViewerLabel => {
                     kind: 'text', id: nextId++, ox: origin.x, oy: origin.y,
                     f: rIdx >= 0 ? rIdx : f,
                     font: '25', hMag: 1, wMag: 1,
-                    pointSize: Math.max(1, Math.round((num(gp[1], 0) || 24) * 72 / 203)),
+                    pointSize: Math.max(1, Math.round((num(gp[1], 0) || 24) * 72 / dpi)),
                     source: { type: 'fixed', data: glyph },
                 } as ViewerElement);
             } else if (symbol === 'D' || symbol === 'E') {
@@ -246,11 +256,11 @@ export const parseZPL = (code: string): ViewerLabel => {
             // The anchor is derived from the size the RENDERER measures, not an
             // estimate of our own. The two diverging is exactly what put a
             // rotated field's top-left somewhere other than its ^FO point.
-            const sz = estimateElementSize(el, 203);
+            const sz = estimateElementSize(el, dpi);
             Object.assign(el, anchor(origin.x, origin.y, f, sz.lengthDots, sz.crossDots));
             elements.push(el);
         } else if (font) {
-            const pointSize = Math.max(1, Math.round(font.h * 72 / 203));
+            const pointSize = Math.max(1, Math.round(font.h * 72 / dpi));
             const el: TextElement = {
                 kind: 'text', id: nextId++, ox: origin.x, oy: origin.y, f,
                 // c25 is an outline font the renderer sizes by pointSize, which is
@@ -266,7 +276,7 @@ export const parseZPL = (code: string): ViewerLabel => {
                 ...(fbSpacing !== null ? { spaceDots: fbSpacing } : {}),
                 ...(fbAlign !== null && fbAlign !== 'left' ? { align: fbAlign } : {}),
             };
-            const sz = estimateElementSize(el, 203);
+            const sz = estimateElementSize(el, dpi);
             Object.assign(el, anchor(origin.x, origin.y, f, sz.lengthDots, sz.crossDots));
             // ^SN: the counter belongs to the printer, so the step rides on the
             // element and resolveLabelAtBatch advances the <FS> region by it.
@@ -279,7 +289,7 @@ export const parseZPL = (code: string): ViewerLabel => {
         // extent, taken from the element just pushed rather than recomputed, so
         // a rotated field is inverted where it actually landed.
         if (reverseField && elements.length > before) {
-            const box = elementVisualBox(elements[elements.length - 1], 203);
+            const box = elementVisualBox(elements[elements.length - 1], dpi);
             elements.push({
                 kind: 'reverse', id: nextId++, ox: box.x, oy: box.y, f: 0,
                 widthDots: Math.max(1, Math.round(box.w)),

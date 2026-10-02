@@ -532,3 +532,63 @@ describe('^GS — the symbol comes from the DATA, not a parameter', () => {
         expect(big.pointSize!).toBeGreaterThan(small.pointSize!);
     });
 });
+
+// A ZPL size is in DOTS, and the preview renders at the resolution the reader
+// picked. The parser converts that dot height to an IR point size, and the
+// renderer turns the point size BACK into dots as `pointSize / 72 * dpi` — so
+// the conversion and the render must use the SAME dpi, or the two disagree.
+// Before this, the parser divided by a hardcoded 203: a `^A0N,50,50` (50 dots)
+// was read as 18pt and DREW 75 dots at 300 dpi — every ZPL text field sized for
+// a 203 dpi machine whatever the reader selected, while the same stream's
+// barcode (sized straight in dots) stayed put. The class is the DPL parser's
+// hardcoded-203 defect (see ipl-dpl-inline-stx-special-commands). The invariant:
+// the SIZE A FIELD DRAWS IS THE SIZE THE STREAM DECLARED, at every dpi.
+describe('a ZPL field draws the dot size the stream declared, at any dpi', () => {
+    const drawnCrossDots = (code: string, dpi: number): number => {
+        const el = parseZPL(code, dpi).elements[0];
+        return estimateElementSize(el, dpi).crossDots;
+    };
+
+    it('keeps ^A0 outline text at its declared height across dpi', () => {
+        // 50 dots tall, declared once; the rendered height must not grow with dpi.
+        const code = '^XA^PW800^LL520^FO50,50^A0N,50,50^FDtext^FS^XZ';
+        const at203 = drawnCrossDots(code, 203);
+        const at300 = drawnCrossDots(code, 300);
+        const at406 = drawnCrossDots(code, 406);
+        for (const [dpi, h] of [[203, at203], [300, at300], [406, at406]] as const) {
+            // 50 dots + line-height leading (~1.15 to 1.35), never 1.5x.
+            expect(h, `at ${dpi} dpi`).toBeGreaterThanOrEqual(50);
+            expect(h, `at ${dpi} dpi`).toBeLessThanOrEqual(70);
+        }
+        // The old code grew this ~1.5x per resolution step (50 -> 75 -> 102).
+        expect(at300).toBeLessThan(at203 * 1.25);
+    });
+
+    it('reads the same dot height as the same point size at 203 dpi', () => {
+        // The reference case the default argument protects: 30 dots == 11pt.
+        const el = parseZPL('^XA^FO50,50^A0N,30,30^FDHello^FS^XZ').elements[0] as TextElement;
+        expect(el.pointSize).toBe(Math.round(30 * 72 / 203));
+    });
+
+    it('scales the point size inversely with dpi, so the dots stay fixed', () => {
+        const code = '^XA^PW800^LL520^FO50,50^A0N,50,50^FDtext^FS^XZ';
+        const p203 = (parseZPL(code, 203).elements[0] as TextElement).pointSize!;
+        const p300 = (parseZPL(code, 300).elements[0] as TextElement).pointSize!;
+        const p406 = (parseZPL(code, 406).elements[0] as TextElement).pointSize!;
+        expect(p203).toBeGreaterThan(p300);
+        expect(p300).toBeGreaterThan(p406);
+        // And each names the same physical size: pt/72*dpi == 50 dots.
+        for (const [dpi, pt] of [[203, p203], [300, p300], [406, p406]] as const) {
+            expect(Math.round((pt / 72) * dpi), `at ${dpi} dpi`).toBeGreaterThanOrEqual(45);
+        }
+    });
+
+    it('leaves the barcode height alone, since it was already in dots', () => {
+        // The control: a field sized directly in dots must be identical at every
+        // dpi, which is what makes the text case a real asymmetry rather than a
+        // general "sizes scale with dpi" behaviour.
+        const code = '^XA^PW800^LL520^FO50,50^BY2^BCN,60,Y,N,N^FD123456^FS^XZ';
+        expect(drawnCrossDots(code, 203)).toBe(drawnCrossDots(code, 300));
+        expect(drawnCrossDots(code, 300)).toBe(drawnCrossDots(code, 406));
+    });
+});

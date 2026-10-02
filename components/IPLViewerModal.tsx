@@ -323,7 +323,7 @@ export const IPLViewerModal: React.FC<{ onClose: () => void; onImportDesign: (de
     // click away from correct.
     const language = langOverride ?? detectedLanguage;
     const label = useMemo(
-        () => (language === 'zpl' ? parseZPL(debouncedCode)
+        () => (language === 'zpl' ? parseZPL(debouncedCode, dpi)
             : language === 'epl' ? parseEPL(debouncedCode)
             : language === 'tspl' ? parseTSPL(debouncedCode)
             // DPL measures every position UP from the label's bottom edge and
