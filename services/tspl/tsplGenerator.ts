@@ -262,6 +262,9 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                     if (cols !== undefined && !useCols) {
                         warnings.push(`"${field.name}" asks for ${cols} MicroPDF417 data columns, which is outside the printer's 0-4 range (0 = automatic). The printer chooses the column count.`);
                     }
+                    if (field.microRows !== undefined && field.microRows !== 0) {
+                        warnings.push(`"${field.name}": TSPL calculates MicroPDF417 data rows automatically from content and column count, so the ${field.microRows} rows set on screen is ignored.`);
+                    }
                     const cPart = useCols ? `,C${Math.round(cols)}` : '';
                     lines.push(`MPDF417 ${x},${y},${rotation},W${w},H${h}${cPart},"${escapeTsplData(data)}"`);
                 } else if (cmd === 'DMATRIX') {
