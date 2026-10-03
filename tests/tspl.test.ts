@@ -434,6 +434,25 @@ describe('TSPL generator', () => {
         expect(t.split(',')[2]).toBe('"1"'); // design font '0' -> TSPL font 1
     });
 
+    it('round-trips every design bitmap font, in rank order (the parser inverse)', () => {
+        // The generator's table must be the parser's EXACT reverse. It sent
+        // design 1 -> TSPL 3 and 2 -> TSPL 2 (non-monotonic): a smaller design
+        // font printed as TSPL's second-largest cell, and a saved design's
+        // font 1 reloaded as font 2 — the same swap EPL fixed in 9d5b0b5.
+        // Both tables keep the rank 0<1<2 (7x9<7x11<10x14) = 1<2<3
+        // (8x12<12x20<16x24).
+        const numFor = (font: string) =>
+            lines([textField({ font })]).find(l => l.startsWith('TEXT'))!.split(',')[2].replace(/"/g, '');
+        expect(numFor('0')).toBe('1');
+        expect(numFor('1')).toBe('2');
+        expect(numFor('2')).toBe('3');
+        for (const font of ['0', '1', '2']) {
+            const { tspl } = generateTSPL(design([textField({ font })]));
+            const el = parseTSPL(tspl).elements.find(e => e.kind === 'text') as { font?: string };
+            expect(el.font, `design font ${font}`).toBe(font);
+        }
+    });
+
     it('emits the BAR height, not the HRI-inclusive box height', () => {
         // BARCODE's height is the bar height (manual p. 38) and the HRI line is
         // a separate parameter; box.height adds that row, so emitting it

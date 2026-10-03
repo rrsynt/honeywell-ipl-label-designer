@@ -472,11 +472,17 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 const xMul = Math.max(1, Math.trunc(num(p[4], 1)));
                 const yMul = Math.max(1, Math.trunc(num(p[5], 1)));
                 const f = quadrantFromClockwise(p[3]);
-                // The IR font is chosen so the renderer measures the cell TSPL
-                // describes: font 1 is its 8x12, which is IPL's c0; 2/3/4 are
-                // closest to c2's 10x14 cell with the multiplier making up the
-                // rest. The outline path would ignore the multipliers.
-                const irFont = fontName === '1' ? '0' : '2';
+                // The IR font is the EXACT INVERSE of the generator's
+                // TSPL_FONT_FOR, by cell-height RANK (the only order both tables
+                // can agree on, as EPL's map is): design 0 (7x9) < 1 (7x11) <
+                // 2 (10x14) = TSPL 1 (8x12) < 2 (12x20) < 3 (16x24). So TSPL
+                // 1->0, 2->1, 3->2. This used to read `fontName === '1' ? '0'
+                // : '2'`, which sent TSPL 2/3 to design 2 — so a design font 1
+                // (which the generator writes as TSPL 2 under the inverse map)
+                // reloaded as font 2. TSPL 4/5 have no design font of their own
+                // and fall back to 2, matching EPL.
+                const TSPL_FONT_TO_IR: Record<string, string> = { '1': '0', '2': '1', '3': '2', '4': '2', '5': '2' };
+                const irFont = TSPL_FONT_TO_IR[fontName] ?? '2';
                 const el: TextElement = {
                     kind: 'text', id: nextId++,
                     ox: num(p[0], 0), oy: num(p[1], 0), f,

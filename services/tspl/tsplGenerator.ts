@@ -48,11 +48,22 @@ export interface TsplGenerateResult {
     warnings: string[];
 }
 
-/** Design font id -> the TSPL resident font number. */
+/**
+ * Design font id -> the TSPL resident font number.
+ *
+ * This MUST be the exact reverse of the parser's `TSPL_FONT_TO_IR`, and the two
+ * keep the RANK order by cell height: the designer's bitmap fonts grow 0 (7x9)
+ * < 1 (7x11) < 2 (10x14), and TSPL's grow 1 (8x12) < 2 (12x20) < 3 (16x24), so
+ * 0->1, 1->2, 2->3. The table used to send font 1 -> TSPL 3 and font 2 -> TSPL
+ * 2, which was not the parser's inverse AND was non-monotonic: a SMALLER design
+ * font printed as TSPL's second-LARGEST resident cell (16x24 for a 7x11 cell),
+ * and a saved design's font 1 reloaded as font 2. The same swap EPL fixed in
+ * 9d5b0b5, which never reached TSPL.
+ */
 const TSPL_FONT_FOR: Record<string, number> = {
-    '0': 1,  // 7x9  -> TSPL 1 (8x12)
-    '2': 2,  // 10x14 -> TSPL 2 (12x20)
-    '1': 3,  // 7x11 OCR -> TSPL 3 (16x24)
+    '0': 1,  // 7x9   -> TSPL 1 (8x12)
+    '1': 2,  // 7x11  -> TSPL 2 (12x20)
+    '2': 3,  // 10x14 -> TSPL 3 (16x24)
 };
 
 /**
