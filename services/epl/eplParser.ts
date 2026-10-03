@@ -106,18 +106,30 @@ const EPL_BARCODE_TYPES: Record<string, EplBarcode> = {
     'E80': { symbology: '7', eanUpcVersion: 1 },
     'UA0': { symbology: '7', eanUpcVersion: 3 },
     'UE0': { symbology: '7', eanUpcVersion: 4 },
+    // Code 93 and Codabar (manual Table 2-1, p. 3-12). These sat in the
+    // "no encoder" list for years, but the shared encoder has both — and the
+    // GENERATOR already writes '9'/'K' for them, so refusing them here broke
+    // the round trip: a design saved as EPL reloaded with its bar code gone.
+    '9': { symbology: '1' },
+    K: { symbology: '4' },
+    // Postnet and Planet. Table 2-1 gives their p5 as "—": neither takes a
+    // bar-width magnification, which is why the shared encoder models them at
+    // their natural cell size rather than through the narrow/wide path.
+    P: { symbology: '11' },
+    PL: { symbology: '22' },
 };
 
 /**
  * Types EPL defines but this renderer cannot encode. Recognized so an issue
  * can NAME the symbology instead of saying "unknown type" — the difference
  * between a user knowing what is missing and having to look it up.
+ *
+ * Every entry here is a claim that the ENCODER cannot draw the symbol, so it
+ * must be re-checked against `IPL_SYMBOLOGY_TO_BCID` whenever that table
+ * grows: four types (9/K/P/PL) were named here long after their encoders
+ * existed, and the message kept a working symbol off the label.
  */
 const EPL_KNOWN_UNENCODED: Record<string, string> = {
-    '9': 'Code 93',
-    K: 'Codabar',
-    P: 'POSTNET',
-    PL: 'Planet',
     J: 'Japanese POSTNET',
     L: 'Plessey (MSI-1)',
     M: 'MSI-3',

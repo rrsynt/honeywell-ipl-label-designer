@@ -94,6 +94,8 @@ const EPL_BARCODE_FOR: Record<string, string> = {
     '2': '2',   // Interleaved 2 of 5
     '1': '9',   // Code 93
     '4': 'K',   // Codabar
+    '11': 'P',  // Postnet
+    '22': 'PL', // Planet
 };
 
 const fieldData = (field: TextField | BarcodeField, design: Design): string => {

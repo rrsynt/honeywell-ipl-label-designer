@@ -20,6 +20,7 @@ import { renderLabel, computeLabelExtent, estimateElementSize } from '../service
 import { totalLabelCount } from '../services/ipl/odometer';
 import { parseEPL, tokenizeEpl, unescapeEpl, EPL_FONT_SIZES } from '../services/epl/eplParser';
 import { generateEPL, escapeEplData } from '../services/epl/eplGenerator';
+import { resolveBcid } from '../services/ipl/barcodes';
 import { jobSendabilityError, renderJobChunk, type PrintJob } from '../services/printQueue';
 import { validateTarget } from '../services/printTargets';
 import type { Design } from '../types';
@@ -134,12 +135,36 @@ describe('EPL parser', () => {
 
     it('names a known-but-unencodable type instead of saying "unknown"', () => {
         const named = (type: string) => parseEPL(`N\nB10,10,0,${type},2,2,60,B,"12345"`).issues.find(i => i.code === 'epl-barcode-unencoded')?.message;
-        expect(named('9')).toMatch(/Code 93/);
-        expect(named('K')).toMatch(/Codabar/);
-        expect(named('PL')).toMatch(/Planet/);
+        // 'M' (MSI-3) really has no encoder: IPL's id list stops at c22 and
+        // carries no MSI. Naming it is the point of this list.
         expect(named('M')).toMatch(/MSI-3/);
         // And such a field draws nothing rather than something wrong.
-        expect(parseEPL('N\nB10,10,0,9,2,2,60,B,"12345"').elements).toHaveLength(0);
+        expect(parseEPL('N\nB10,10,0,M,2,2,60,B,"12345"').elements).toHaveLength(0);
+    });
+
+    it('draws Code 93, Codabar, Postnet and Planet (manual Table 2-1, p. 3-12)', () => {
+        // These four sat in the "this viewer has no encoder for" list while the
+        // shared encoder carried all four — and the generator was already
+        // writing '9'/'K' for Code 93/Codabar. Refusing them on the way back
+        // broke the round trip: a design saved as EPL reloaded with its bar
+        // code gone. Table 2-1 lists them all; the encoder draws them all.
+        const draw = (type: string) => parseEPL(`N\nB10,10,0,${type},2,2,60,B,"12345"`);
+        const symOf = (type: string) => (draw(type).elements[0] as { symbology?: string } | undefined)?.symbology;
+        expect(symOf('9')).toBe('1');    // Code 93
+        expect(symOf('K')).toBe('4');    // Codabar
+        expect(symOf('P')).toBe('11');   // Postnet
+        expect(symOf('PL')).toBe('22');  // Planet
+        // The reason they must draw: the encoder resolves each to a real bcid,
+        // which is what actually lays ink down. A symbology id that resolves to
+        // null would be a drawn element that paints nothing — worse than the
+        // named drop it replaced.
+        for (const id of ['1', '4', '11', '22']) {
+            expect(resolveBcid(id, '12345'), `IR id ${id} must have an encoder`).not.toBeNull();
+        }
+        // None of them may still be reported as unencodable.
+        for (const type of ['9', 'K', 'P', 'PL']) {
+            expect(draw(type).issues.map(i => i.code)).not.toContain('epl-barcode-unencoded');
+        }
     });
 
     it('R offsets every element that follows it (manual p. 3-96)', () => {
@@ -606,6 +631,26 @@ describe('EPL generator', () => {
         const { epl, warnings } = generateEPL(withFields([barcodeField({ symbology: '7', dataSource: { type: 'fixed', data: '123' } })]));
         expect(epl.split('\n').some(l => l.startsWith('B'))).toBe(false);
         expect(warnings.some(w => /digits/.test(w))).toBe(true);
+    });
+
+    it('round-trips Code 93, Codabar, Postnet and Planet through EPL', () => {
+        // The generator wrote '9'/'K' for Code 93/Codabar while the parser
+        // refused both as "no encoder", so a design saved as EPL came back with
+        // the bar code DELETED — the silent-drift failure the reverse-table
+        // comment rules out. Postnet and Planet were missing from BOTH sides.
+        // Every one of the four has an encoder (proved by the resolveBcid
+        // check in the parser suite above), so all four must survive the trip.
+        for (const [sym, letter] of [['1', '9'], ['4', 'K'], ['11', 'P'], ['22', 'PL']] as const) {
+            const { epl, warnings } = generateEPL(withFields([
+                barcodeField({ symbology: sym, dataSource: { type: 'fixed', data: '12345678901' } }),
+            ]));
+            const line = epl.split('\n').find(l => l.startsWith('B'));
+            expect(line, `${sym} must emit a B line`).toBeTruthy();
+            expect(line!.split(',')[3], `${sym} must print as EPL "${letter}"`).toBe(letter);
+            expect(warnings, `${sym} is drawn, so nothing may be left off or substituted`).toEqual([]);
+            const back = parseEPL(epl).elements[0] as { symbology?: string } | undefined;
+            expect(back?.symbology, `${sym} must reload as itself`).toBe(sym);
+        }
     });
 
     it('prints HRI below with a warning when ABOVE was asked for', () => {
