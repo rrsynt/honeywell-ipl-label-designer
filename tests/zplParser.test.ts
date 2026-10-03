@@ -83,7 +83,7 @@ describe('parseZPL', () => {
         const label = parseZPL('^XA^FO30,30^BY2,3,60^BCN,60,Y,N,N^FD123456^FS^XZ');
         const el = label.elements[0] as BarcodeElement;
         expect(el.kind).toBe('barcode');
-        expect(el.symbology).toBe('code128');
+        expect(el.symbology).toBe('6'); // IR id for Code 128, not the bcid name
         expect(el.heightDots).toBe(60);
         expect(el.moduleDots).toBe(2);
         expect(el.hri).toBe(1);
@@ -95,10 +95,24 @@ describe('parseZPL', () => {
         const zpl = '^XA^FO0,0^B3N,N,50,N,N^FDABC^FS^FO0,80^BQN,2,4^FDMM,TEST^FS^FO0,160^BXN,5,200^FDXYZ^FS^XZ';
         const label = parseZPL(zpl);
         const [b3, bq, bx] = label.elements as BarcodeElement[];
-        expect(b3.symbology).toBe('code39');
+        expect(b3.symbology).toBe('0');  // IR id for Code 39
         expect(b3.hri).toBe(0);
-        expect(bq.symbology).toBe('qrcode');
-        expect(bx.symbology).toBe('datamatrix');
+        expect(bq.symbology).toBe('18'); // QR Code
+        expect(bx.symbology).toBe('17'); // DataMatrix
+    });
+
+    it('emits NUMERIC IR ids, which the shared encoder actually paints', async () => {
+        // The table held bcid NAMES ('code128'), and buildBwipSpec switches on
+        // the numeric ids — so every ZPL barcode drew ZERO ink with no issue.
+        // Measured: the same Code 128 gave 4320 ink pixels from IPL (c6) and 0
+        // from ZPL. This guards the FORM of the value, not just that a field
+        // exists, because a field whose symbology the encoder cannot resolve is
+        // drawn as nothing — the silent failure this suite exists to catch.
+        const { buildBwipSpec } = await import('../services/ipl/barcodes');
+        for (const stream of ['^XA^FO0,0^BCN,60,N,N,N^FD123456^FS^XZ', '^XA^FO0,0^B3N,N,60,N,N^FD12345^FS^XZ']) {
+            const el = parseZPL(stream).elements[0] as BarcodeElement;
+            expect(buildBwipSpec(el.symbology, '123456'), `symbology "${el.symbology}" must resolve`).not.toBeNull();
+        }
     });
 
     it('draws ^GB as a box, and as a line when one side is no thicker than the stroke', () => {
@@ -483,7 +497,7 @@ describe('1D barcode slots differ per command, measured (2026-09-30)', () => {
         // "a barcode this viewer does not draw yet" to say so.
         const label = parseZPL('^XA^FO10,10^B2N,Y,N,N,N^FD12345678^FS^XZ');
         expect(label.elements, '^B2 must draw').toHaveLength(1);
-        expect((label.elements[0] as { symbology: string }).symbology).toBe('interleaved2of5');
+        expect((label.elements[0] as { symbology: string }).symbology).toBe('2');
         expect(label.issues.map(i => i.code)).not.toContain('zpl-barcode-unsupported');
     });
 });

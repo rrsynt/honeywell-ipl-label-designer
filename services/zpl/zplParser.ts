@@ -100,18 +100,30 @@ const num = (s: string | undefined, fallback: number): number => {
     return Number.isFinite(n) ? n : fallback;
 };
 
-/** Barcode commands in scope, mapped to the IR symbology ids the renderer paints. */
+/**
+ * Barcode commands in scope, mapped to the IR symbology ids the renderer paints.
+ *
+ * These MUST be the NUMERIC IR ids (services/ipl/barcodes.ts), not bcid NAMES.
+ * The table used to hold bwip names — 'code128', 'code39', 'qrcode' — which the
+ * shared encoder `buildBwipSpec` does not recognise: it switches on the numeric
+ * ids, so every ZPL barcode drew ZERO ink with no issue raised. Measured: the
+ * same Code 128 rendered 4320 ink pixels from IPL (`c6`) and 0 from ZPL (`^BC`).
+ * The comment above claimed these were the IR ids; the values never were.
+ */
 const BARCODE_SYMBOLOGY: Record<string, string> = {
-    BC: 'code128',
-    B3: 'code39',
+    // ^BC ^B2 ^B3 field 2 is the printer-generated check digit (see below); the
+    // id alone is the plain symbology, matching EPL's `1`/`3` and TSPL's
+    // `128`/`39`.
+    BC: '6',   // Code 128
+    B3: '0',   // Code 39
     // ^B2 is Interleaved 2 of 5, and the generator has written it for the IR's
     // '2' since it was written — while this table had no entry, so a stream
     // produced by this app for an I2of5 design fell to the generic
     // "barcode this viewer does not draw yet" and the field was lost. Labelary
     // confirms the command exists and takes o,h,f,g like ^BC.
-    B2: 'interleaved2of5',
-    BQ: 'qrcode',
-    BX: 'datamatrix',
+    B2: '2',   // Interleaved 2 of 5
+    BQ: '18',  // QR Code
+    BX: '17',  // DataMatrix
 };
 
 export interface ZplParseResult {
@@ -250,7 +262,7 @@ export const parseZPL = (code: string, dpi = 203): ViewerLabel => {
             // ENCODED into the symbol, so the QR would carry "H," in its data.
             let bcData = data;
             let qrEcl: string | undefined;
-            if (pendingBarcode.symbology === 'qrcode') {
+            if (pendingBarcode.symbology === '18') {
                 const m = /^([HLMQhlmq]),/.exec(bcData);
                 if (m) { qrEcl = m[1].toUpperCase(); bcData = bcData.slice(m[0].length); }
             }
