@@ -167,12 +167,17 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
     const warnings: string[] = [];
     const lines: string[] = [];
 
-    const { width, height, orientation } = design.labelSettings;
-    const landscape = orientation === 'landscape';
+    // The stock is exactly what the settings say, with no landscape transpose. A
+    // landscape stock is simply one whose width exceeds its length — the driver
+    // leaves the coordinates alone, and the canvas, IPL and sheet preview all
+    // read it that way. This generator used to swap the axes, so a landscape
+    // design emitted a label turned a quarter — a field drawn near the right
+    // edge landed off the label.
+    const { width, height } = design.labelSettings;
     // SIZE takes millimetres with an explicit unit (manual p. 1). Writing mm
     // rather than dots keeps the label correct if the dpi ever changes.
     const mm = (d: number) => Math.round((d / (DPI_MAP[dpi])) * 10) / 10;
-    lines.push(`SIZE ${mm(dots(landscape ? height : width))} mm,${mm(dots(landscape ? width : height))} mm`);
+    lines.push(`SIZE ${mm(dots(width))} mm,${mm(dots(height))} mm`);
     lines.push('GAP 3 mm,0');
     lines.push('CLS');
 

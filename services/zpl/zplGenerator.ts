@@ -117,9 +117,15 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
     const warnings: string[] = [];
     const lines: string[] = ['^XA', '^CI28'];
 
-    const { width, height, orientation } = design.labelSettings;
-    const landscape = orientation === 'landscape';
-    lines.push(`^PW${dots(landscape ? height : width)}`, `^LL${dots(landscape ? width : height)}`);
+    // The stock is exactly what the settings say: ^PW is the width and ^LL the
+    // length, with no landscape transpose. A landscape stock is simply one whose
+    // width exceeds its length — the driver leaves the coordinates alone (a
+    // `btLandscape` page declares W388 for a 96x48 mm stock, printed where it was
+    // authored), and the canvas, IPL and sheet preview all read it that way. This
+    // generator used to swap the axes, so a landscape design emitted a label
+    // turned a quarter — a field drawn near the right edge landed off the label.
+    const { width, height } = design.labelSettings;
+    lines.push(`^PW${dots(width)}`, `^LL${dots(height)}`);
 
     for (const field of printableFields(design)) {
         const box = getObjectBoundingBox(field, design);

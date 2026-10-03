@@ -133,11 +133,16 @@ export const generateEPL = (design: Design): EplGenerateResult => {
     const warnings: string[] = [];
     const lines: string[] = ['N'];
 
-    const { width, height, orientation } = design.labelSettings;
-    const landscape = orientation === 'landscape';
-    // q sets the label WIDTH, Q the form LENGTH (manual pp. 3-89, 3-91).
-    lines.push(`q${dots(landscape ? height : width)}`);
-    lines.push(`Q${dots(landscape ? width : height)},${Math.max(0, Math.round((design.printerSettings.mediaSenseMode === 'continuous' ? 0 : 3)))}`);
+    // The stock is exactly what the settings say: q is the label WIDTH and Q the
+    // form LENGTH (manual pp. 3-89, 3-91), with no landscape transpose. A
+    // landscape stock is simply one whose width exceeds its length — the driver
+    // leaves the coordinates alone, and the canvas, IPL and sheet preview all
+    // read it that way. This generator used to swap the axes, so a landscape
+    // design emitted a label turned a quarter — a field drawn near the right
+    // edge landed off the label.
+    const { width, height } = design.labelSettings;
+    lines.push(`q${dots(width)}`);
+    lines.push(`Q${dots(height)},${Math.max(0, Math.round((design.printerSettings.mediaSenseMode === 'continuous' ? 0 : 3)))}`);
 
     for (const field of printableFields(design)) {
         const box = getObjectBoundingBox(field, design);

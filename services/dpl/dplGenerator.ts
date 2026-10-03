@@ -171,10 +171,13 @@ export const generateDPL = (design: Design): DplGenerateResult => {
     const warnings: string[] = [];
     const lines: string[] = [];
 
-    const { width, height, orientation } = design.labelSettings;
-    const landscape = orientation === 'landscape';
-    // The label LENGTH as the printer sees it: the feed direction.
-    const labelLengthDots = dots(landscape ? width : height);
+    // The stock is exactly what the settings say, with no landscape transpose. A
+    // landscape stock is simply one whose width exceeds its length — the driver
+    // leaves the coordinates alone, and the canvas, IPL and sheet preview all
+    // read it that way. This generator used to take the length from the width
+    // for a landscape stock, so a field's ROW (counted up from the bottom edge)
+    // landed where the canvas never showed it.
+    const { height } = design.labelSettings;
 
     /**
      * Millimetres from the TOP of the label -> DPL rows counting UP from the
@@ -182,7 +185,7 @@ export const generateDPL = (design: Design): DplGenerateResult => {
      * generator stays in it so the stream needs no <STX>m).
      */
     const rowFor = (mmFromTop: number): number => {
-        const fromBottom = (landscape ? width : height) - mmFromTop;
+        const fromBottom = height - mmFromTop;
         return Math.max(0, Math.min(9999, Math.round((fromBottom / 25.4) * 100)));
     };
     const colFor = (mmFromLeft: number): number =>

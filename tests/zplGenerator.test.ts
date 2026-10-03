@@ -39,11 +39,17 @@ describe('generateZPL', () => {
         expect(zpl).toContain('^LL400');
     });
 
-    it('swaps the axes for a landscape label', () => {
+    it('a landscape label keeps the width and length as declared', () => {
+        // Landscape is DESCRIPTIVE — a stock whose width exceeds its length. It
+        // is not a quarter turn: the canvas, IPL and the sheet preview all keep
+        // the declared size and field coordinates, and the driver's own
+        // `btLandscape` fixture declares W388 for a 96x48 mm stock. This test
+        // used to assert the opposite (^PW400/^LL800, i.e. swapped), which made
+        // a landscape design emit a label a field near the right edge fell off.
         const d = design([text()], { labelSettings: { width: 100, height: 50, columns: 1, rows: 1, unit: 'mm', orientation: 'landscape' } });
         const { zpl } = generateZPL(d);
-        expect(zpl).toContain('^PW400');
-        expect(zpl).toContain('^LL800');
+        expect(zpl).toContain('^PW800');
+        expect(zpl).toContain('^LL400');
     });
 
     it('sizes a bitmap font by h_mag/w_mag and an outline font by point size', () => {
