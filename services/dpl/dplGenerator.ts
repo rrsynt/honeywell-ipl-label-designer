@@ -33,7 +33,7 @@ const dplRotation = (rotation: number): number => {
  * codes with human-readable interpretations. Values a through z (lowercase)
  * will print bar codes only" (p. 133).
  */
-const DPL_LETTER_FOR: Record<string, { letter: string; wId?: string; name: string }> = {
+const DPL_LETTER_FOR: Record<string, { letter: string; wId?: string; name: string; hriAbove?: boolean }> = {
     '0': { letter: 'A', name: 'Code 39' },
     '2': { letter: 'D', name: 'Interleaved 2 of 5' },
     '4': { letter: 'I', name: 'Codabar' },
@@ -49,6 +49,12 @@ const DPL_LETTER_FOR: Record<string, { letter: string; wId?: string; name: strin
     '18': { letter: 'D', name: 'QR Code', wId: 'W1D' },
     '19': { letter: 'z', name: 'MicroPDF417', wId: 'W1Z' },
     '23': { letter: 'F', name: 'Aztec', wId: 'W1F' },
+    // The standalone UPC addenda (Table F-1). They are their own symbols, so
+    // they need no main symbol beside them — and unlike every other letter here
+    // their human-readable line prints ABOVE the bars (Appendix G), which is a
+    // property of the record rather than a case choice.
+    '25': { letter: 'M', name: '2-digit UPC addendum', hriAbove: true },
+    '26': { letter: 'N', name: '5-digit UPC addendum', hriAbove: true },
 };
 
 /**
@@ -338,13 +344,22 @@ export const generateDPL = (design: Design): DplGenerateResult => {
                 continue;
             }
             if (bf.warning) warnings.push(`"${field.name}": ${bf.warning}`);
-            // DPL's bar-code records have no parameter that moves the
-            // human-readable line: the upper-case letter plainly prints the line
-            // below the bars. An "above" request therefore prints below — name
-            // it, the way EPL and TSPL do, so it is not a silent difference
-            // from the screen.
-            if (field.humanReadable === 'above') {
-                warnings.push(`"${field.name}" asks for the human-readable line above the bar code. DPL can only print it below, so it will print below.`);
+            // DPL has no parameter that MOVES the human-readable line — when a
+            // type prints one, its position comes from the type (Appendix G
+            // prints Q/R/S/M/N above and the rest below, and its figures show
+            // it). So an "above" request on a below type still prints below,
+            // and vice versa: both are named, because either one is a real
+            // difference from the screen.
+            //
+            // The old message claimed DPL "can only print it below", which the
+            // manual's own samples disprove — M's "42" and N's "01234" sit over
+            // their bars.
+            const printsAbove = DPL_LETTER_FOR[field.symbology]?.hriAbove === true;
+            const wantsAbove = field.humanReadable === 'above';
+            if (wantsAbove && !printsAbove) {
+                warnings.push(`"${field.name}" asks for the human-readable line above the bar code. DPL prints it below for this symbology, so it will print below.`);
+            } else if (!wantsAbove && field.humanReadable !== 'none' && printsAbove) {
+                warnings.push(`"${field.name}" asks for the human-readable line below the bar code. DPL prints it above for this symbology, so it will print above.`);
             }
             // A QR's model, error-correction level and mask exist ONLY in DPL's
             // MANUAL format (W1D), as a prefix on the data

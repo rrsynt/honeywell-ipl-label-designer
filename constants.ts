@@ -425,4 +425,7 @@ export const BARCODE_MAP: { [key: string]: string } = {
     // a TSPL stream carrying them can round-trip through the designer instead of
     // having the symbol dropped as "not a symbology".
     '23': 'Aztec', '24': 'Codablock F',
+    // Likewise 25/26: DPL's Table F-1 gives M and N as standalone UPC addenda,
+    // so a DPL stream carrying one round-trips instead of drawing nothing.
+    '25': 'UPC 2-Digit Addendum', '26': 'UPC 5-Digit Addendum',
 };

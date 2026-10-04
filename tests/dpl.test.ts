@@ -170,6 +170,34 @@ describe('DPL bar code table (manual Appendix F, cross-checked against Fiji)', (
         expect(dplBarcodeFor('Z')?.hri, 'PDF417 cannot print text').toBe(0);
     });
 
+    it('gives M and N their own symbology, not the EAN/UPC family id', () => {
+        // Table F-1 lists them as symbols in their OWN right — "2 digit UPC
+        // addendum" and "5 digit UPC addendum" — and a DPL stream prints one
+        // alone, with no main symbol beside it. Mapping them to '7' handed the
+        // encoder an EAN/UPC request with no version, so it returned no spec
+        // and the record drew NOTHING, with no issue to say so.
+        expect(dplBarcodeFor('M')?.type.symbology).toBe('25');
+        expect(dplBarcodeFor('N')?.type.symbology).toBe('26');
+        // The control: the letters that DO belong to the family keep '7'.
+        expect(dplBarcodeFor('B')?.type.symbology).toBe('7');
+        expect(dplBarcodeFor('F')?.type.symbology).toBe('7');
+    });
+
+    it('marks the five types Appendix G prints ABOVE the bars', () => {
+        // "Human readable characters for this barcode symbology are printed
+        // above the symbol" — said for Q, R, S, M and N, and the manual's own
+        // figures show it: M's "42" and N's "01234" sit OVER the bars while
+        // L's control figure sits under. The uppercase letter alone says only
+        // that a line exists, so the position has to be carried separately.
+        for (const letter of ['Q', 'R', 'S', 'M', 'N']) {
+            expect(dplBarcodeFor(letter)?.type.hriAbove, `${letter} prints above`).toBe(true);
+        }
+        // The control: every other type prints below (or has no line at all).
+        for (const letter of ['A', 'B', 'E', 'F', 'G', 'L', 'O', 'T']) {
+            expect(dplBarcodeFor(letter)?.type.hriAbove, `${letter} prints below`).toBeFalsy();
+        }
+    });
+
     it('reads the two-character Wxx ids, which shift the whole header', () => {
         // "Value W requires two additional characters to specify the Bar
         // Code/Font ID" (manual p. 133). Consuming one letter would leave the
@@ -1139,6 +1167,53 @@ describe('DPL EAN/UPC variants and the price checksum (Appendix F/G/P)', () => {
         const r = generateDPL(design([{ id: 1, type: 'barcode', name: 'BC', x: 5, y: 5, rotation: 0, symbology: '7', humanReadable: 'none', h_mag: 60, w_mag: 2, dataSource: { type: 'fixed', data: '123456' } }]));
         expect(r.warnings.some(w => /BC/.test(w) && /not a length DPL recognizes/.test(w))).toBe(true);
         expect(r.dpl).not.toMatch(/^1[A-Za-z]/m);
+    });
+
+    it('draws the M/N UPC addenda, which used to resolve to no spec at all', () => {
+        // Table F-1 gives M and N their own rows — "2 digit UPC addendum",
+        // "5 digit UPC addendum" — and a DPL stream prints one ALONE. The table
+        // used to send both through the EAN/UPC id '7' with no version, so
+        // buildBwipSpec returned null: the record drew NO INK and raised no
+        // issue. The encoder must resolve a real symbol for each.
+        const add = (b: string, data: string) => {
+            const r = bcidFor(b, data);
+            return { sym: r.bc?.symbology, bcid: r.bcid };
+        };
+        expect(add('M', '12'), 'M is the 2-digit addendum').toEqual({ sym: '25', bcid: 'ean2' });
+        expect(add('N', '12345'), 'N is the 5-digit addendum').toEqual({ sym: '26', bcid: 'ean5' });
+        // The lowercase forms are the same symbols without the human-readable
+        // line — still drawn, which is what "no ink" hid before.
+        expect(add('m', '12').bcid, 'the lowercase form still draws').toBe('ean2');
+        // The control: an ordinary EAN/UPC member still resolves through '7'.
+        expect(bcidFor('F', '123456789012').bcid).toBe('ean13');
+    });
+
+    it('prints the addendum human-readable line ABOVE, as Appendix G says', () => {
+        // "Human readable characters for this barcode symbology are printed
+        // above the symbol" — written for Q, R, S, M and N, and shown in the
+        // manual's own figures (M's "42" and N's "01234" sit over the bars,
+        // while L's control sits under). The IR's hri 2 means above.
+        expect(bcidFor('M', '12').bc?.hri, 'M prints above').toBe(2);
+        expect(bcidFor('N', '12345').bc?.hri, 'N prints above').toBe(2);
+        expect(bcidFor('Q', '123456789012345678').bc?.hri, 'Q prints above').toBe(2);
+        expect(bcidFor('R', '123456789012345678').bc?.hri, 'R prints above').toBe(2);
+        expect(bcidFor('S', '123456789012345678').bc?.hri, 'S prints above').toBe(2);
+        // The controls: below-printing types keep hri 1, and the lowercase form
+        // prints no line at all.
+        expect(bcidFor('A', 'ABC123').bc?.hri, 'Code 39 prints below').toBe(1);
+        expect(bcidFor('L', '12345678901234').bc?.hri, 'I2of5+bearer prints below').toBe(1);
+        expect(bcidFor('m', '12').bc?.hri, 'lowercase prints no line').toBe(0);
+    });
+
+    it('round-trips the M/N addenda out and back', () => {
+        const addField = (symbology: string) => ({ id: 1, type: 'barcode', name: 'BC', x: 5, y: 5, rotation: 0, symbology, humanReadable: 'none', h_mag: 60, w_mag: 2, dataSource: { type: 'fixed', data: symbology === '25' ? '12' : '12345' } });
+        for (const [sym, letter] of [['25', 'm'], ['26', 'n']] as const) {
+            const dpl = generateDPL(design([addField(sym)])).dpl;
+            const rec = dpl.split('\r').find(l => /^1[A-Za-z]/.test(l))!;
+            expect(rec[1], `${sym} must print as DPL "${letter}" with no HRI`).toBe(letter);
+            const back = parseDPL(dpl, PAGE).elements.find(e => e.kind === 'barcode') as { symbology?: string } | undefined;
+            expect(back?.symbology, `${sym} must reload as itself`).toBe(sym);
+        }
     });
 
     it('round-trips the EAN/UPC variant out and back', () => {

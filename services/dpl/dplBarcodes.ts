@@ -50,6 +50,19 @@ export interface DplBarcodeType {
     eanVariant?: number;
     /** A standalone EAN/UPC add-on, encoded as its own symbol. */
     addon?: 'ean2' | 'ean5';
+    /**
+     * True when this type's human-readable line prints ABOVE the symbol rather
+     * than below.
+     *
+     * Appendix G says so in words for Q, R, S, M and N ("Human readable
+     * characters for this barcode symbology are printed above the symbol"), and
+     * the manual's own figures show it: the M sample prints "42" over the
+     * bars, the N sample "01234" over them, while L's control figure sits its
+     * text underneath. The uppercase letter alone says only that a line is
+     * printed; for these five it is not below, which is what the IR's hri 0/1/2
+     * has to carry.
+     */
+    hriAbove?: boolean;
 }
 
 /**
@@ -72,13 +85,16 @@ export const DPL_BARCODES: Record<string, DplBarcodeType> = {
     J: { symbology: '2', name: 'Interleaved 2 of 5, mod-10' },
     K: { symbology: '1', name: 'Plessey' },
     L: { symbology: '2', name: 'Interleaved 2 of 5, mod-10 + bearer bars' },
-    M: { symbology: '7', name: '2-digit UPC addendum', addon: 'ean2' },
-    N: { symbology: '7', name: '5-digit UPC addendum', addon: 'ean5' },
+    // M and N are the addenda THEMSELVES, not a main symbol: the id is 25/26,
+    // and giving them '7' made the encoder ask for an EAN/UPC with no version,
+    // which draws nothing at all.
+    M: { symbology: '25', name: '2-digit UPC addendum', addon: 'ean2', hriAbove: true },
+    N: { symbology: '26', name: '5-digit UPC addendum', addon: 'ean5', hriAbove: true },
     O: { symbology: '1', name: 'Code 93' },
     P: { symbology: '11', name: 'Postnet', noHumanReadable: true },
-    Q: { symbology: '6', name: 'UCC/EAN Code 128' },
-    R: { symbology: '6', name: 'UCC/EAN Code 128 K-Mart' },
-    S: { symbology: '6', name: 'UCC/EAN Code 128 Random Weight' },
+    Q: { symbology: '6', name: 'UCC/EAN Code 128', hriAbove: true },
+    R: { symbology: '6', name: 'UCC/EAN Code 128 K-Mart', hriAbove: true },
+    S: { symbology: '6', name: 'UCC/EAN Code 128 Random Weight', hriAbove: true },
     T: { symbology: '21', name: 'Telepen' },
     U: { symbology: '14', name: 'UPS MaxiCode', noHumanReadable: true },
     V: { symbology: '21', name: 'FIM', noHumanReadable: true },

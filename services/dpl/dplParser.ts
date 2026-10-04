@@ -1468,17 +1468,26 @@ export const parseDPL = (
             }
             elements.push({
                 kind: 'barcode', id: nextId++, ox: col, oy: row, f: rot,
+                // Table F-1's M and N carry their own symbology id now (25/26):
+                // as '7' the encoder was handed a main-symbol request with no
+                // version and returned no spec, so the record drew NOTHING and
+                // said nothing — the addendum is the whole symbol here, not a
+                // variant of one.
                 symbology: bc.type.symbology,
                 heightDots,
                 moduleDots,
                 ratio,
-                // The letter names which EAN/UPC member this is, and the addenda
-                // are their own symbols. Without it the variant is guessed from
-                // the digit count, which fails on the manual's own records.
+                // The letter names which EAN/UPC member this is. Without it the
+                // variant is guessed from the digit count, which fails on the
+                // manual's own records.
                 ...(bc.type.eanVariant !== undefined ? { eanUpcVersion: bc.type.eanVariant } : {}),
                 ...(microColumns !== undefined ? { microColumns } : {}),
                 ...(microRows !== undefined ? { microRows } : {}),
-                hri: bc.hri,
+                // Appendix G: Q, R, S, M and N print their human-readable line
+                // ABOVE the bars, and the manual's own figures show it (M's
+                // "42" and N's "01234" sit over the symbol, while L's control
+                // sits under). The uppercase letter only says a line exists.
+                hri: bc.hri !== 0 && bc.type.hriAbove ? 2 : bc.hri,
                 source: { type: 'fixed', data: barcodeData },
             } as BarcodeElement);
             continue;

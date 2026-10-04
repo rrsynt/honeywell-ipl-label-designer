@@ -27,6 +27,15 @@ export const IPL_SYMBOLOGY_TO_BCID: { [id: string]: string } = {
     '18': 'qrcode',
     '19': 'micropdf417',
     '22': 'planet',
+    // 25/26 are NOT IPL bar code types — the PRM's c list stops at c22, the
+    // same way 23/24 are the IR's own ids for TSPL's 2D commands. DPL's Table
+    // F-1 gives M and N as symbols in their OWN right ("2 digit UPC addendum",
+    // "5 digit UPC addendum"), not as a variant of a main symbol: a DPL stream
+    // prints an addendum alone, with no EAN-13 beside it. Mapping them to '7'
+    // (EAN/UPC) produced a spec with no version and therefore NO INK and no
+    // message at all, because the encoder needs a main symbol to attach to.
+    '25': 'ean2',
+    '26': 'ean5',
 };
 
 // pixs-shaped rasters: keep modules square, do not stretch vertically by h.
