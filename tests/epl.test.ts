@@ -135,11 +135,38 @@ describe('EPL parser', () => {
 
     it('names a known-but-unencodable type instead of saying "unknown"', () => {
         const named = (type: string) => parseEPL(`N\nB10,10,0,${type},2,2,60,B,"12345"`).issues.find(i => i.code === 'epl-barcode-unencoded')?.message;
-        // 'M' (MSI-3) really has no encoder: IPL's id list stops at c22 and
-        // carries no MSI. Naming it is the point of this list.
+        // These five really have no encoder HERE, and the reason is the IR, not
+        // the library: bwip-js CAN draw japanpost/msi/plessey/identcode (each
+        // probed to lay ink), but the IR has no symbology id for them and the
+        // renderer reaches the encoder only through an id. Measured: invented
+        // ids 25-28 paint 0 ink against a Code 39 control at 14400 px.
         expect(named('M')).toMatch(/MSI-3/);
+        expect(named('L')).toMatch(/Plessey/);
+        expect(named('J')).toMatch(/Japanese POSTNET/);
+        expect(named('2G')).toMatch(/German Post/);
+        expect(named('2U')).toMatch(/UPC Interleaved/);
         // And such a field draws nothing rather than something wrong.
         expect(parseEPL('N\nB10,10,0,M,2,2,60,B,"12345"').elements).toHaveLength(0);
+    });
+
+    it('draws the EAN/UPC add-on types (manual Table 2-1, p. 3-12)', () => {
+        // E32/E35/E82/E85/UA2/UA5/UE2/UE5 named "with a 2/5-digit add-on" sat
+        // in the unencodable list while the SHARED encoder supported add-ons
+        // all along (buildBwipSpec splits the payload on '.' and attaches
+        // ean2/ean5). The main symbol is an ordinary EAN/UPC — the add-on is
+        // the caller's payload convention, not a different symbology — so the
+        // fix is the EAN/UPC mapping, and the supplement rides in the data.
+        const symOf = (type: string) => (parseEPL(`N\nB10,10,0,${type},2,2,60,B,"1234567890128.12"`).elements[0] as { symbology?: string } | undefined)?.symbology;
+        for (const [type, version] of [['E32', 2], ['E35', 2], ['E82', 1], ['E85', 1], ['UA2', 3], ['UA5', 3], ['UE2', 4], ['UE5', 4]] as const) {
+            expect(symOf(type), `${type} must map to the EAN/UPC IR id`).toBe('7');
+            const label = parseEPL(`N\nB10,10,0,${type},2,2,60,B,"1234567890128.12"`);
+            expect(label.elements[0], `${type} must carry the variant`).toMatchObject({ eanUpcVersion: version });
+            expect(label.issues.map(i => i.code), `${type} has an encoder, so it must not be reported`).not.toContain('epl-barcode-unencoded');
+        }
+        // The control: the encoder really does draw the add-on, so the mapping
+        // above is not merely a table change. EAN-13 alone vs +2 measured
+        // 9900 px vs 12100 px.
+        expect(resolveBcid('7', '1234567890128.12', 2)).toBe('ean13');
     });
 
     it('draws Code 93, Codabar, Postnet and Planet (manual Table 2-1, p. 3-12)', () => {
@@ -625,6 +652,32 @@ describe('EPL generator', () => {
         expect(typeOf('012345678905')).toBe('UA0');
         expect(typeOf('12345670')).toBe('E80');
         expect(typeOf('1234567')).toBe('UE0');
+    });
+
+    it('names the ADD-ON letter when the data carries a supplement', () => {
+        // Table 2-1 gives the add-on variants their own letters. Counting every
+        // digit in the payload turned "EAN-13 + 2-digit add-on" into "15
+        // digits, which is not a length EPL recognizes" and left the bar code
+        // OFF the label entirely. The PRM's delimiter is the '.': "Data to the
+        // right of the '.' is supplemental data; data to the left is bar code
+        // data."
+        const typeOf = (data: string) => eplLines([barcodeField({ symbology: '7', dataSource: { type: 'fixed', data } })])
+            .find(l => l.startsWith('B'))!.split(',')[3];
+        expect(typeOf('1234567890128.12')).toBe('E32');     // EAN-13 + 2
+        expect(typeOf('1234567890128.12345')).toBe('E35');  // EAN-13 + 5
+        expect(typeOf('12345670.12')).toBe('E82');          // EAN-8 + 2
+        expect(typeOf('12345670.12345')).toBe('E85');       // EAN-8 + 5
+        expect(typeOf('012345678905.12')).toBe('UA2');      // UPC-A + 2
+        expect(typeOf('012345678905.12345')).toBe('UA5');   // UPC-A + 5
+        expect(typeOf('0123456.12')).toBe('UE2');           // UPC-E + 2
+        expect(typeOf('0123456.12345')).toBe('UE5');        // UPC-E + 5
+        // The control: the same payload WITHOUT the add-on keeps the plain
+        // letter, so the delimiter is what selects the add-on form.
+        expect(typeOf('1234567890128')).toBe('E30');
+        // And nothing is left off the label for any of them.
+        for (const d of ['1234567890128.12', '012345678905.12345', '0123456.12']) {
+            expect(generateEPL(withFields([barcodeField({ symbology: '7', dataSource: { type: 'fixed', data: d } })])).warnings).toEqual([]);
+        }
     });
 
     it('skips an EAN/UPC whose length EPL does not know, and says which', () => {

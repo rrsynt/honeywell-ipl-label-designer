@@ -18,6 +18,7 @@ import { DPI_MAP } from '../../constants';
 import { getObjectBoundingBox, shiftForTextAlign, printableFields } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
+import { splitEanSupplement } from '../ipl/barcodes';
 import { parseMaxiCodeScm } from '../ipl/maxiCodeScm';
 import { charsetWarning } from '../charsetRisk';
 
@@ -69,13 +70,25 @@ const EPL_2D_LETTER: Record<string, string> = {
     '12': 'P',   // PDF417
 };
 
-/** EAN/UPC variants, by the DATA LENGTH — which is how EPL's letters map. */
+/**
+ * EAN/UPC variants, by the DATA LENGTH — which is how EPL's letters map.
+ *
+ * The payload may carry an add-on after a '.', and Table 2-1 gives those their
+ * own letters (E32/E35/E82/E85/UA2/UA5/UE2/UE5). Counting every digit — the
+ * old behaviour — turned an EAN-13 with a 2-digit add-on into "15 digits,
+ * which is not a length EPL recognizes" and left the barcode OFF the label.
+ * The PRM's own convention is the delimiter: "Use a '.' to delimit the bar
+ * code data from the supplemental data. Data to the right of the '.' is
+ * supplemental data; data to the left is bar code data."
+ */
 const eplEanType = (data: string): string | null => {
-    switch (data.replace(/\D/g, '').length) {
-        case 13: return 'E30'; // EAN-13
-        case 8: return 'E80';  // EAN-8
-        case 12: return 'UA0'; // UPC-A
-        case 7: return 'UE0';  // UPC-E
+    const { main, supplemental } = splitEanSupplement(data);
+    const digits = main.replace(/\D/g, '').length;
+    switch (digits) {
+        case 13: return supplemental ? (supplemental.length === 2 ? 'E32' : 'E35') : 'E30';
+        case 8: return supplemental ? (supplemental.length === 2 ? 'E82' : 'E85') : 'E80';
+        case 12: return supplemental ? (supplemental.length === 2 ? 'UA2' : 'UA5') : 'UA0';
+        case 7: return supplemental ? (supplemental.length === 2 ? 'UE2' : 'UE5') : 'UE0';
         default: return null;
     }
 };
@@ -268,7 +281,7 @@ export const generateEPL = (design: Design): EplGenerateResult => {
             }
             if (!eplType) {
                 warnings.push(sym === '7'
-                    ? `"${field.name}" is an EAN/UPC bar code whose data is ${data.replace(/\D/g, '').length} digits, which is not a length EPL recognizes (7, 8, 12 or 13). It was left off the label.`
+                    ? `"${field.name}" is an EAN/UPC bar code whose data is ${splitEanSupplement(data).main.replace(/\D/g, '').length} digits, which is not a length EPL recognizes (7, 8, 12 or 13). It was left off the label.`
                     : `"${field.name}" is barcode type ${sym}, which this EPL subset cannot draw. It was left off the label.`);
                 continue;
             }

@@ -106,6 +106,25 @@ const EPL_BARCODE_TYPES: Record<string, EplBarcode> = {
     'E80': { symbology: '7', eanUpcVersion: 1 },
     'UA0': { symbology: '7', eanUpcVersion: 3 },
     'UE0': { symbology: '7', eanUpcVersion: 4 },
+    // The add-on variants. They carried NO encoder claim for the symbol itself
+    // — the main symbol is an ordinary EAN/UPC — and the shared encoder draws
+    // the supplement when the payload carries it after a '.', which is the
+    // PRM's own convention ("Use a '.' to delimit the bar code data from the
+    // supplemental data"; "You can add the two- or five-digit supplemental to
+    // any version of the UPC/EAN code"). Measured: EAN-13 alone 9900 px vs
+    // EAN-13 + 2-digit add-on 12100 px.
+    //
+    // Which add-on the EPL letter names is the CALLER's business, not the
+    // decoder's: the symbol is the same EAN/UPC either way, and the digit
+    // count of the supplement is what actually selects ean2 vs ean5.
+    'E32': { symbology: '7', eanUpcVersion: 2 },
+    'E35': { symbology: '7', eanUpcVersion: 2 },
+    'E82': { symbology: '7', eanUpcVersion: 1 },
+    'E85': { symbology: '7', eanUpcVersion: 1 },
+    'UA2': { symbology: '7', eanUpcVersion: 3 },
+    'UA5': { symbology: '7', eanUpcVersion: 3 },
+    'UE2': { symbology: '7', eanUpcVersion: 4 },
+    'UE5': { symbology: '7', eanUpcVersion: 4 },
     // Code 93 and Codabar (manual Table 2-1, p. 3-12). These sat in the
     // "no encoder" list for years, but the shared encoder has both — and the
     // GENERATOR already writes '9'/'K' for them, so refusing them here broke
@@ -130,19 +149,18 @@ const EPL_BARCODE_TYPES: Record<string, EplBarcode> = {
  * existed, and the message kept a working symbol off the label.
  */
 const EPL_KNOWN_UNENCODED: Record<string, string> = {
+    // These five really have no encoder HERE, and the reason is the IR rather
+    // than the encoder library: bwip-js CAN draw japanpost, msi, plessey and
+    // identcode (probed — each lays ink), but the IR has no symbology id for
+    // them, and the renderer reaches the encoder only through an IR id.
+    // Measured: made-up ids 25-28 paint 0 ink while the Code 39 control paints
+    // 14400 px. Adding real support means minting ids and teaching every
+    // language's tables, not just this list.
     J: 'Japanese POSTNET',
     L: 'Plessey (MSI-1)',
     M: 'MSI-3',
     '2G': 'German Post Code',
     '2U': 'UPC Interleaved 2 of 5',
-    E32: 'EAN-13 with a 2-digit add-on',
-    E35: 'EAN-13 with a 5-digit add-on',
-    E82: 'EAN-8 with a 2-digit add-on',
-    E85: 'EAN-8 with a 5-digit add-on',
-    UA2: 'UPC-A with a 2-digit add-on',
-    UA5: 'UPC-A with a 5-digit add-on',
-    UE2: 'UPC-E with a 2-digit add-on',
-    UE5: 'UPC-E with a 5-digit add-on',
 };
 
 /**
