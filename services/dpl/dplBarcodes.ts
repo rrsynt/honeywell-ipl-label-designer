@@ -63,6 +63,13 @@ export interface DplBarcodeType {
      * has to carry.
      */
     hriAbove?: boolean;
+    /**
+     * Set when bwip-js has no encoder for this symbol at all, so the record
+     * cannot be drawn by any path. The parser names it instead of emitting an
+     * element that paints nothing — a symbol dropped without a word is the one
+     * failure this project exists to prevent.
+     */
+    noEncoder?: string;
 }
 
 /**
@@ -83,7 +90,15 @@ export const DPL_BARCODES: Record<string, DplBarcodeType> = {
     H: { symbology: '8', name: 'HIBC' },
     I: { symbology: '4', name: 'Codabar' },
     J: { symbology: '2', name: 'Interleaved 2 of 5, mod-10' },
-    K: { symbology: '1', name: 'Plessey' },
+    // K is PLESSEY, and '1' is Code 93 — a different symbol entirely, so a
+    // Plessey record drew a Code 93 bar code with nothing said. Table F-1
+    // lists K as "Plessey" and O as "Code 93"; they were never the same symbol.
+    //
+    // It goes to id 27 (bwip `msi`), NOT 28 (`plessey`): this appendix marks K
+    // "48-57 Numeric only", while bwip's `plessey` is Plessey UK and takes hex.
+    // The manual's Plessey is the MSI family, as EPL spells out in
+    // "Plessey (MSI-1)".
+    K: { symbology: '27', name: 'Plessey' },
     L: { symbology: '2', name: 'Interleaved 2 of 5, mod-10 + bearer bars' },
     // M and N are the addenda THEMSELVES, not a main symbol: the id is 25/26,
     // and giving them '7' made the encoder ask for an EAN/UPC with no version,
@@ -95,9 +110,15 @@ export const DPL_BARCODES: Record<string, DplBarcodeType> = {
     Q: { symbology: '6', name: 'UCC/EAN Code 128', hriAbove: true },
     R: { symbology: '6', name: 'UCC/EAN Code 128 K-Mart', hriAbove: true },
     S: { symbology: '6', name: 'UCC/EAN Code 128 Random Weight', hriAbove: true },
-    T: { symbology: '21', name: 'Telepen' },
+    // '21' is the IR's EAN.UCC Composite id — a different family, and one whose
+    // encoder needs a linear component the record does not carry, so a Telepen
+    // record resolved to no spec and drew nothing. 31 is the Telepen encoder.
+    T: { symbology: '31', name: 'Telepen' },
     U: { symbology: '14', name: 'UPS MaxiCode', noHumanReadable: true },
-    V: { symbology: '21', name: 'FIM', noHumanReadable: true },
+    // '21' is the composite id, which needs a linear component this record does
+    // not carry — the same mis-mapping T had. Unlike T there is no encoder to
+    // point at: bwip-js ships none for FIM, so the record is NAMED instead.
+    V: { symbology: '21', name: 'FIM', noHumanReadable: true, noEncoder: 'FIM' },
     Z: { symbology: '12', name: 'PDF417', noHumanReadable: true },
 };
 

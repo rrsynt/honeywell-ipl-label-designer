@@ -36,6 +36,36 @@ export const IPL_SYMBOLOGY_TO_BCID: { [id: string]: string } = {
     // message at all, because the encoder needs a main symbol to attach to.
     '25': 'ean2',
     '26': 'ean5',
+    // 27-33 are the same kind of id: symbols several printer languages carry
+    // that IPL's c list never had. Each one was previously either DROPPED with
+    // an "unencodable" message (EPL, TSPL) or, worse, drawn as a DIFFERENT
+    // symbol (DPL's K went through '1', which is Code 93 — a Plessey record
+    // printed a Code 93 bar code, silently). bwip-js has an encoder for every
+    // one of them; only the IR lacked a name to reach it through.
+    //
+    // NOT included, because bwip-js has no encoder at all: FIM (DPL V) and
+    // China Post (TSPL CPOST). Those stay NAMED as unencodable, which is the
+    // honest answer for them.
+    // 27 is the encoder EPL and DPL call "Plessey": both manuals pin it to the
+    // MSI family by their own words — EPL Table 2-1 writes "Plessey (MSI-1)
+    // with mod. 10 check digit" and "MSI-3 with mod. 10 check digit", and the
+    // DPL appendix gives K "48-57 Numeric only". bwip names this encoder "MSI
+    // Modified Plessey" and takes digits only.
+    '27': 'msi',
+    // 28 is Plessey UK — a DIFFERENT symbol, and bwip says so: its `plessey`
+    // is documented as "Plessey UK" with the example `01234ABCD`, and it
+    // accepts hex. TSPL is the one language here that asks for it: its type
+    // table lists MSI and PLESSEY as separate entries, which would be
+    // redundant if they were one symbol. Sending EPL's or DPL's numeric
+    // "Plessey" here instead would print the wrong symbol AND accept data the
+    // printer rejects, so those two stay on 27.
+    '28': 'plessey',
+    '29': 'identcode',      // Deutsche Post Identcode
+    '30': 'leitcode',       // Deutsche Post Leitcode
+    '31': 'telepen',
+    '32': 'itf14',
+    '33': 'telepennumeric',
+    '34': 'japanpost',      // Japanese Postnet (EPL J)
 };
 
 // pixs-shaped rasters: keep modules square, do not stretch vertically by h.

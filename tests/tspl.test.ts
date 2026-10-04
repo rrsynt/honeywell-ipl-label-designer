@@ -258,9 +258,43 @@ describe('TSPL parser', () => {
     });
 
     it('names a known-but-unencodable type', () => {
-        const label = parseTSPL('CLS\nBARCODE 10,50,"MSI",100,1,0,2,2,"12345"');
+        // China Post is one of only two left, and it is absent from the encoder
+        // library itself (bwip reports `unknownEncoder` for it). The rest of
+        // this list moved to real IR ids — see the next test.
+        const label = parseTSPL('CLS\nBARCODE 10,50,"CPOST",100,1,0,2,2,"12345"');
         expect(label.elements).toHaveLength(0);
-        expect(label.issues.find(i => i.code === 'tspl-barcode-unencoded')?.message).toMatch(/MSI/);
+        expect(label.issues.find(i => i.code === 'tspl-barcode-unencoded')?.message).toMatch(/China Post/);
+    });
+
+    it('draws MSI, PLESSEY, TELEPEN and the German Post codes now', () => {
+        // Every one of these sat behind an "unencodable" message while bwip-js
+        // had an encoder for it; only the IR id was missing.
+        const sym = (type: string) => {
+            const label = parseTSPL(`CLS\nBARCODE 10,50,"${type}",100,1,0,2,2,"1234567890"`);
+            return {
+                sym: (label.elements[0] as { symbology?: string } | undefined)?.symbology,
+                codes: label.issues.map(i => i.code),
+            };
+        };
+        expect(sym('MSI').sym).toBe('27');
+        expect(sym('DPI').sym, 'Deutsche Post Identcode').toBe('29');
+        expect(sym('DPL').sym, 'Deutsche Post Leitcode').toBe('30');
+        expect(sym('TELEPEN').sym).toBe('31');
+        expect(sym('ITF14').sym).toBe('32');
+        expect(sym('TELEPENN').sym).toBe('33');
+        // MSI and PLESSEY are SEPARATE types in the manual's own table, so they
+        // stay separate encoders: 27 is the MSI family (digits), 28 is Plessey
+        // UK (hex). Collapsing them would send a Plessey record to a symbol
+        // that accepts data the printer rejects.
+        expect(sym('MSI').sym).not.toBe(sym('PLESSEY').sym);
+        expect(sym('PLESSEY').sym).toBe('28');
+        // MSIC is MSI whose check digit the PRINTER appends: drawn, but the
+        // substitution is named rather than silent.
+        expect(sym('MSIC').sym).toBe('27');
+        expect(sym('MSIC').codes).toContain('tspl-i2of5-check-digit');
+        for (const type of ['MSI', 'PLESSEY', 'TELEPEN', 'ITF14']) {
+            expect(sym(type).codes, `${type} must not be reported unencodable`).not.toContain('tspl-barcode-unencoded');
+        }
     });
 
     it('notes that an add-on variant draws only the main symbol', () => {

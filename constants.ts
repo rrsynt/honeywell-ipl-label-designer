@@ -428,4 +428,10 @@ export const BARCODE_MAP: { [key: string]: string } = {
     // Likewise 25/26: DPL's Table F-1 gives M and N as standalone UPC addenda,
     // so a DPL stream carrying one round-trips instead of drawing nothing.
     '25': 'UPC 2-Digit Addendum', '26': 'UPC 5-Digit Addendum',
+    // 27-34: symbols EPL, TSPL and DPL carry that IPL's c list never had. bwip
+    // has an encoder for each, so they draw once the IR can name them.
+    '27': 'MSI', '28': 'Plessey',
+    '29': 'Deutsche Post Identcode', '30': 'Deutsche Post Leitcode',
+    '31': 'Telepen', '32': 'ITF-14', '33': 'Telepen Numeric',
+    '34': 'Japanese Postnet',
 };

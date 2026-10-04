@@ -116,21 +116,32 @@ const TSPL_BARCODE_TYPES: Record<string, TsplBarcode> = {
     POST: { symbology: '11' },
     PLANET: { symbology: '22' },
     CODE49: { symbology: '10' },
+    // These carried an "unencodable" message while bwip-js had an encoder for
+    // every one of them. They were only ever missing an IR id (see the 27-34
+    // block in services/ipl/barcodes.ts). MSIC is MSI with the check digit the
+    // PRINTER appends, which this encoder cannot reproduce, so it is named
+    // rather than silently drawn without it — the same call EPL 2C and TSPL
+    // 25C make.
+    MSI: { symbology: '27' },
+    MSIC: { symbology: '27', checkDigitUndrawn: true },
+    PLESSEY: { symbology: '28' },
+    DPI: { symbology: '29' },
+    DPL: { symbology: '30' },
+    TELEPEN: { symbology: '31' },
+    TELEPENN: { symbology: '33' },
+    ITF14: { symbology: '32' },
 };
 
 /** Types the manual lists that this viewer has no encoder for. Named so an
- *  issue says WHICH symbology is missing instead of "unknown type". */
+ *  issue says WHICH symbology is missing instead of "unknown type".
+ *
+ *  Only two are left, and both are absent from the encoder library itself:
+ *  China Post and EAN-14 (bwip reports `unknownEncoder` / `ean14badLength` for
+ *  the shapes it does ship). The other eight moved to real IR ids — see the
+ *  additions in services/ipl/barcodes.ts. */
 const TSPL_KNOWN_UNENCODED: Record<string, string> = {
-    MSI: 'MSI',
-    MSIC: 'MSI with check digit',
-    PLESSEY: 'Plessey',
     CPOST: 'China Post',
-    ITF14: 'ITF-14',
     EAN14: 'EAN-14',
-    TELEPEN: 'Telepen',
-    TELEPENN: 'Telepen number',
-    DPI: 'Deutsche Post Identcode',
-    DPL: 'Deutsche Post Leitcode',
 };
 
 /** TSPL's QR error-correction letters onto the IR's c18,m2 values. */

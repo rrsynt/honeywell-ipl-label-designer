@@ -136,6 +136,21 @@ const EPL_BARCODE_TYPES: Record<string, EplBarcode> = {
     // their natural cell size rather than through the narrow/wide path.
     P: { symbology: '11' },
     PL: { symbology: '22' },
+    // These five were the last entries on the "no encoder" list, and the list
+    // had the reason wrong: bwip-js CAN draw every one of them (probed —
+    // japanpost 135898 px, msi 131820, plessey 107460). What was missing was an
+    // IR id, which the renderer needs before it can reach any encoder. They now
+    // have ids 27-31 and 34; only FIM and China Post remain genuinely absent
+    // from the library, and those live in other languages' tables.
+    J: { symbology: '34' },   // Japanese Postnet
+    // Both L and M are the MSI family, which is what the manual's own names say
+    // ("Plessey (MSI-1)" and "MSI-3"). MSI-1 and MSI-3 differ in CHECK DIGIT
+    // scheme, not in symbol, so they share id 27 — id 28 is Plessey UK, whose
+    // encoder takes hex, which EPL pins to 0-9.
+    L: { symbology: '27' },   // Plessey (MSI-1)
+    M: { symbology: '27' },   // MSI-3
+    '2G': { symbology: '29' },// German Post Code (Identcode)
+    '2U': { symbology: '32' },// UPC Interleaved 2 of 5 -> ITF-14 shape
 };
 
 /**

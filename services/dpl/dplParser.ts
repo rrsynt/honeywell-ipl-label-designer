@@ -1466,6 +1466,14 @@ export const parseDPL = (
                 issue('warning', 'dpl-price-checksum',
                     `This record places a "V" in its data, which asks the printer to compute and insert the EAN/UPC price-or-weight checksum at that position (Appendix P). The preview cannot reproduce that digit, so it is left as written and the symbol will not encode until it is provided.`, bChar);
             }
+            // A type with no encoder anywhere in the app cannot be drawn by any
+            // path, so it is NAMED rather than pushed as an element that paints
+            // nothing. FIM is the one such type on this table.
+            if (bc.type.noEncoder) {
+                issue('info', 'dpl-barcode-no-encoder',
+                    `A ${bc.type.name} record cannot be drawn here: no encoder is available for ${bc.type.noEncoder}, so the symbol is left off the label.`, bChar);
+                continue;
+            }
             elements.push({
                 kind: 'barcode', id: nextId++, ox: col, oy: row, f: rot,
                 // Table F-1's M and N carry their own symbology id now (25/26):

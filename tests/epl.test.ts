@@ -133,20 +133,29 @@ describe('EPL parser', () => {
         expect(codes('3C')).not.toContain('epl-i2of5-check-digit');
     });
 
-    it('names a known-but-unencodable type instead of saying "unknown"', () => {
-        const named = (type: string) => parseEPL(`N\nB10,10,0,${type},2,2,60,B,"12345"`).issues.find(i => i.code === 'epl-barcode-unencoded')?.message;
-        // These five really have no encoder HERE, and the reason is the IR, not
-        // the library: bwip-js CAN draw japanpost/msi/plessey/identcode (each
-        // probed to lay ink), but the IR has no symbology id for them and the
-        // renderer reaches the encoder only through an id. Measured: invented
-        // ids 25-28 paint 0 ink against a Code 39 control at 14400 px.
-        expect(named('M')).toMatch(/MSI-3/);
-        expect(named('L')).toMatch(/Plessey/);
-        expect(named('J')).toMatch(/Japanese POSTNET/);
-        expect(named('2G')).toMatch(/German Post/);
-        expect(named('2U')).toMatch(/UPC Interleaved/);
-        // And such a field draws nothing rather than something wrong.
-        expect(parseEPL('N\nB10,10,0,M,2,2,60,B,"12345"').elements).toHaveLength(0);
+    it('draws J/L/M/2G/2U now that the IR can name them', () => {
+        // These five were the last entries on the "no encoder" list, and the
+        // list had the reason wrong: bwip-js CAN draw every one of them
+        // (probed — japanpost 135898 px, msi 131820, plessey 107460) and the
+        // renderer reaches the encoder through the IR id it was missing. The
+        // ids are listed in services/ipl/barcodes.ts.
+        //
+        // EPL's L and M BOTH land on id 27: the manual calls them "Plessey
+        // (MSI-1)" and "MSI-3", which differ in check-digit scheme, not in
+        // symbol. Id 28 is Plessey UK (bwip's `plessey`, hex), which this
+        // manual pins to digits — a different symbol, so L must not use it.
+        const sym = (type: string) => (parseEPL(`N\nB10,10,0,${type},2,2,60,B,"12345"`).elements[0] as { symbology?: string } | undefined)?.symbology;
+        expect(sym('J'), 'Japanese Postnet').toBe('34');
+        expect(sym('2G'), 'German Post Code').toBe('29');
+        expect(sym('2U'), 'UPC Interleaved 2 of 5').toBe('32');
+        // The two MSI-family letters: same symbol, so same id.
+        expect(sym('L')).toBe(sym('M'));
+        expect(sym('M'), 'MSI-3 must NOT go to Plessey UK').toBe('27');
+        for (const type of ['J', 'L', 'M', '2G', '2U']) {
+            const label = parseEPL(`N\nB10,10,0,${type},2,2,60,B,"12345"`);
+            expect(label.elements, `${type} must draw`).toHaveLength(1);
+            expect(label.issues.map(i => i.code), `${type} has an encoder now`).not.toContain('epl-barcode-unencoded');
+        }
     });
 
     it('draws the EAN/UPC add-on types (manual Table 2-1, p. 3-12)', () => {
