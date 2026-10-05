@@ -66,6 +66,13 @@ export const IPL_SYMBOLOGY_TO_BCID: { [id: string]: string } = {
     '32': 'itf14',
     '33': 'telepennumeric',
     '34': 'japanpost',      // Japanese Postnet (EPL J)
+    // 35 is TSPL's EAN14 — a symbol DISTINCT from ITF14 (32), which TSC's own
+    // ratio table separates: manual p. 40 puts EAN14 in the 1:1 column
+    // (uniform modules, the Code 128 profile) while ITF14 gets the wide/narrow
+    // 1:2/1:3/2:5 columns. bwip's `ean14` is GS1-128 in disguise — its body
+    // composes "FNC101" + the GTIN and delegates to code128 — so it takes the
+    // (01) AI form, which buildBwipSpec supplies below.
+    '35': 'ean14',
 };
 
 // pixs-shaped rasters: keep modules square, do not stretch vertically by h.
@@ -644,6 +651,20 @@ export const buildBwipSpec = (symbology: string, data: string, params: BarcodePa
             opts.rowheight = Number.isInteger(modW) && modW > 0 ? rowH * modW : rowH;
         }
         return { main: { bcid: 'codablockf', text: data, opts } };
+    }
+
+    if (symbology === '35') {
+        // EAN-14 (TSPL `EAN14`, TSC manual p. 41). bwip's `ean14` is the GS1-128
+        // encoding of a GTIN and REQUIRES the "(01)" AI — its length check
+        // counts those four characters (the 17/18 in its source are "(01)" plus
+        // 13 or 14 digits), so a bare 13-digit host value (what TSC's table
+        // feeds it) gets the AI and the mod-10 check digit added here, exactly
+        // as the RSS branch above does. A 14-digit value gets the AI alone, its
+        // check digit left for the encoder to validate.
+        let text = data;
+        if (/^\d{13}$/.test(data)) text = '(01)' + data + gtinCheckDigit(data);
+        else if (/^\d{14}$/.test(data)) text = '(01)' + data;
+        return { main: { bcid: 'ean14', text, opts: {} } };
     }
 
     const bcid = IPL_SYMBOLOGY_TO_BCID[symbology];

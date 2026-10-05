@@ -258,9 +258,9 @@ describe('TSPL parser', () => {
     });
 
     it('names a known-but-unencodable type', () => {
-        // China Post is one of only two left, and it is absent from the encoder
-        // library itself (bwip reports `unknownEncoder` for it). The rest of
-        // this list moved to real IR ids — see the next test.
+        // China Post is the last one left, and it is absent from the encoder
+        // library itself (bwip ships no `china`/`cpost` encoder at all). The
+        // rest of this list moved to real IR ids — see the next test.
         const label = parseTSPL('CLS\nBARCODE 10,50,"CPOST",100,1,0,2,2,"12345"');
         expect(label.elements).toHaveLength(0);
         expect(label.issues.find(i => i.code === 'tspl-barcode-unencoded')?.message).toMatch(/China Post/);
@@ -282,6 +282,11 @@ describe('TSPL parser', () => {
         expect(sym('TELEPEN').sym).toBe('31');
         expect(sym('ITF14').sym).toBe('32');
         expect(sym('TELEPENN').sym).toBe('33');
+        // EAN-14 is a DIFFERENT symbol from ITF-14, not a variant of it: TSC's
+        // ratio table (p. 40) puts EAN14 in the 1:1 column and ITF14 in the
+        // wide/narrow columns. They must not collapse onto one id.
+        expect(sym('EAN14').sym).toBe('35');
+        expect(sym('EAN14').sym).not.toBe(sym('ITF14').sym);
         // MSI and PLESSEY are SEPARATE types in the manual's own table, so they
         // stay separate encoders: 27 is the MSI family (digits), 28 is Plessey
         // UK (hex). Collapsing them would send a Plessey record to a symbol
@@ -292,9 +297,42 @@ describe('TSPL parser', () => {
         // substitution is named rather than silent.
         expect(sym('MSIC').sym).toBe('27');
         expect(sym('MSIC').codes).toContain('tspl-i2of5-check-digit');
-        for (const type of ['MSI', 'PLESSEY', 'TELEPEN', 'ITF14']) {
+        for (const type of ['MSI', 'PLESSEY', 'TELEPEN', 'ITF14', 'EAN14']) {
             expect(sym(type).codes, `${type} must not be reported unencodable`).not.toContain('tspl-barcode-unencoded');
         }
+    });
+
+    it('EAN14 parses to id 35 and wraps the GTIN in the (01) AI the encoder needs', () => {
+        // TSC manual p. 41. bwip's `ean14` is the GS1-128 encoding of a GTIN:
+        // it REQUIRES the "(01)" application identifier and adds the mod-10
+        // check digit itself only when the body is 13 digits. A bare host value
+        // therefore has to be wrapped here, exactly as the GS1 DataBar branch
+        // does — this is why the generic pass-through would draw nothing.
+        const label = parseTSPL('CLS\nBARCODE 10,50,"EAN14",100,1,0,2,2,"0952876543210"');
+        expect((label.elements[0] as any).symbology).toBe('35');
+        expect(label.issues.map(i => i.code)).not.toContain('tspl-barcode-unencoded');
+
+        // Build a spec directly: the wrapper must add "(01)" AND the check digit
+        // that bwip's own example uses (…43210 -> check 8).
+        const spec = buildBwipSpec('35', '0952876543210', {})!.main;
+        expect(spec.bcid).toBe('ean14');
+        expect(spec.text).toBe('(01)09528765432108');
+
+        // and the ENCODER accepts it — a well-formed spec is not proof. A Code
+        // 39 positive control guards against a probe that draws nothing at all.
+        expect(measureBarcode('35', '0952876543210', {}), 'EAN14 renders').not.toBeNull();
+        expect(measureBarcode('0', 'ABC', {}), 'positive control: Code 39 renders').not.toBeNull();
+        // A length the encoder cannot wrap is refused, not silently mis-drawn.
+        expect(measureBarcode('35', '12345', {}), 'too short for an EAN-14').toBeNull();
+    });
+
+    it('round-trips EAN14 through the generator', () => {
+        // The generator's table must stay the parser's inverse, or a saved
+        // design reloads with a different symbology (the TSPL font lesson).
+        const { tspl } = generateTSPL(design([barcodeField({
+            symbology: '35', name: 'G14', dataSource: { type: 'fixed', data: '0952876543210' },
+        })]));
+        expect(tspl.split('\n').find(l => l.startsWith('BARCODE'))).toContain('"EAN14"');
     });
 
     it('notes that an add-on variant draws only the main symbol', () => {

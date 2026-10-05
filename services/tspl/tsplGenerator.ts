@@ -84,6 +84,7 @@ const TSPL_BARCODE_FOR: Record<string, string> = {
     '10': 'CODE49',
     '11': 'POST',
     '22': 'PLANET',
+    '35': 'EAN14',
 };
 
 /**

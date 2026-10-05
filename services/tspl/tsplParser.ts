@@ -130,18 +130,21 @@ const TSPL_BARCODE_TYPES: Record<string, TsplBarcode> = {
     TELEPEN: { symbology: '31' },
     TELEPENN: { symbology: '33' },
     ITF14: { symbology: '32' },
+    // EAN-14 (TSC manual p. 41) is a DIFFERENT symbol from ITF14, not a variant
+    // of it: the manual's ratio table puts EAN14 in the 1:1 (Code 128) column
+    // and ITF14 in the wide/narrow columns. bwip's `ean14` encoder draws it
+    // once buildBwipSpec wraps the 13-digit body in the (01) AI.
+    EAN14: { symbology: '35' },
 };
 
 /** Types the manual lists that this viewer has no encoder for. Named so an
  *  issue says WHICH symbology is missing instead of "unknown type".
  *
- *  Only two are left, and both are absent from the encoder library itself:
- *  China Post and EAN-14 (bwip reports `unknownEncoder` / `ean14badLength` for
- *  the shapes it does ship). The other eight moved to real IR ids — see the
- *  additions in services/ipl/barcodes.ts. */
+ *  Only China Post is left, and it is absent from the encoder library itself
+ *  (bwip ships no `china`/`cpost` encoder at all). The other nine moved to real
+ *  IR ids — see the additions in services/ipl/barcodes.ts. */
 const TSPL_KNOWN_UNENCODED: Record<string, string> = {
     CPOST: 'China Post',
-    EAN14: 'EAN-14',
 };
 
 /** TSPL's QR error-correction letters onto the IR's c18,m2 values. */

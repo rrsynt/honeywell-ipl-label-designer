@@ -434,4 +434,7 @@ export const BARCODE_MAP: { [key: string]: string } = {
     '29': 'Deutsche Post Identcode', '30': 'Deutsche Post Leitcode',
     '31': 'Telepen', '32': 'ITF-14', '33': 'Telepen Numeric',
     '34': 'Japanese Postnet',
+    // 35 is TSPL's EAN14, distinct from ITF-14 (32) — see the id table in
+    // services/ipl/barcodes.ts.
+    '35': 'EAN-14',
 };
