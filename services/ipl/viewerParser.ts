@@ -7,7 +7,7 @@ import type {
     FieldSource,
     PagePlacement,
 } from './types';
-import { isBarcodeEngineReady, measureBarcode, applyI2of5Padding, interpretiveText } from './barcodes';
+import { isBarcodeEngineReady, measureBarcode, applyI2of5Padding, interpretiveText, IPL_UNPRINTABLE_SYMBOLOGIES } from './barcodes';
 import { VirtualPrinter, KIND_PREFIX } from './virtualPrinter';
 import { FONT_MAP, PRINTABLE_WIDTH_IN, LABEL_WIDTH_ADJUSTMENT } from '../../constants';
 import { extractDirectGraphics, nibblizedToByteString, directGraphicToBitmap, directGraphicInkBounds, type DirectGraphic } from './directGraphics';
@@ -3033,6 +3033,14 @@ export class IPLViewerParser {
             }
             heightDots = 101;
             moduleDots = 1;
+        } else if (IPL_UNPRINTABLE_SYMBOLOGIES.has(parts[0])) {
+            // The IR's own ids for forms other languages carry (23/24 TSPL 2D
+            // commands, 25/26 DPL addenda, 27-35 MSI/Plessey/postal/Telepen/
+            // ITF-14/EAN-14): IPL's `c` list stops at c22 (PRM p.149), so no
+            // IPL printer accepts them. A hand-written stream can still carry
+            // one, and this preview draws it through the shared encoder — name
+            // that, so the screen is not a promise the printer cannot keep.
+            this.printer.issue('warning', 'symbology-not-an-ipl-type', `Symbology c${parts[0]} is not an IPL bar code type — the c list stops at c22 (PRM p.149), so no IPL printer prints it. This preview draws it anyway.`, cmd);
         } else if (parts[0] === '15') {
             // JIS-ITF is a boxed variant bwip lacks (PRM p.157). c21 no longer
             // belongs here: bwip ships composite encoders for every linear

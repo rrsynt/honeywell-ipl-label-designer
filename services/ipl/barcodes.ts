@@ -75,6 +75,16 @@ export const IPL_SYMBOLOGY_TO_BCID: { [id: string]: string } = {
     '35': 'ean14',
 };
 
+/** IR ids no IPL printer accepts in its `c` parameter (PRM p.149, "Values for
+ *  n": the list stops at 22, and the widest per-printer range is 0-12,
+ *  14-22). They are the IR's own ids for forms other languages carry — 23/24
+ *  (TSPL 2D commands), 25/26 (DPL UPC addenda), 27-35 (MSI, Plessey UK,
+ *  Identcode, Leitcode, Telepen, ITF-14, Telepen Numeric, Japanese Postnet,
+ *  EAN-14). A single set so the write direction (designerOnlyWarnings) and the
+ *  read direction (viewerParser) cannot disagree about the ceiling. */
+export const IPL_UNPRINTABLE_SYMBOLOGIES: ReadonlySet<string> = new Set(
+    ['23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35']);
+
 // pixs-shaped rasters: keep modules square, do not stretch vertically by h.
 // The stacked databar variants and maxicode rasterize as pixs in bwip (probed).
 // The composite encoders are included: each renders a linear row PLUS a 2D

@@ -1,4 +1,6 @@
 import type { BarcodeField, Design, PrinterLanguage, TextField } from '../types';
+import { BARCODE_MAP } from '../constants';
+import { IPL_UNPRINTABLE_SYMBOLOGIES } from './ipl/barcodes';
 
 /**
  * Properties the DESIGNER draws but no printer language can carry. The screen
@@ -70,6 +72,28 @@ export const designerOnlyWarnings = (language: PrinterLanguage, design: Design):
         if (gapped.length > 0) {
             const one = gapped.length === 1;
             out.push(`${gapped.map(f => `"${f.name}"`).join(', ')}: intercharacter gap is only supported in IPL (c n,m), so the character spacing set on screen ${one ? 'is' : 'are'} not printed in this language. (IPL carries it.)`);
+        }
+    }
+
+    // A barcode symbology no IPL printer accepts. The IR's own ids 23-35 name
+    // forms other languages carry (TSPL 2D commands, DPL addenda, MSI, Plessey
+    // UK, Identcode, Leitcode, Telepen, ITF-14, Telepen Numeric, Japanese
+    // Postnet, EAN-14), but IPL's `c` list stops at c22 (PRM p.149, "Values for
+    // n"; the widest per-printer range is 0-12, 14-22). The designer dropdown
+    // offers every id for every target and generateIPL emits them raw (`c27`),
+    // so without this the stream carries a value the printer rejects while the
+    // preview draws it. Other languages genuinely carry these ids, so this is
+    // IPL-only by design.
+    if (language === 'ipl') {
+        const unprintable = shown.filter(f =>
+            f.type === 'barcode' && IPL_UNPRINTABLE_SYMBOLOGIES.has((f as BarcodeField).symbology));
+        if (unprintable.length > 0) {
+            const named = unprintable.map(f => {
+                const sym = (f as BarcodeField).symbology;
+                const label = BARCODE_MAP[sym] ?? `Symbology ${sym}`;
+                return `"${f.name}" (${label})`;
+            });
+            out.push(`${named.join(', ')}: no IPL printer accepts this symbology — the c list stops at c22 (PRM p.149), so the bar code is drawn on screen but not printed. Pick a symbology at or below c22, or export to the language that carries it.`);
         }
     }
 
