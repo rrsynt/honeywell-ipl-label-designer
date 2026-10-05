@@ -335,6 +335,28 @@ describe('TSPL parser', () => {
         expect(tspl.split('\n').find(l => l.startsWith('BARCODE'))).toContain('"EAN14"');
     });
 
+    it('emits the linear types for ids 27-33, so they round-trip', () => {
+        // The parser read these back, but the generator's reverse table had no
+        // entry for any of them, so a design using one exported a stream that
+        // DROPPED the bar code ("this TSPL subset cannot draw") — the round trip
+        // the table's own header forbids. The names are the parser's forward
+        // keys exactly.
+        const names: [string, string][] = [
+            ['27', 'MSI'], ['28', 'PLESSEY'], ['29', 'DPI'], ['30', 'DPL'],
+            ['31', 'TELEPEN'], ['32', 'ITF14'], ['33', 'TELEPENN'],
+        ];
+        for (const [id, name] of names) {
+            const { tspl, warnings } = generateTSPL(design([barcodeField({
+                symbology: id, dataSource: { type: 'fixed', data: '12345' },
+            })]));
+            const line = tspl.split('\n').find(l => l.startsWith('BARCODE'));
+            expect(line, `id ${id} must emit a BARCODE`).toBeTruthy();
+            expect(line, `id ${id} emits its TSPL name`).toContain(`"${name}"`);
+            expect(warnings.join(' '), `id ${id} must not be dropped`).not.toMatch(/cannot draw/);
+            expect((parseTSPL(tspl).elements[0] as { symbology?: string })?.symbology, `id ${id} round-trips`).toBe(id);
+        }
+    });
+
     it('notes that an add-on variant draws only the main symbol', () => {
         const label = parseTSPL('CLS\nBARCODE 10,50,"EAN13+5",100,1,0,2,2,"1234567890128"');
         expect(label.elements).toHaveLength(1);

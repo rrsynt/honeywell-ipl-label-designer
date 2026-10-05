@@ -109,6 +109,15 @@ const EPL_BARCODE_FOR: Record<string, string> = {
     '4': 'K',   // Codabar
     '11': 'P',  // Postnet
     '22': 'PL', // Planet
+    // 27/29/32/34: Table 2-1 letters the parser already reads back, but whose
+    // reverse was missing — a design using one exported a stream that DROPPED
+    // the bar code ("this EPL subset cannot draw"), so a design saved as EPL
+    // reloaded without it. J/L/M/2G/2U are exactly the parser's keys: L and M
+    // are one symbol (the MSI family) so they share 27, written as L.
+    '27': 'L',  // Plessey (MSI-1) / MSI-3
+    '34': 'J',  // Japanese Postnet
+    '29': '2G', // German Post Code (Identcode)
+    '32': '2U', // UPC Interleaved 2 of 5 -> ITF-14 shape
 };
 
 const fieldData = (field: TextField | BarcodeField, design: Design): string => {

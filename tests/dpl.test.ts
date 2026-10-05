@@ -474,10 +474,30 @@ describe('DPL generator', () => {
         expect(bOf(hidden.dpl)).toBe('e');  // Code 128 without
     });
 
-    it('says so when a symbology has no DPL equivalent', () => {
-        const { dpl, warnings } = generateDPL(design([barcodeField({ symbology: '8' })]));
-        expect(warnings.join(' ')).toMatch(/no DPL equivalent/);
-        expect(dpl).not.toContain('HIBC');
+    it('draws the DPL letters the reverse table used to drop, and names a truly absent one', () => {
+        // HIBC (H), Code 93 (O), Plessey (K) and Telepen (T) all have Table F-1
+        // letters, but the generator's reverse table omitted them — so a design
+        // using one exported a stream with the bar code DROPPED, under a warning
+        // that named its IR id, even though the parser already read the letter
+        // back. That is the round trip the table's own header forbids.
+        const letterOf = (sym: string) =>
+            generateDPL(design([barcodeField({ symbology: sym })])).dpl.split('\r').find(l => /^\d/.test(l))![1];
+        const h = generateDPL(design([barcodeField({ symbology: '8' })]));
+        expect(h.warnings.join(' '), 'HIBC must not be dropped').not.toMatch(/no DPL equivalent/);
+        expect(letterOf('8'), 'HIBC letter').toBe('H');
+        expect(letterOf('1'), 'Code 93 letter').toBe('O');
+        expect(letterOf('27'), 'Plessey (MSI family) letter').toBe('K');
+        expect(letterOf('31'), 'Telepen letter').toBe('T');
+        // and each one survives the round trip the parser already understood
+        for (const id of ['8', '1', '27', '31']) {
+            const { dpl } = generateDPL(design([barcodeField({ symbology: id })]));
+            const back = parseDPL(dpl, PAGE).elements.find(e => (e as any).kind === 'barcode') as any;
+            expect(back?.symbology, `id ${id} round-trips`).toBe(id);
+        }
+        // The addenda's IR ids (25/26) and TSPL's EAN-14 (35) have no DPL form,
+        // so they still report rather than being silently omitted.
+        const ean14 = generateDPL(design([barcodeField({ symbology: '35' })]));
+        expect(ean14.warnings.join(' ')).toMatch(/no DPL equivalent/);
     });
 
     it('ROUND TRIP: what it emits, the parser reads back', () => {

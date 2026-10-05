@@ -33,22 +33,30 @@ const dplRotation = (rotation: number): number => {
  * codes with human-readable interpretations. Values a through z (lowercase)
  * will print bar codes only" (p. 133).
  */
-const DPL_LETTER_FOR: Record<string, { letter: string; wId?: string; name: string; hriAbove?: boolean }> = {
+const DPL_LETTER_FOR: Record<string, { letter: string; wId?: string; name: string; hriAbove?: boolean; noHumanReadable?: boolean }> = {
     '0': { letter: 'A', name: 'Code 39' },
     '2': { letter: 'D', name: 'Interleaved 2 of 5' },
     '4': { letter: 'I', name: 'Codabar' },
     '6': { letter: 'E', name: 'Code 128' },
     // '7' (EAN/UPC) is NOT here: B/C/F/G are one id in the IR, so the letter is
     // derived from the data length in bFieldFor, not fixed.
-    '11': { letter: 'P', name: 'Postnet' },
+    '1': { letter: 'O', name: 'Code 93' },
+    '8': { letter: 'H', name: 'HIBC' },
+    '11': { letter: 'P', name: 'Postnet', noHumanReadable: true },
     // Single-letter `z` is PDF417 (Table 8-4). W1z/W1Z is MicroPDF417 — a
     // DIFFERENT symbol — so PDF417 is NOT a W form.
-    '12': { letter: 'Z', name: 'PDF417' },
-    '14': { letter: 'U', name: 'UPS MaxiCode' },
+    '12': { letter: 'Z', name: 'PDF417', noHumanReadable: true },
+    '14': { letter: 'U', name: 'UPS MaxiCode', noHumanReadable: true },
     '17': { letter: 'C', name: 'DataMatrix', wId: 'W1C' },
     '18': { letter: 'D', name: 'QR Code', wId: 'W1D' },
     '19': { letter: 'z', name: 'MicroPDF417', wId: 'W1Z' },
     '23': { letter: 'F', name: 'Aztec', wId: 'W1F' },
+    // 27/31: Table F-1 letters the parser already reads back (K Plessey, T
+    // Telepen), but whose reverse was missing, so a design using one exported a
+    // stream that dropped the bar code. K goes to the MSI family (id 27), the
+    // numeric Plessey, matching the parser and EPL's "Plessey (MSI-1)".
+    '27': { letter: 'K', name: 'Plessey (MSI-1)' },
+    '31': { letter: 'T', name: 'Telepen' },
     // The standalone UPC addenda (Table F-1). They are their own symbols, so
     // they need no main symbol beside them — and unlike every other letter here
     // their human-readable line prints ABOVE the bars (Appendix G), which is a
@@ -108,8 +116,12 @@ const bFieldFor = (sym: string, hri: boolean, data = ''): { field: string; warni
     }
     // Postnet, MaxiCode and PDF417 have no human-readable form at all, so the
     // lowercase letter is the ONLY valid spelling; asking for text would give
-    // the printer a letter the manual says is invalid.
-    const noHri = sym === '11' || sym === '14' || sym === '12';
+    // the printer a letter the manual says is invalid. The flag lives on the
+    // entry now rather than in a hardcoded id list, so a new symbol carries its
+    // own rule instead of being silently mis-cased. Postnet keeps HRI off in
+    // BOTH directions deliberately: the parser reads its lower-case letter back
+    // as hri 0 (unlike PDF417/MaxiCode, whose W-forms are always lower-case).
+    const noHri = entry.noHumanReadable === true || sym === '11';
     const letter = hri && !noHri ? entry.letter : entry.letter.toLowerCase();
     return {
         field: letter,

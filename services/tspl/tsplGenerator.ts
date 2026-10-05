@@ -84,6 +84,17 @@ const TSPL_BARCODE_FOR: Record<string, string> = {
     '10': 'CODE49',
     '11': 'POST',
     '22': 'PLANET',
+    // 27-34: the parser has read these back for a while, but the reverse was
+    // never written, so a design using one exported a stream that DROPPED the
+    // bar code with a "this TSPL subset cannot draw" warning — the round trip
+    // the header warns about. The names match the parser's forward keys exactly.
+    '27': 'MSI',
+    '28': 'PLESSEY',
+    '29': 'DPI',
+    '30': 'DPL',
+    '31': 'TELEPEN',
+    '32': 'ITF14',
+    '33': 'TELEPENN',
     '35': 'EAN14',
 };
 

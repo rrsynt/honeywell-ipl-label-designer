@@ -646,6 +646,26 @@ describe('EPL generator', () => {
         expect((parseEPL(epl).elements[0] as { code39Mode?: string }).code39Mode).toBe('2');
     });
 
+    it('emits the Table 2-1 letters for J/L/2G/2U, so they round-trip', () => {
+        // The parser read J/L/M/2G/2U back as ids 34/27/27/29/32, but the
+        // generator's reverse table had no entry for any of them, so exporting
+        // such a design DROPPED the bar code with a "this EPL subset cannot
+        // draw" warning — then a reload lost it. The letters here are exactly
+        // the parser's forward keys; L and M are one symbol (the MSI family),
+        // so 27 is written as L.
+        const letterOf = (sym: string) => eplLines([barcodeField({ symbology: sym })])
+            .find(l => l.startsWith('B'))!.split(',')[3];
+        expect(letterOf('27'), 'MSI family').toBe('L');
+        expect(letterOf('34'), 'Japanese Postnet').toBe('J');
+        expect(letterOf('29'), 'German Post Code').toBe('2G');
+        expect(letterOf('32'), 'UPC Interleaved 2 of 5').toBe('2U');
+        for (const id of ['27', '34', '29', '32']) {
+            const { epl, warnings } = generateEPL(withFields([barcodeField({ symbology: id })]));
+            expect(warnings.join(' '), `id ${id} must not be dropped`).not.toMatch(/cannot draw/);
+            expect((parseEPL(epl).elements[0] as { symbology?: string })?.symbology, `id ${id} round-trips`).toBe(id);
+        }
+    });
+
     it('names the Code 39 printer check digit EPL cannot add', () => {
         // EPL has no "printer enters the digit" Code 39 type — '3C' is the
         // host-verified one. The nearest honest form is plain '3', and the

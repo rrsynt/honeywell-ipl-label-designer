@@ -164,18 +164,14 @@ const EPL_BARCODE_TYPES: Record<string, EplBarcode> = {
  * existed, and the message kept a working symbol off the label.
  */
 const EPL_KNOWN_UNENCODED: Record<string, string> = {
-    // These five really have no encoder HERE, and the reason is the IR rather
-    // than the encoder library: bwip-js CAN draw japanpost, msi, plessey and
-    // identcode (probed — each lays ink), but the IR has no symbology id for
-    // them, and the renderer reaches the encoder only through an IR id.
-    // Measured: made-up ids 25-28 paint 0 ink while the Code 39 control paints
-    // 14400 px. Adding real support means minting ids and teaching every
-    // language's tables, not just this list.
-    J: 'Japanese POSTNET',
-    L: 'Plessey (MSI-1)',
-    M: 'MSI-3',
-    '2G': 'German Post Code',
-    '2U': 'UPC Interleaved 2 of 5',
+    // EMPTY, and kept as the named-drop slot for the next EPL type with no
+    // encoder. Its five former entries (J, L, M, 2G, 2U) are now real IR ids
+    // (27/29/32/34) AND live in EPL_BARCODE_TYPES above, so they never reach
+    // this lookup — an earlier pass left them here after the forward table won,
+    // which is dead code that reads as if four symbols were still undrawable.
+    // Removing the map instead would make a genuinely unknown type fall to the
+    // generic "not one this viewer knows" message, which is a lie for anything
+    // the manual lists but this table has not caught up with.
 };
 
 /**
