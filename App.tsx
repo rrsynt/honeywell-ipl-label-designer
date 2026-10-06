@@ -1,15 +1,20 @@
-import React, { useReducer, useEffect, useState, useRef, useCallback } from 'react';
+import React, { Suspense, lazy, useReducer, useEffect, useState, useRef, useCallback } from 'react';
 import { TopBar } from './components/TopBar';
 import { LeftPanel } from './components/LeftPanel';
 import { RightPanel } from './components/RightPanel';
 import { Workspace } from './components/Workspace';
-import { HelpModal } from './components/HelpModal';
-import { IPLViewerModal } from './components/IPLViewerModal';
-import { TemplateGallery } from './components/TemplateGallery';
-import { NewLabelDialog } from './components/NewLabelDialog';
 import { StatusBar } from './components/StatusBar';
-import { StartScreen } from './components/StartScreen';
-import { PrintCenter } from './components/PrintCenter';
+// NEXT (audit TECH-02, 2026-10-06): modals load on first open, not on first
+// paint. They are conditional renders already ({show && <Modal/>}), so lazy
+// only moves their bytes out of the main chunk — IPLViewerModal alone is
+// ~1.2k lines plus the jspdf viewer path. The fallback is null because each
+// modal paints its own backdrop on mount; a spinner would flash one frame.
+const HelpModal = lazy(() => import('./components/HelpModal').then(m => ({ default: m.HelpModal })));
+const IPLViewerModal = lazy(() => import('./components/IPLViewerModal').then(m => ({ default: m.IPLViewerModal })));
+const TemplateGallery = lazy(() => import('./components/TemplateGallery').then(m => ({ default: m.TemplateGallery })));
+const NewLabelDialog = lazy(() => import('./components/NewLabelDialog').then(m => ({ default: m.NewLabelDialog })));
+const StartScreen = lazy(() => import('./components/StartScreen').then(m => ({ default: m.StartScreen })));
+const PrintCenter = lazy(() => import('./components/PrintCenter').then(m => ({ default: m.PrintCenter })));
 import { createDefaultDesign, type LabelTemplate } from './services/templates';
 import { DialogHost } from './components/DialogHost';
 import { requestConfirm, notify } from './services/uiDialogs';
@@ -40,53 +45,66 @@ const initialState: AppState = {
     contextMenu: null,
 };
 
-// Migration function to update old design structures
-const migrateDesign = (design: any): Design => {
-    const migrateField = (field: any): Field => {
+// Migration function to update old design structures. The input is untrusted
+// JSON (file import, localStorage, library record) — `unknown` in, validated
+// Design out — so a corrupt file degrades to defaults instead of throwing
+// halfway through a property read.
+const migrateDesign = (design: unknown): Design => {
+    const d = (design ?? {}) as Record<string, unknown>;
+    const migrateField = (field: unknown): Field => {
+        const f = (field ?? {}) as Record<string, unknown>;
         // Batch O: a loaded/imported groupId must be a real finite number to
         // be trusted. Strip the raw key FIRST (all three branches below), so
         // garbage from hand-edited or foreign JSON can neither poison
         // selection nor survive the branch that spreads the whole field.
-        const { groupId: rawGroupId, ...fieldRest } = field;
+        const { groupId: rawGroupId, ...fieldRest } = f;
         const groupId = typeof rawGroupId === 'number' && Number.isFinite(rawGroupId) ? rawGroupId : undefined;
         const groupPatch = groupId === undefined ? {} : { groupId };
-        const base = { locked: field.locked ?? false, visible: field.visible ?? true };
+        const base = {
+            locked: typeof f.locked === 'boolean' ? f.locked : false,
+            visible: typeof f.visible === 'boolean' ? f.visible : true,
+        };
+        // The rest is untrusted file JSON — one documented cast per branch
+        // rather than `any` on the way in, so the boundary is visible.
+        const rest = fieldRest as Partial<Field>;
+        const dataSource = f.dataSource as { type?: unknown } | undefined;
         // Image fields carry a bitmap, not a data source — nothing to migrate
         // except the visibility/lock defaults. (Falling through would bolt a
         // bogus {type:'fixed'} dataSource onto them.)
-        if (field.type === 'image' || field.type === 'ellipse' || field.type === 'polygon' || field.type === 'triangle') {
-            return { ...fieldRest, ...base, ...groupPatch } as Field;
+        if (f.type === 'image' || f.type === 'ellipse' || f.type === 'polygon' || f.type === 'triangle') {
+            return { ...rest, ...base, ...groupPatch } as Field;
         }
-        if (field.dataSource && (field.dataSource.type === 'fixed' || field.dataSource.type === 'variable' || field.dataSource.type === 'linked' || field.dataSource.type === 'date' || field.dataSource.type === 'time')) {
+        if (dataSource && (dataSource.type === 'fixed' || dataSource.type === 'variable' || dataSource.type === 'linked' || dataSource.type === 'date' || dataSource.type === 'time')) {
              return {
-                ...fieldRest,
+                ...rest,
                 ...base,
                 ...groupPatch,
-            };
+            } as Field;
         }
         // Old format with isStatic and data properties
-        const { isStatic, data, ...rest } = fieldRest;
-        const dataSource = isStatic === false // Check for explicit false for variable
-            ? { type: 'variable', defaultData: data || '' }
-            : { type: 'fixed', data: data || '' };
+        const { isStatic, data, ...legacyRest } = rest as Partial<Field> & { isStatic?: unknown; data?: unknown };
+        const legacySource = isStatic === false // Check for explicit false for variable
+            ? { type: 'variable', defaultData: (typeof data === 'string' ? data : '') }
+            : { type: 'fixed', data: (typeof data === 'string' ? data : '') };
 
         return {
-            ...rest,
-            dataSource,
+            ...legacyRest,
+            dataSource: legacySource,
             ...base,
             ...groupPatch,
         } as Field;
     };
-    
-    const migratedFields = (design.fields || []).map(migrateField);
+
+    const rawFields = Array.isArray(d.fields) ? d.fields : [];
+    const migratedFields = rawFields.map(migrateField);
 
     return {
         ...defaultDesign,
-        ...design,
-        labelSettings: { ...defaultDesign.labelSettings, ...(design.labelSettings || {}) },
+        ...(d as Partial<Design>),
+        labelSettings: { ...defaultDesign.labelSettings, ...((d.labelSettings ?? {}) as Partial<Design['labelSettings']>) },
         fields: migratedFields,
-        dataSources: design.dataSources || [],
-        guides: design.guides || { horizontal: [], vertical: [] },
+        dataSources: (Array.isArray(d.dataSources) ? d.dataSources : []) as Design['dataSources'],
+        guides: (d.guides as Design['guides']) ?? { horizontal: [], vertical: [] },
     };
 };
 
@@ -161,7 +179,31 @@ export const isDesignDirty = (state: AppState): boolean =>
  *  crash costs at most this much work. Exported so tests need not sleep. */
 export const AUTOSAVE_DELAY_MS = 1500;
 
-export function appReducer(state: AppState, action: any): AppState {
+/**
+ * NEXT (audit TECH-01, 2026-10-06): the reducer's action names as a union. The
+ * `default` branch returns state unchanged, so a mistyped `type` used to be a
+ * silent no-op; now it is a compile error. Payloads stay loosely typed for
+ * now — narrowing all 40 cases is its own task — but the name is pinned.
+ */
+export type AppActionType =
+    | 'SET_DESIGN' | 'RESTORE_DRAFT' | 'UPDATE_INTERMEDIATE' | 'COMMIT_INTERMEDIATE'
+    | 'NUDGE_BASELINE' | 'UPDATE_SETTING' | 'UPDATE_FIELD_PROPERTIES' | 'ADD_DATA_SOURCE'
+    | 'UPDATE_DATA_SOURCE' | 'DELETE_DATA_SOURCE' | 'UPDATE_MULTIPLE_FIELD_PROPERTIES'
+    | 'TOGGLE_FIELD_LOCK' | 'TOGGLE_FIELD_VISIBILITY' | 'UNDO' | 'REDO' | 'ADD_FIELD'
+    | 'DELETE_FIELD' | 'DUPLICATE_FIELD' | 'SET_SELECTION' | 'SELECT_FIELD'
+    | 'DELETE_SELECTED_FIELDS' | 'DUPLICATE_SELECTED_FIELDS' | 'COPY_FIELD' | 'CUT_FIELD'
+    | 'PASTE_FIELD' | 'GROUP_SELECTED_FIELDS' | 'SET_GROUP_SUPPRESS' | 'UNGROUP_SELECTED_FIELDS'
+    | 'SET_SAVED_DESIGNS' | 'DESIGN_SAVED' | 'DESIGN_DELETED' | 'ALIGN_SELECTED_FIELDS'
+    | 'DISTRIBUTE_SELECTED_FIELDS' | 'BRING_FORWARD' | 'SEND_BACKWARD' | 'BRING_TO_FRONT'
+    | 'SEND_TO_BACK' | 'REORDER_LAYER' | 'SET_CONTEXT_MENU';
+
+export interface AppAction {
+    type: AppActionType;
+    // Loose on purpose (see above): every case reads what it needs.
+    payload?: any;
+}
+
+export function appReducer(state: AppState, action: AppAction): AppState {
     const { history, clipboard, selectedFieldIds } = state;
     const { past, present, future, intermediate } = history;
     const currentDesign = intermediate ?? present;
@@ -200,11 +242,14 @@ export function appReducer(state: AppState, action: any): AppState {
             };
         }
         case 'UPDATE_INTERMEDIATE': {
-            const { fields, guides, ...otherUpdates } = action.payload;
+            const { fields, guides, ...otherUpdates } = action.payload as {
+                fields?: { id: number }[];
+                guides?: Partial<Design['guides']>;
+            };
             let newFields = currentDesign.fields;
             if (fields) {
                 newFields = currentDesign.fields.map(f => {
-                    const update = fields.find((u: any) => u.id === f.id);
+                    const update = fields.find(u => u.id === f.id);
                     return update ? { ...f, ...update } : f;
                 });
             }
@@ -1213,6 +1258,7 @@ export default function App() {
             <StatusBar design={activeDesign} zoom={workspaceState.zoom} mouseCoords={mouseCoords} dirty={dirty} />
             {contextMenu && <ContextMenu {...contextMenu} onClose={() => dispatch({ type: 'SET_CONTEXT_MENU', payload: null })} />}
             <DialogHost />
+            <Suspense fallback={null}>
             {showNewLabel && <NewLabelDialog onClose={() => setShowNewLabel(false)} onCreate={d => void appActions.onNewDesign(d)} />}
             {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
             {showTemplates && <TemplateGallery onClose={() => setShowTemplates(false)} onPick={t => void appActions.onPickTemplate(t)} />}
@@ -1225,10 +1271,13 @@ export default function App() {
                 onOpen={name => void appActions.onLoad(name)}
             />}
             {showIplViewer && <IPLViewerModal onClose={() => setShowIplViewer(false)} onImportDesign={appActions.onImportDesign} />}
+            </Suspense>
             {/* The job snapshots the SCREEN (intermediate ?? present), the same
                 honesty rule Ctrl+S and the image exports follow: what is queued
                 is what the user is looking at, not the last saved version. */}
+            <Suspense fallback={null}>
             {showPrintCenter && <PrintCenter design={activeDesign} onClose={() => setShowPrintCenter(false)} />}
+            </Suspense>
         </div>
     );
 }

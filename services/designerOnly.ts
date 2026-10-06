@@ -29,10 +29,12 @@ export const designerOnlyWarnings = (language: PrinterLanguage, design: Design):
 
     // HRI horizontal placement. TSPL's BARCODE carries it (p4: 1 left, 2
     // centre, 3 right — manual p. 38), so a centre/right align IS printed
-    // there. The other three anchor the human-readable line at the start of
+    // there. The other four anchor the human-readable line at the start of
     // the bar code: IPL's interpretive field is ALWAYS left justified (PRM
-    // p.200 — it has no `o` of its own and cannot be moved), and the ZPL/EPL
-    // generators place it at the field's own origin. So on those three a
+    // p.200 — it has no `o` of its own and cannot be moved), the ZPL/EPL
+    // generators place it at the field's own origin, and DPL has no HRI
+    // alignment parameter either (it chooses above/below per symbology, but
+    // the horizontal anchor stays at the field origin). So on those four a
     // centre or right choice is a preview-only promise.
     if (language !== 'tspl') {
         const misaligned = shown.filter(f =>
@@ -40,7 +42,7 @@ export const designerOnlyWarnings = (language: PrinterLanguage, design: Design):
             && f.hriAlign !== undefined && f.hriAlign !== 'left');
         if (misaligned.length > 0) {
             const one = misaligned.length === 1;
-            const where = language === 'ipl' ? 'IPL, ZPL and EPL' : 'this language';
+            const where = language === 'ipl' ? 'IPL, ZPL, EPL and DPL' : 'this language';
             out.push(`${misaligned.map(f => `"${f.name}"`).join(', ')}: the human-readable line is anchored at the start of the bar code in ${where}, so the alignment set on screen ${one ? 'is' : 'are'} not printed. (TSPL carries it.)`);
         }
     }

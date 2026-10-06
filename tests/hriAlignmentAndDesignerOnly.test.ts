@@ -163,9 +163,12 @@ describe('designerOnlyWarnings — screen-only properties are named, not dropped
     it('warns about the HRI alignment on every language EXCEPT TSPL', () => {
         // TSPL's BARCODE p4 is 1 left / 2 centre / 3 right (manual p. 38), so
         // it PRINTS a centre or right alignment — warning there would be wrong.
-        // IPL, ZPL and EPL anchor at the start and cannot carry it.
+        // IPL, ZPL, EPL and DPL anchor at the start and cannot carry it (DPL
+        // chooses above/below per symbology but never moves the horizontal
+        // anchor — audit NEXT 2026-10-06 closed the comment/test gap that left
+        // DPL unnamed here while the code already warned for it).
         const d = designOf([barcodeField({ hriAlign: 'right' })]);
-        for (const lang of ['ipl', 'zpl', 'epl'] as const) {
+        for (const lang of ['ipl', 'zpl', 'epl', 'dpl'] as const) {
             expect(designerOnlyWarnings(lang, d), lang).toHaveLength(1);
         }
         expect(designerOnlyWarnings('tspl', d)).toEqual([]);
