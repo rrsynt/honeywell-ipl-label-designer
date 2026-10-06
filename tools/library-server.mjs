@@ -14,11 +14,22 @@
 // ipl-bridge.mjs.
 //
 // Usage:
-//   node tools/library-server.mjs                     # http://localhost:9182, data in ./library-data
+//   node tools/library-server.mjs                     # http://127.0.0.1:9182, data in ./library-data
 //   node tools/library-server.mjs --port=9300         # custom port
 //   node tools/library-server.mjs --dir=D:/shared     # a folder the whole shop can see
+//   node tools/library-server.mjs --host=0.0.0.0 --token=s3cret
+//                                                     # serve the LAN, but only to token holders
 //
-// Endpoints (all JSON, CORS open — it is a LAN tool, not an internet service):
+// Hardening (audit SEC-01/SEC-02, 2026-10-06):
+//   --host   HTTP listen address. Default 127.0.0.1 (this machine only); pass
+//            --host=0.0.0.0 explicitly to serve the LAN.
+//   --token  When set, every route except /ping requires
+//            `Authorization: Bearer <token>`. Without it the server keeps its
+//            old behaviour, so a single-station setup needs no token at all.
+//   CORS     Echoes the request Origin instead of `*`, so a token-bearing
+//            browser cannot be driven cross-origin by a stranger site.
+//
+// Endpoints (all JSON; CORS echoes the caller Origin):
 //   GET    /ping
 //   GET    /designs                 -> LibraryRecord[], newest first
 //   GET    /designs/:name           -> LibraryRecord | 404
@@ -53,15 +64,20 @@ const port = parseInt(opt('--port') || String(DEFAULT_PORT), 10);
 // point each run at its own throwaway directory through the environment so
 // two suites never share files.
 const dataDir = () => path.resolve(process.env.IPL_LIBRARY_DIR || String(opt('--dir') || 'library-data'));
+const bindHost = () => process.env.IPL_LIBRARY_HOST || String(opt('--host') || '127.0.0.1');
+const serverToken = () => process.env.IPL_LIBRARY_TOKEN || (typeof opt('--token') === 'string' ? opt('--token') : '');
 
-const CORS = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+const corsHeaders = (req) => {
+    const origin = req.headers?.origin;
+    return {
+        ...(origin ? { 'Access-Control-Allow-Origin': origin, 'Vary': 'Origin' } : {}),
+        'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    };
 };
 
-const sendJson = (res, code, obj) => {
-    res.writeHead(code, { ...CORS, 'Content-Type': 'application/json' });
+const sendJson = (req, res, code, obj) => {
+    res.writeHead(code, { ...corsHeaders(req), 'Content-Type': 'application/json' });
     res.end(JSON.stringify(obj));
 };
 
@@ -167,9 +183,17 @@ const readBody = (req) => new Promise((resolve, reject) => {
  *
  * Returns nothing; the response is always ended here.
  */
+/** Bearer check for every route except /ping. Public when no --token is set,
+ *  so a single-station setup behaves exactly as before. Exported for tests. */
+export const isAuthorized = (req) => {
+    const token = serverToken();
+    if (!token) return true;
+    return (req.headers?.authorization ?? '') === `Bearer ${token}`;
+};
+
 export const handleLibraryRequest = (req, res) => {
     if (req.method === 'OPTIONS') {
-        res.writeHead(204, CORS);
+        res.writeHead(204, corsHeaders(req));
         res.end();
         return;
     }
@@ -177,45 +201,52 @@ export const handleLibraryRequest = (req, res) => {
     try {
         url = new URL(req.url, 'http://localhost');
     } catch {
-        sendJson(res, 400, { ok: false, error: 'bad request URL' });
+        sendJson(req, res, 400, { ok: false, error: 'bad request URL' });
         return;
     }
 
     if (url.pathname === '/ping' && req.method === 'GET') {
-        sendJson(res, 200, { ok: true, service: 'library' });
+        sendJson(req, res, 200, { ok: true, service: 'library' });
+        return;
+    }
+
+    // /ping is the only public route: liveness must work before the UI knows
+    // any token. Designs, sources and drafts are shop data — token-gated.
+    if (!isAuthorized(req)) {
+        sendJson(req, res, 401, { ok: false, error: 'library token required (start the UI with the same token, or restart the server without --token)' });
         return;
     }
 
     const parts = url.pathname.split('/').filter(Boolean);
     const collection = COLLECTIONS[parts[0]];
     if (!collection || parts.length > 2) {
-        sendJson(res, 404, { ok: false, error: 'unknown endpoint' });
+        sendJson(req, res, 404, { ok: false, error: 'unknown endpoint' });
         return;
     }
     const key = parts.length === 2 ? decodeURIComponent(parts[1]) : null;
 
     const fail = (err) => {
         const status = err.status || 500;
-        sendJson(res, status, { ok: false, error: err.message || String(err) });
+        sendJson(req, res, status, { ok: false, error: err.message || String(err) });
     };
 
     if (req.method === 'GET' && key === null) {
         try {
-            sendJson(res, 200, { ok: true, records: listRecords(collection) });
+            sendJson(req, res, 200, { ok: true, records: listRecords(collection) });
         } catch (err) { fail(err); }
         return;
     }
 
     if (key === null) {
-        sendJson(res, 405, { ok: false, error: `${req.method} needs a name` });
+        sendJson(req, res, 405, { ok: false, error: `${req.method} needs a name` });
         return;
     }
 
     if (req.method === 'GET') {
         try {
             const record = readRecord(collection, key);
-            if (!record) { sendJson(res, 404, { ok: false, error: 'not found' }); return; }
-            sendJson(res, 200, { ok: true, record });
+            if (!record) { sendJson(req, res, 404, { ok: false, error: 'not found' }); return; }
+            sendJson(req, res, 200, { ok: true, record });
         } catch (err) { fail(err); }
         return;
     }
@@ -223,7 +254,7 @@ export const handleLibraryRequest = (req, res) => {
     if (req.method === 'DELETE') {
         try {
             deleteRecord(collection, key);
-            sendJson(res, 200, { ok: true });
+            sendJson(req, res, 200, { ok: true });
         } catch (err) { fail(err); }
         return;
     }
@@ -232,27 +263,27 @@ export const handleLibraryRequest = (req, res) => {
         readBody(req).then((text) => {
             let body;
             try { body = JSON.parse(text); } catch {
-                sendJson(res, 400, { ok: false, error: 'body is not JSON' });
+                sendJson(req, res, 400, { ok: false, error: 'body is not JSON' });
                 return;
             }
             if (!body || typeof body !== 'object' || Array.isArray(body)) {
-                sendJson(res, 400, { ok: false, error: 'body must be a record' });
+                sendJson(req, res, 400, { ok: false, error: 'body must be a record' });
                 return;
             }
             const bodyKey = collection.keyOf(body);
             if (typeof bodyKey !== 'string' || bodyKey !== key) {
-                sendJson(res, 400, { ok: false, error: `record name "${bodyKey}" does not match the URL` });
+                sendJson(req, res, 400, { ok: false, error: `record name "${bodyKey}" does not match the URL` });
                 return;
             }
             try {
                 writeRecord(collection, key, body);
-                sendJson(res, 200, { ok: true });
+                sendJson(req, res, 200, { ok: true });
             } catch (err) { fail(err); }
         }).catch(fail);
         return;
     }
 
-    sendJson(res, 405, { ok: false, error: `unsupported method ${req.method}` });
+    sendJson(req, res, 405, { ok: false, error: `unsupported method ${req.method}` });
 };
 
 // fileURLToPath, not `new URL(...).pathname`: a pathname keeps percent-encoding,
@@ -266,7 +297,10 @@ if (isMain) {
         console.error(`[library] cannot listen on http/${port}: ${err.message}`);
         process.exit(1);
     });
-    server.listen(port, () => {
-        console.log(`[library] shared design library on http://localhost:${port}, storing in ${dataDir()}`);
+    const host = bindHost();
+    server.listen(port, host, () => {
+        console.log(`[library] shared design library on http://${host}:${port}, storing in ${dataDir()}`);
+        if (serverToken()) console.log('[library] token auth enabled (all routes except /ping)');
+        else console.log('[library] no --token: LAN callers can read and write the library (single-station default)');
     });
 }

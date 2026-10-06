@@ -21,11 +21,27 @@
 // come back as '?'), which for a label means a misprinted label.
 //
 // Usage:
-//   node tools/db-server.mjs                    # http://localhost:9184, data in ./db-data
+//   node tools/db-server.mjs                    # http://127.0.0.1:9184, data in ./db-data
 //   node tools/db-server.mjs --port=9400        # custom port
 //   node tools/db-server.mjs --dir=D:/shared    # a folder the whole shop can see
+//   node tools/db-server.mjs --host=0.0.0.0 --token=s3cret
+//                                               # serve the LAN, but only to token holders
 //
-// Endpoints (all JSON, CORS open; it is a LAN tool, not an internet service):
+// Hardening (audit SEC-01/SEC-02/SEC-03, 2026-10-06):
+//   --host   HTTP listen address. Default 127.0.0.1 (this machine only); pass
+//            --host=0.0.0.0 explicitly to serve the LAN.
+//   --token  When set, every route except /ping requires
+//            `Authorization: Bearer <token>`. Without it the server keeps its
+//            old behaviour, so a single-station setup needs no token at all.
+//   PUT      additionally requires a LOOPBACK caller even WITHOUT a token:
+//            writing a query means writing a connection (server/user/password)
+//            plus SQL, so it is an admin act done on the server machine —
+//            hand-edited files, or curl from localhost. A browser (and the web
+//            UI, which never calls PUT) can only list and run.
+//   CORS     Echoes the request Origin instead of `*`, so a token-bearing
+//            browser cannot be driven cross-origin by a stranger site.
+//
+// Endpoints (all JSON; CORS echoes the caller Origin):
 //   GET    /ping                 -> { ok, service:'db', providers:[...] }
 //   GET    /queries              -> query summaries, NEWEST first, no credentials
 //   GET    /queries/:id          -> one definition (still no credentials)
@@ -76,16 +92,38 @@ const port = parseInt(opt('--port') || String(DEFAULT_PORT), 10);
 // point each run at its own throwaway directory through the environment.
 const dataDir = () => path.resolve(process.env.IPL_DB_DIR || String(opt('--dir') || 'db-data'));
 const queriesDir = () => path.join(dataDir(), 'queries');
+const bindHost = () => process.env.IPL_DB_HOST || String(opt('--host') || '127.0.0.1');
+const serverToken = () => process.env.IPL_DB_TOKEN || (typeof opt('--token') === 'string' ? opt('--token') : '');
 
-const CORS = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+const corsHeaders = (req) => {
+    const origin = req.headers?.origin;
+    return {
+        ...(origin ? { 'Access-Control-Allow-Origin': origin, 'Vary': 'Origin' } : {}),
+        'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    };
 };
 
-const sendJson = (res, code, obj) => {
-    res.writeHead(code, { ...CORS, 'Content-Type': 'application/json' });
+const sendJson = (req, res, code, obj) => {
+    res.writeHead(code, { ...corsHeaders(req), 'Content-Type': 'application/json' });
     res.end(JSON.stringify(obj));
+};
+
+/** Bearer check for every route except /ping. Public when no --token is set,
+ *  so a single-station setup behaves exactly as before. Exported for tests. */
+export const isAuthorized = (req) => {
+    const token = serverToken();
+    if (!token) return true;
+    return (req.headers?.authorization ?? '') === `Bearer ${token}`;
+};
+
+/** Loopback check for PUT: writing a query writes credentials + SQL, so it is
+ *  an on-the-machine admin act even when no --token is set. Exported for tests. */
+export const isLoopback = (req) => {
+    // socket.remoteAddress is the TCP peer — what actually connected, not a
+    // header anyone can forge. Covers IPv4, IPv6 and IPv4-mapped IPv6.
+    const peer = req.socket?.remoteAddress ?? '';
+    return peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1';
 };
 
 /** FNV-1a 32-bit, hex. Filenames only; the record own id is the identity. */
@@ -366,7 +404,7 @@ const storedQuery = (id) => readQuery(id);
 
 export const handleDbRequest = (req, res) => {
     if (req.method === 'OPTIONS') {
-        res.writeHead(204, CORS);
+        res.writeHead(204, corsHeaders(req));
         res.end();
         return;
     }
@@ -374,33 +412,41 @@ export const handleDbRequest = (req, res) => {
     try {
         url = new URL(req.url, 'http://localhost');
     } catch {
-        sendJson(res, 400, { ok: false, error: 'bad request URL' });
+        sendJson(req, res, 400, { ok: false, error: 'bad request URL' });
         return;
     }
 
     if (url.pathname === '/ping' && req.method === 'GET') {
-        sendJson(res, 200, {
+        sendJson(req, res, 200, {
             ok: true, service: 'db',
             providers: Object.entries(PROVIDERS).filter(([, available]) => available).map(([name]) => name),
         });
         return;
     }
 
+    // /ping is the only public route. Everything else needs the token when one
+    // is set — and PUT additionally needs a loopback caller even without one,
+    // because writing a query writes credentials + SQL (audit SEC-03).
+    if (!isAuthorized(req)) {
+        sendJson(req, res, 401, { ok: false, error: 'database token required (start the UI with the same token, or restart the server without --token)' });
+        return;
+    }
+
     const fail = (err) => {
         const status = err.status || 500;
-        sendJson(res, status, { ok: false, error: err.message || String(err) });
+        sendJson(req, res, status, { ok: false, error: err.message || String(err) });
     };
 
     const parts = url.pathname.split('/').filter(Boolean);
     if (parts[0] !== 'queries' || parts.length > 3) {
-        sendJson(res, 404, { ok: false, error: 'unknown endpoint' });
+        sendJson(req, res, 404, { ok: false, error: 'unknown endpoint' });
         return;
     }
 
     // POST /queries/:id/run
     if (parts.length === 3 && parts[2] === 'run') {
         if (req.method !== 'POST') {
-            sendJson(res, 405, { ok: false, error: `${req.method} not allowed on a run` });
+            sendJson(req, res, 405, { ok: false, error: `${req.method} not allowed on a run` });
             return;
         }
         const id = decodeURIComponent(parts[1]);
@@ -408,16 +454,16 @@ export const handleDbRequest = (req, res) => {
         try {
             record = storedQuery(id);
         } catch (err) { fail(err); return; }
-        if (!record) { sendJson(res, 404, { ok: false, error: `no query "${id}"` }); return; }
+        if (!record) { sendJson(req, res, 404, { ok: false, error: `no query "${id}"` }); return; }
         runStoredQuery(record).then((result) => {
             if (!result.ok) {
                 // A refused query is the operator's mistake and the caller's
                 // to fix, so it is a 400; anything else is the database or the
                 // helper failing, which is a 502.
-                sendJson(res, result.refusal ? 400 : 502, result);
+                sendJson(req, res, result.refusal ? 400 : 502, result);
                 return;
             }
-            sendJson(res, 200, result);
+            sendJson(req, res, 200, result);
         }).catch(fail);
         return;
     }
@@ -429,21 +475,21 @@ export const handleDbRequest = (req, res) => {
             const records = listQueries()
                 .map(publicQuery)
                 .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-            sendJson(res, 200, { ok: true, queries: records });
+            sendJson(req, res, 200, { ok: true, queries: records });
         } catch (err) { fail(err); }
         return;
     }
 
     if (id === null) {
-        sendJson(res, 405, { ok: false, error: `${req.method} needs an id` });
+        sendJson(req, res, 405, { ok: false, error: `${req.method} needs an id` });
         return;
     }
 
     if (req.method === 'GET') {
         try {
             const record = readQuery(id);
-            if (!record) { sendJson(res, 404, { ok: false, error: 'not found' }); return; }
-            sendJson(res, 200, { ok: true, query: publicQuery(record) });
+            if (!record) { sendJson(req, res, 404, { ok: false, error: 'not found' }); return; }
+            sendJson(req, res, 200, { ok: true, query: publicQuery(record) });
         } catch (err) { fail(err); }
         return;
     }
@@ -451,40 +497,48 @@ export const handleDbRequest = (req, res) => {
     if (req.method === 'DELETE') {
         try {
             deleteQuery(id);
-            sendJson(res, 200, { ok: true });
+            sendJson(req, res, 200, { ok: true });
         } catch (err) { fail(err); }
         return;
     }
 
     if (req.method === 'PUT') {
+        // Writing a query means writing a connection (server/user/password)
+        // plus SQL — an admin act done on the server machine. A non-loopback
+        // caller is refused even when no --token is set; the web UI never
+        // calls PUT, so no legitimate flow breaks.
+        if (!isLoopback(req)) {
+            sendJson(req, res, 403, { ok: false, error: 'storing a query is an admin act: PUT is accepted from the server machine only (localhost)' });
+            return;
+        }
         readBody(req, MAX_BODY).then((bytes) => {
             let body;
             try { body = JSON.parse(bytes.toString('utf8')); } catch {
-                sendJson(res, 400, { ok: false, error: 'body is not JSON' });
+                sendJson(req, res, 400, { ok: false, error: 'body is not JSON' });
                 return;
             }
             if (!body || typeof body !== 'object' || Array.isArray(body)) {
-                sendJson(res, 400, { ok: false, error: 'body must be a record' });
+                sendJson(req, res, 400, { ok: false, error: 'body must be a record' });
                 return;
             }
             if (typeof body.id !== 'string' || body.id !== id) {
-                sendJson(res, 400, { ok: false, error: `record id "${body.id}" does not match the URL` });
+                sendJson(req, res, 400, { ok: false, error: `record id "${body.id}" does not match the URL` });
                 return;
             }
             const refusal = readOnlyRefusal(body.sql);
             if (refusal) {
-                sendJson(res, 400, { ok: false, error: `refused: ${refusal}` });
+                sendJson(req, res, 400, { ok: false, error: `refused: ${refusal}` });
                 return;
             }
             try {
                 writeQuery(id, body);
-                sendJson(res, 200, { ok: true, query: publicQuery(body) });
+                sendJson(req, res, 200, { ok: true, query: publicQuery(body) });
             } catch (err) { fail(err); }
         }).catch(fail);
         return;
     }
 
-    sendJson(res, 405, { ok: false, error: `unsupported method ${req.method}` });
+    sendJson(req, res, 405, { ok: false, error: `unsupported method ${req.method}` });
 };
 
 // fileURLToPath, not `new URL(...).pathname`: a pathname keeps percent-encoding,
@@ -498,8 +552,11 @@ if (isMain) {
         console.error(`[db] cannot listen on http/${port}: ${err.message}`);
         process.exit(1);
     });
-    server.listen(port, () => {
+    const host = bindHost();
+    server.listen(port, host, () => {
         const providers = Object.entries(PROVIDERS).filter(([, on]) => on).map(([name]) => name).join(', ');
-        console.log(`[db] database server on http://localhost:${port} (${providers}), queries in ${queriesDir()}`);
+        console.log(`[db] database server on http://${host}:${port} (${providers}), queries in ${queriesDir()}`);
+        if (serverToken()) console.log('[db] token auth enabled (all routes except /ping)');
+        else console.log('[db] no --token: PUT additionally requires a loopback caller; list/run stay open (single-station default)');
     });
 }

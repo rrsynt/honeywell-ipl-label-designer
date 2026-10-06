@@ -20,11 +20,22 @@
 // own. Zero dependencies, like the bridge and the library server.
 //
 // Usage:
-//   node tools/print-server.mjs                    # http://localhost:9183, data in ./print-data
+//   node tools/print-server.mjs                    # http://127.0.0.1:9183, data in ./print-data
 //   node tools/print-server.mjs --port=9300        # custom port
 //   node tools/print-server.mjs --dir=D:/shared    # a folder the whole shop can see
+//   node tools/print-server.mjs --host=0.0.0.0 --token=s3cret
+//                                                  # serve the LAN, but only to token holders
 //
-// Endpoints (all JSON, CORS open; it is a LAN tool, not an internet service):
+// Hardening (audit SEC-01/SEC-02, 2026-10-06):
+//   --host   HTTP listen address. Default 127.0.0.1 (this machine only); pass
+//            --host=0.0.0.0 explicitly to serve the LAN.
+//   --token  When set, every route except /ping requires
+//            `Authorization: Bearer <token>`. Without it the server keeps its
+//            old behaviour, so a single-station setup needs no token at all.
+//   CORS     Echoes the request Origin instead of `*`, so a token-bearing
+//            browser cannot be driven cross-origin by a stranger site.
+//
+// Endpoints (all JSON; CORS echoes the caller Origin):
 //   GET    /ping
 //   GET    /jobs                    -> PrintJob[], newest first
 //   GET    /jobs/:id                -> PrintJob | 404
@@ -83,17 +94,33 @@ const port = parseInt(opt('--port') || String(DEFAULT_PORT), 10);
 // point each run at its own throwaway directory through the environment so
 // two suites never share files.
 const dataDir = () => path.resolve(process.env.IPL_PRINT_DIR || String(opt('--dir') || 'print-data'));
+const bindHost = () => process.env.IPL_PRINT_HOST || String(opt('--host') || '127.0.0.1');
+const serverToken = () => process.env.IPL_PRINT_TOKEN || (typeof opt('--token') === 'string' ? opt('--token') : '');
 
-const CORS = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+const corsHeaders = (req) => {
+    const origin = req.headers?.origin;
+    return {
+        ...(origin ? { 'Access-Control-Allow-Origin': origin, 'Vary': 'Origin' } : {}),
+        'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    };
 };
 
-const sendJson = (res, code, obj) => {
-    res.writeHead(code, { ...CORS, 'Content-Type': 'application/json' });
+const sendJson = (req, res, code, obj) => {
+    res.writeHead(code, { ...corsHeaders(req), 'Content-Type': 'application/json' });
     res.end(JSON.stringify(obj));
 };
+
+/** Bearer check for every route except /ping. Public when no --token is set,
+ *  so a single-station setup behaves exactly as before. Exported for tests. */
+export const isAuthorized = (req) => {
+    const token = serverToken();
+    if (!token) return true;
+    return (req.headers?.authorization ?? '') === `Bearer ${token}`;
+};
+
+const unauthorized = (req, res) =>
+    sendJson(req, res, 401, { ok: false, error: 'print server token required (start the UI with the same token, or restart the server without --token)' });
 
 // One subdirectory per collection. Ids are never used as filenames: a job id
 // with a slash or a Windows-illegal name must store and round-trip, so the
@@ -249,7 +276,7 @@ const logId = () => `l${Date.now().toString(36)}${Math.floor(Math.random() * 0xf
  */
 export const handlePrintRequest = (req, res) => {
     if (req.method === 'OPTIONS') {
-        res.writeHead(204, CORS);
+        res.writeHead(204, corsHeaders(req));
         res.end();
         return;
     }
@@ -257,18 +284,22 @@ export const handlePrintRequest = (req, res) => {
     try {
         url = new URL(req.url, 'http://localhost');
     } catch {
-        sendJson(res, 400, { ok: false, error: 'bad request URL' });
+        sendJson(req, res, 400, { ok: false, error: 'bad request URL' });
         return;
     }
 
     if (url.pathname === '/ping' && req.method === 'GET') {
-        sendJson(res, 200, { ok: true, service: 'print' });
+        sendJson(req, res, 200, { ok: true, service: 'print' });
         return;
     }
 
+    // /ping is the only public route: liveness must work before the UI knows
+    // any token. Everything else — queue, targets, log, chunks — is LAN-powerful.
+    if (!isAuthorized(req)) { unauthorized(req, res); return; }
+
     const fail = (err) => {
         const status = err.status || 500;
-        sendJson(res, status, { ok: false, error: err.message || String(err) });
+        sendJson(req, res, status, { ok: false, error: err.message || String(err) });
     };
 
     const parts = url.pathname.split('/').filter(Boolean);
@@ -276,7 +307,7 @@ export const handlePrintRequest = (req, res) => {
     // POST /jobs/:id/chunk?seq=N — the whole reason this server exists.
     if (parts[0] === 'jobs' && parts[2] === 'chunk') {
         if (req.method !== 'POST') {
-            sendJson(res, 405, { ok: false, error: `${req.method} not allowed on a chunk` });
+            sendJson(req, res, 405, { ok: false, error: `${req.method} not allowed on a chunk` });
             return;
         }
         handleChunk(req, res, decodeURIComponent(parts[1] ?? ''), url.searchParams.get('seq'), fail);
@@ -285,7 +316,7 @@ export const handlePrintRequest = (req, res) => {
 
     const collection = COLLECTIONS[parts[0]];
     if (!collection || parts.length > 2) {
-        sendJson(res, 404, { ok: false, error: 'unknown endpoint' });
+        sendJson(req, res, 404, { ok: false, error: 'unknown endpoint' });
         return;
     }
     const key = parts.length === 2 ? decodeURIComponent(parts[1]) : null;
@@ -298,17 +329,17 @@ export const handlePrintRequest = (req, res) => {
         readBody(req, MAX_BODY).then((bytes) => {
             let body;
             try { body = JSON.parse(bytes.toString('utf8')); } catch {
-                sendJson(res, 400, { ok: false, error: 'body is not JSON' });
+                sendJson(req, res, 400, { ok: false, error: 'body is not JSON' });
                 return;
             }
             if (!body || typeof body !== 'object' || Array.isArray(body)) {
-                sendJson(res, 400, { ok: false, error: 'body must be a record' });
+                sendJson(req, res, 400, { ok: false, error: 'body must be a record' });
                 return;
             }
             try {
                 const record = { ...body, id: logId() };
                 writeRecord(collection, record.id, record);
-                sendJson(res, 200, { ok: true, id: record.id });
+                sendJson(req, res, 200, { ok: true, id: record.id });
             } catch (err) { fail(err); }
         }).catch(fail);
         return;
@@ -316,21 +347,21 @@ export const handlePrintRequest = (req, res) => {
 
     if (req.method === 'GET' && key === null) {
         try {
-            sendJson(res, 200, { ok: true, records: listRecords(collection) });
+            sendJson(req, res, 200, { ok: true, records: listRecords(collection) });
         } catch (err) { fail(err); }
         return;
     }
 
     if (key === null) {
-        sendJson(res, 405, { ok: false, error: `${req.method} needs an id` });
+        sendJson(req, res, 405, { ok: false, error: `${req.method} needs an id` });
         return;
     }
 
     if (req.method === 'GET') {
         try {
             const record = readRecord(collection, key);
-            if (!record) { sendJson(res, 404, { ok: false, error: 'not found' }); return; }
-            sendJson(res, 200, { ok: true, record });
+            if (!record) { sendJson(req, res, 404, { ok: false, error: 'not found' }); return; }
+            sendJson(req, res, 200, { ok: true, record });
         } catch (err) { fail(err); }
         return;
     }
@@ -338,7 +369,7 @@ export const handlePrintRequest = (req, res) => {
     if (req.method === 'DELETE') {
         try {
             deleteRecord(collection, key);
-            sendJson(res, 200, { ok: true });
+            sendJson(req, res, 200, { ok: true });
         } catch (err) { fail(err); }
         return;
     }
@@ -347,27 +378,27 @@ export const handlePrintRequest = (req, res) => {
         readBody(req, MAX_BODY).then((bytes) => {
             let body;
             try { body = JSON.parse(bytes.toString('utf8')); } catch {
-                sendJson(res, 400, { ok: false, error: 'body is not JSON' });
+                sendJson(req, res, 400, { ok: false, error: 'body is not JSON' });
                 return;
             }
             if (!body || typeof body !== 'object' || Array.isArray(body)) {
-                sendJson(res, 400, { ok: false, error: 'body must be a record' });
+                sendJson(req, res, 400, { ok: false, error: 'body must be a record' });
                 return;
             }
             const bodyKey = collection.keyOf(body);
             if (typeof bodyKey !== 'string' || bodyKey !== key) {
-                sendJson(res, 400, { ok: false, error: `record id "${bodyKey}" does not match the URL` });
+                sendJson(req, res, 400, { ok: false, error: `record id "${bodyKey}" does not match the URL` });
                 return;
             }
             try {
                 writeWithFloor(collection, key, body);
-                sendJson(res, 200, { ok: true });
+                sendJson(req, res, 200, { ok: true });
             } catch (err) { fail(err); }
         }).catch(fail);
         return;
     }
 
-    sendJson(res, 405, { ok: false, error: `unsupported method ${req.method}` });
+    sendJson(req, res, 405, { ok: false, error: `unsupported method ${req.method}` });
 };
 
 /**
@@ -420,20 +451,20 @@ const serializePerJob = (jobId, work) => {
  * server owns a number the client also writes. It is never lowered here, and
  * `writeWithFloor` keeps a stale client PUT from lowering it either.
  */
-const acceptChunk = async (res, jobId, seq, payload, fail) => {
+const acceptChunk = async (req, res, jobId, seq, payload, fail) => {
     let job;
     try {
         job = readRecord(COLLECTIONS.jobs, jobId);
     } catch (err) { fail(err); return; }
     if (!job) {
-        sendJson(res, 404, { ok: false, accepted: 0, error: `no job "${jobId}"` });
+        sendJson(req, res, 404, { ok: false, accepted: 0, error: `no job "${jobId}"` });
         return;
     }
     const accepted = Number.isFinite(Number(job.sentChunks)) ? Number(job.sentChunks) : 0;
 
     if (seq !== accepted) {
         const behind = seq < accepted;
-        sendJson(res, 409, {
+        sendJson(req, res, 409, {
             ok: false, accepted,
             error: behind
                 ? `chunk ${seq} was already accepted — this server has flushed ${accepted} chunk(s)`
@@ -442,7 +473,7 @@ const acceptChunk = async (res, jobId, seq, payload, fail) => {
         return;
     }
     if (payload.length === 0) {
-        sendJson(res, 400, { ok: false, accepted, error: 'empty chunk body' });
+        sendJson(req, res, 400, { ok: false, accepted, error: 'empty chunk body' });
         return;
     }
 
@@ -452,7 +483,7 @@ const acceptChunk = async (res, jobId, seq, payload, fail) => {
     const host = job.target?.host;
     const port = parseInt(String(job.target?.port ?? ''), 10);
     if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
-        sendJson(res, 502, {
+        sendJson(req, res, 502, {
             ok: false, accepted,
             error: `job "${jobId}" has no usable printer target (${job.target?.host}:${job.target?.port})`,
         });
@@ -464,7 +495,7 @@ const acceptChunk = async (res, jobId, seq, payload, fail) => {
         // `accepted` is untouched, and that is a fact rather than a guess: the
         // bytes did not flush, so the chunk did not print. Saying otherwise
         // would make the queue skip it forever.
-        sendJson(res, 502, { ok: false, accepted, error: result.error });
+        sendJson(req, res, 502, { ok: false, accepted, error: result.error });
         return;
     }
 
@@ -479,7 +510,7 @@ const acceptChunk = async (res, jobId, seq, payload, fail) => {
         fail(err);
         return;
     }
-    sendJson(res, 200, { ok: true, accepted: next, written: result.written, bytes: payload.length });
+    sendJson(req, res, 200, { ok: true, accepted: next, written: result.written, bytes: payload.length });
 };
 
 const handleChunk = (req, res, jobId, rawSeq, fail) => {
@@ -489,12 +520,56 @@ const handleChunk = (req, res, jobId, rawSeq, fail) => {
     const missing = rawSeq === null || rawSeq === undefined || String(rawSeq).trim() === '';
     const seq = missing ? NaN : Number(rawSeq);
     if (!Number.isInteger(seq) || seq < 0) {
-        sendJson(res, 400, { ok: false, accepted: 0, error: `invalid seq "${rawSeq}" — must be a non-negative integer` });
+        sendJson(req, res, 400, { ok: false, accepted: 0, error: `invalid seq "${rawSeq}" — must be a non-negative integer` });
         return;
     }
     readBody(req, MAX_BODY)
-        .then((payload) => serializePerJob(jobId, () => acceptChunk(res, jobId, seq, payload, fail)))
+        .then((payload) => serializePerJob(jobId, () => acceptChunk(req, res, jobId, seq, payload, fail)))
         .catch(fail);
+};
+
+/**
+ * NOW-5 (audit PRINT-01, 2026-10-06): one data directory, one server. The ack
+ * chain (`ackChain`) lives in memory, so two server processes on the same
+ * `--dir` both read `sentChunks: 0`, both flush chunk 0, and both record `1` —
+ * two copies of the chunk on the media with a count that hides one of them.
+ * The pid-file below refuses the second process instead of double-printing.
+ *
+ * Stale locks (a killed process that never cleaned up) are reclaimed: a lock
+ * whose pid no longer exists is overwritten with a warning, not honoured.
+ * Exported so tests can prove both halves against a throwaway directory.
+ */
+export const acquireDataDirLock = (dir) => {
+    const lockPath = path.join(dir, 'server.lock');
+    fs.mkdirSync(dir, { recursive: true });
+    try {
+        fs.writeFileSync(lockPath, String(process.pid), { flag: 'wx' });
+        return { lockPath, reclaimed: false };
+    } catch (err) {
+        if (err.code !== 'EEXIST') throw err;
+    }
+    let owner = '';
+    try { owner = fs.readFileSync(lockPath, 'utf8').trim(); } catch { owner = ''; }
+    const ownerPid = parseInt(owner, 10);
+    let alive = Number.isInteger(ownerPid) && ownerPid > 0;
+    if (alive) {
+        try { process.kill(ownerPid, 0); }
+        catch { alive = false; } // ESRCH: no such process — the lock is stale.
+    }
+    if (alive) {
+        throw Object.assign(
+            new Error(`another print server (pid ${ownerPid}) already holds ${dir} — start this one with a different --dir`),
+            { code: 'ELOCKED' },
+        );
+    }
+    fs.writeFileSync(lockPath, String(process.pid));
+    return { lockPath, reclaimed: true, previousOwner: owner || undefined };
+};
+
+export const releaseDataDirLock = (lockPath) => {
+    try { fs.unlinkSync(lockPath); } catch (err) {
+        if (err.code !== 'ENOENT') throw err;
+    }
 };
 
 // fileURLToPath, not `new URL(...).pathname`: a pathname keeps percent-encoding,
@@ -503,12 +578,29 @@ const handleChunk = (req, res, jobId, rawSeq, fail) => {
 const isMain = !!process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isMain) {
+    let lock;
+    try {
+        lock = acquireDataDirLock(dataDir());
+        if (lock.reclaimed) {
+            console.log(`[print] reclaimed a stale lock${lock.previousOwner ? ` (previous owner ${lock.previousOwner})` : ''} in ${dataDir()}`);
+        }
+    } catch (err) {
+        console.error(`[print] ${err.message}`);
+        process.exit(1);
+    }
+    const dropLock = () => releaseDataDirLock(lock.lockPath);
+    process.on('exit', dropLock);
+    process.on('SIGINT', () => { dropLock(); process.exit(0); });
+    process.on('SIGTERM', () => { dropLock(); process.exit(0); });
     const server = http.createServer(handlePrintRequest);
     server.on('error', (err) => {
         console.error(`[print] cannot listen on http/${port}: ${err.message}`);
         process.exit(1);
     });
-    server.listen(port, () => {
-        console.log(`[print] shared print server on http://localhost:${port}, storing in ${dataDir()}`);
+    const host = bindHost();
+    server.listen(port, host, () => {
+        console.log(`[print] shared print server on http://${host}:${port}, storing in ${dataDir()}`);
+        if (serverToken()) console.log('[print] token auth enabled (all routes except /ping)');
+        else console.log('[print] no --token: LAN callers can read and write the queue (single-station default)');
     });
 }
