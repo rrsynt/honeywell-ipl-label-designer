@@ -175,7 +175,12 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
                 ? Math.max(1, dots(box.height))
                 : Math.max(1, field.h_mag || 50);
             // Code 39's printer-generated check digit is ^B3's e flag. The ZPL
-            // side has no host-verify mode, so 'host-verifies' maps to N.
+            // side has no host-verify mode, so 'host-verifies' maps to N — named
+            // here the way EPL/TSPL name their analogous gaps, so the vanished
+            // verification semantics are not silent (audit FUN-05).
+            if (field.symbology === '0' && field.code39_checkDigit === 'host-verifies') {
+                warnings.push(`"${field.name}" asks Code 39 for host verification. ZPL ^B3 has no host-verify mode, so it prints as a plain symbol without it.`);
+            }
             const e: 'Y' | 'N' = field.symbology === '0' && field.code39_checkDigit === 'printer-generated' ? 'Y' : 'N';
             // QR's error-correction level is not a ^BQ parameter — it is a
             // PREFIX on the field DATA. Probed against Labelary (the ZPL

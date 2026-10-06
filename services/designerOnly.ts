@@ -97,6 +97,27 @@ export const designerOnlyWarnings = (language: PrinterLanguage, design: Design):
         }
     }
 
+    // A printer-side serial counter. Only IPL carries one: a serial counter
+    // source wraps the print-block data in <FS>…<FS> and sets <ESC>I/D so the
+    // PRINTER advances the number after every label (Batch Q). The other four
+    // generators resolve a linked counter field to its padded START and print
+    // that same value on every label — a lot sticker that reads 0001 on all
+    // 500 copies. Counter sources that are NOT serial behave identically
+    // everywhere (start value each time), so only serial ones are named here.
+    if (language !== 'ipl') {
+        const serial = shown.filter(f => {
+            if ((f.type !== 'text' && f.type !== 'barcode') || !('dataSource' in f)) return false;
+            const ds = (f as TextField | BarcodeField).dataSource;
+            if (ds.type !== 'linked') return false;
+            const source = design.dataSources.find(s => s.id === ds.sourceId);
+            return source?.type === 'counter' && source.serial === true && source.step !== 0;
+        });
+        if (serial.length > 0) {
+            const one = serial.length === 1;
+            out.push(`${serial.map(f => `"${f.name}"`).join(', ')}: the linked counter advances on the printer in IPL only (<ESC>I/D), so in this language every label prints the counter's start value. Export to IPL — or print the labels one row at a time from the Data tab — for ${one ? 'a running' : 'running'} numbers.`);
+        }
+    }
+
     // Multi-up stock (Grid Columns / Rows). No supported language has a
     // ganging command: IPL's only width control is <SI>W, which "sets the LABEL
     // width" (PRM p.131) — one label per feed, sized by that number of dots. So
