@@ -4,8 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Honeywell IPL Label Designer</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <script>
       // Polyfill for Safari & older browsers that don't support structuredClone
       if (!window.structuredClone) {
@@ -34,10 +32,14 @@
       }
     </script>
     <style>
-      /* @import must precede every other rule or the whole block is dropped
-         (postcss: "@import must precede all other statements"). It has to be
-         first in the <style>, not just above the rule that uses it. */
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+      /* UI fonts, vendored like the label faces below (audit TECH-03): the app
+         used to pull Inter + Material Icons from Google Fonts and Tailwind
+         from a CDN, so an offline PC rendered unstyled with tofu icons. Inter
+         is the variable cut (100-900, latin) — one 73 KB file for every
+         weight the UI uses; Material Icons is the static woff2. */
+      @font-face { font-family: 'Inter'; src: url('/fonts/Inter-Variable.woff2') format('woff2'); font-weight: 100 900; font-style: normal; font-display: swap; }
+      @font-face { font-family: 'Material Icons'; src: url('/fonts/MaterialIcons-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+      .material-icons { font-family: 'Material Icons'; font-weight: normal; font-style: normal; line-height: 1; letter-spacing: normal; text-transform: none; display: inline-block; white-space: nowrap; direction: ltr; -webkit-font-smoothing: antialiased; }
 
       /* Vendored label fonts (public/fonts): the designer preview and the IPL
          viewer measure text with these exact faces, so on-screen widths match
