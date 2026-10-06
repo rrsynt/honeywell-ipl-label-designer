@@ -48,8 +48,14 @@ const ctx2dStub = {
     setTransform: () => undefined,
     transform: () => undefined,
     resetTransform: () => undefined,
+    setLineDash: () => undefined,
+    getLineDash: () => [] as number[],
 } as unknown as CanvasRenderingContext2D;
 
 if (typeof HTMLCanvasElement !== 'undefined') {
+    // drawElements reads ctx.canvas.width/height, so the stub carries a fake
+    // element back-reference (added for the App-mount E2E; unit suites that
+    // never paint are unaffected).
+    (ctx2dStub as unknown as { canvas: { width: number; height: number } }).canvas = { width: 800, height: 600 };
     HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue(ctx2dStub);
 }
