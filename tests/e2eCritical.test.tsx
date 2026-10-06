@@ -149,3 +149,79 @@ describe('critical path: new label to print center', () => {
         );
     });
 });
+
+describe('menu bar: the same actions as the toolbar', () => {
+    const openMenu = async (name: string): Promise<HTMLElement> => {
+        const btn = await waitFor(
+            () => [...document.querySelectorAll('[role="menubar"] [role="menuitem"]')]
+                .find(b => b.textContent?.trim() === name) as HTMLElement | null,
+            `menu "${name}"`,
+        );
+        await act(async () => {
+            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        });
+        return waitFor(
+            () => document.querySelector('[role="menu"]') as HTMLElement | null,
+            `${name} dropdown`,
+        );
+    };
+
+    const pickItem = async (menu: HTMLElement, label: string): Promise<void> => {
+        const item = [...menu.querySelectorAll('[role="menuitem"]')]
+            .find(b => (b.textContent ?? '').includes(label));
+        expect(item, `menu item "${label}"`).toBeTruthy();
+        await act(async () => {
+            item!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        });
+    };
+
+    it('shows File/Edit/Arrange/View and opens the File dropdown', async () => {
+        await mount();
+        const names = [...document.querySelectorAll('[role="menubar"] [role="menuitem"]')]
+            .map(b => b.textContent?.trim());
+        expect(names).toEqual(['File', 'Edit', 'Arrange', 'View']);
+        const menu = await openMenu('File');
+        const items = [...menu.querySelectorAll('[role="menuitem"]')].map(b => b.textContent ?? '');
+        expect(items.some(t => t.includes('New label'))).toBe(true);
+        expect(items.some(t => t.includes('Print Center'))).toBe(true);
+    });
+
+    it('File > Print Center opens the print dialog and closes the menu', async () => {
+        await mount();
+        const menu = await openMenu('File');
+        await pickItem(menu, 'Print Center');
+        expect(document.querySelector('[role="menu"]'), 'menu closes').toBeNull();
+        await waitFor(
+            () => [...document.querySelectorAll('button')].find(b => /^(sheet|jobs|log)/i.test(b.textContent?.trim() ?? '')) as HTMLElement | null,
+            'print center tabs',
+        );
+    });
+
+    it('keyboard: arrows move the highlight, Enter fires', async () => {
+        await mount();
+        const menu = await openMenu('Edit');
+        for (let i = 0; i < 7; i++) {
+            await act(async () => {
+                menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+            });
+        }
+        const highlighted = [...menu.querySelectorAll('[role="menuitem"]')]
+            .find(b => b.className.includes('bg-blue-600'));
+        expect(highlighted?.textContent).toContain('Select all');
+        await act(async () => {
+            menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        });
+        expect(document.querySelector('[role="menu"]'), 'menu closes on Enter').toBeNull();
+    });
+
+    it('Ctrl+N opens the New Label dialog', async () => {
+        await mount();
+        await act(async () => {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true, bubbles: true, cancelable: true }));
+        });
+        await waitFor(
+            () => document.querySelector('[role="dialog"][aria-label="New label"]') as HTMLElement | null,
+            'New label dialog via Ctrl+N',
+        );
+    });
+});

@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, useReducer, useEffect, useState, useRef, useCallback } from 'react';
+import { MenuBar } from './components/MenuBar';
 import { TopBar } from './components/TopBar';
 import { LeftPanel } from './components/LeftPanel';
 import { RightPanel } from './components/RightPanel';
@@ -922,6 +923,12 @@ export default function App() {
                 } else switch (e.key) {
                     case 'z': e.preventDefault(); dispatch({ type: 'UNDO' }); break;
                     case 'y': e.preventDefault(); dispatch({ type: 'REDO' }); break;
+                    // MenuBar twins: New label and Print Center match their
+                    // menu entries (Ctrl+N / Ctrl+P). Print's default is
+                    // untouched while an input has focus (the isEditing guard
+                    // above), so this never hijacks browser print from a field.
+                    case 'n': e.preventDefault(); appActions.onNew(); break;
+                    case 'p': e.preventDefault(); setShowPrintCenter(true); break;
                     case 'c': if(selectionRef.current.length > 0) { e.preventDefault(); dispatch({ type: 'COPY_FIELD' }); } break;
                     case 'x': if(selectionRef.current.length > 0) { e.preventDefault(); dispatch({ type: 'CUT_FIELD' }); } break;
                     case 'v': if(clipboardRef.current) { e.preventDefault(); dispatch({ type: 'PASTE_FIELD' }); } break;
@@ -1201,7 +1208,35 @@ export default function App() {
 
     return (
         <div className="h-screen w-screen flex flex-col bg-gray-900 text-gray-200" onClick={() => dispatch({type: 'SET_CONTEXT_MENU', payload: null})}>
-            <TopBar 
+            <MenuBar
+              dispatch={dispatch}
+              canUndo={history.past.length > 0}
+              canRedo={history.future.length > 0}
+              canCutCopy={selectedFieldIds.length > 0}
+              canPaste={!!clipboard && clipboard.length > 0}
+              canAlign={canAlign}
+              canDistribute={canDistribute}
+              canGroup={canGroup}
+              canUngroup={canUngroup}
+              hasSelection={selectedFieldIds.length > 0}
+              selectAllIds={activeDesign.fields.map(f => f.id)}
+              onNew={appActions.onNew}
+              onTemplates={appActions.onTemplates}
+              onLibrary={appActions.onLibrary}
+              onSave={appActions.onSave}
+              onExport={appActions.onExport}
+              onExportImage={appActions.onExportImage}
+              exportingImage={exportingImage}
+              onViewIpl={() => setShowIplViewer(true)}
+              onPrintCenter={() => setShowPrintCenter(true)}
+              onHelp={() => setShowHelp(true)}
+              onZoomIn={() => setWorkspaceState(prev => ({ ...prev, zoom: Math.min(10, prev.zoom * 1.25) }))}
+              onZoomOut={() => setWorkspaceState(prev => ({ ...prev, zoom: Math.max(0.1, prev.zoom * 0.8) }))}
+              onZoomToFit={appActions.onZoomToFit}
+              snapSettings={snapSettings}
+              onSnapSettingsChange={setSnapSettings}
+            />
+            <TopBar
               designName={activeDesign.name}
               savedDesigns={savedDesigns}
               dispatch={dispatch}
