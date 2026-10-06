@@ -77,12 +77,22 @@ export const applyQuery = (table: DataTable, query: DataQuery): DataTable => {
     return { columns: table.columns, rows };
 };
 
-/** CSV/xlsx parsers yield arrays of arrays; the table model is keyed rows. */
+/**
+ * CSV/xlsx parsers yield arrays of arrays; the table model is keyed rows.
+ *
+ * Columns are DEFINED, not assigned: a hostile `__proto__` header assigned
+ * with `rec[h] = ...` would rewrite the row's prototype (audit DEP-01 —
+ * SheetJS's own proto-pollution advisory arrived through the same door).
+ * defineProperty writes an own property whatever the name is, and reads
+ * identically for every honest header.
+ */
 export const tableFromRows = (headers: string[], rows: string[][]): DataTable => ({
     columns: headers,
     rows: rows.map(r => {
         const rec: Record<string, string> = {};
-        headers.forEach((h, i) => { rec[h] = r[i] ?? ''; });
+        headers.forEach((h, i) => {
+            Object.defineProperty(rec, h, { value: r[i] ?? '', enumerable: true, writable: true, configurable: true });
+        });
         return rec;
     }),
 });
