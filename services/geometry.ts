@@ -1,6 +1,6 @@
 import type { Field, Design, TextField, BarcodeField, LineField, BoxField, EllipseField } from '../types';
 import { getFormattedDateTime } from './dateTimeFormat';
-import { resolveLinkedPreview, applyTransform } from './tableSource';
+import { resolveLinkedPreview, applyTransform, fieldIsSuppressed, groupIsSuppressed } from './tableSource';
 import { FONT_MAP, FONT_FAMILIES, POINTS_TO_MM, DPI_MAP, bitmapTextWidthDots } from '../constants';
 import { measureBarcode, isBarcodeEngineReady } from './ipl/barcodes';
 import { designerBarcodeRender } from './designerBarcode';
@@ -47,6 +47,18 @@ const getFieldData = (field: TextField | BarcodeField, design: Design): string =
  */
 export const printableFields = (design: Design): Field[] =>
     design.fields.filter(f => f.visible !== false);
+
+/**
+ * NEXT (audit FUN-02, 2026-10-06): the fields a non-IPL generator prints.
+ * `printableFields` hides only `visible: false`, so a suppression condition
+ * that held on screen still printed on ZPL/EPL/TSPL/DPL while IPL (and the
+ * canvas) honoured it. This applies the SAME rule the canvas draws
+ * (canvasDrawer.ts: a field- or group-suppressed field paints nothing), so
+ * what you see is what prints in every language. IPL keeps its own richer
+ * path (batch rows, conditional formats) and does not use this.
+ */
+export const unsuppressedFields = (design: Design): Field[] =>
+    printableFields(design).filter(f => !fieldIsSuppressed(f, design) && !groupIsSuppressed(f.groupId, design));
 
 /**
  * The horizontal shift, in the field's own text direction (dots), that a text

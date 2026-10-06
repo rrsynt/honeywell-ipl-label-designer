@@ -52,7 +52,7 @@ export interface FontSubstitution {
 }
 
 export interface BatchData {
-    rows: any[][];
+    rows: string[][];
     mappings: { [fieldId: number]: number }; // fieldId -> columnIndex
     headers: string[];
 }
@@ -90,7 +90,7 @@ const transformed = (value: string, dataSource: FieldDataSource, design: Design)
  * be present on one row and gone on the next; without a row it is the preview
  * value, which is what the canvas uses too.
  */
-const groupValueForRow = (groupId: number, design: Design, row?: any[], batch?: BatchData): string => {
+const groupValueForRow = (groupId: number, design: Design, row?: string[], batch?: BatchData): string => {
     if (row && batch) {
         const ref = design.fields
             .filter(f => f.groupId === groupId && (f.type === 'text' || f.type === 'barcode'))
@@ -114,7 +114,7 @@ const suppressionReasonFor = (
     field: TextField | BarcodeField,
     design: Design,
     resolved?: string,
-    row?: any[],
+    row?: string[],
     batch?: BatchData,
 ): 'group' | 'field' | null => {
     // A group's condition hides every member. Judged on the row when there is
@@ -128,12 +128,12 @@ const suppressionReasonFor = (
 /** The mapped cell of a batch row for one field, or undefined when the row
  *  has no column for it (unmapped, or a ragged row). Shared with the
  *  suppression predicate so both read the same cell. */
-export const rowCellFor = (batch: BatchData, fieldId: number, row: any[]): string | undefined => {
+export const rowCellFor = (batch: BatchData, fieldId: number, row: string[]): string | undefined => {
     const col = batch.mappings[fieldId];
     return col !== undefined && col >= 0 && col < row.length ? String(row[col] ?? '') : undefined;
 };
 
-const dataOrSuppressed = (field: TextField | BarcodeField, data: string, design: Design, resolved?: string, row?: any[], batch?: BatchData): string =>
+const dataOrSuppressed = (field: TextField | BarcodeField, data: string, design: Design, resolved?: string, row?: string[], batch?: BatchData): string =>
     suppressionReasonFor(field, design, resolved, row, batch) ? '' : data;
 
 /**
@@ -146,7 +146,7 @@ const dataOrSuppressed = (field: TextField | BarcodeField, data: string, design:
 export const suppressedFieldIdsForRow = (
     design: Design,
     fields: (TextField | BarcodeField)[],
-    row: any[],
+    row: string[],
     batch: BatchData,
 ): number[] =>
     fields
@@ -160,7 +160,7 @@ export const suppressedFieldIdsForRow = (
  * represented — a format is one or the other — so the lowest group id wins and
  * the rest are named in the returned warnings.
  */
-const formatForLabel = (design: Design, conditionalGroupIds: number[], row?: any[], batch?: BatchData): { formatId: number; warnings: string[] } => {
+const formatForLabel = (design: Design, conditionalGroupIds: number[], row?: string[], batch?: BatchData): { formatId: number; warnings: string[] } => {
     const shown = conditionalGroupIds.filter(id => {
         const condition = design.groupSuppress?.[id];
         return !!condition && !isSuppressed(condition, groupValueForRow(id, design, row, batch)).suppress;

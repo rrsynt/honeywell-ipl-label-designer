@@ -21,7 +21,7 @@
 
 import type { Design, Field, TextField, BarcodeField } from '../../types';
 import { DPI_MAP, FONT_MAP } from '../../constants';
-import { getObjectBoundingBox, shiftForTextAlign, printableFields } from '../geometry';
+import { getObjectBoundingBox, shiftForTextAlign, unsuppressedFields } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
 import { charsetWarning } from '../charsetRisk';
@@ -127,7 +127,7 @@ export const generateZPL = (design: Design): ZplGenerateResult => {
     const { width, height } = design.labelSettings;
     lines.push(`^PW${dots(width)}`, `^LL${dots(height)}`);
 
-    for (const field of printableFields(design)) {
+    for (const field of unsuppressedFields(design)) {
         const box = getObjectBoundingBox(field, design);
         // `align` on a text block has no stream form — the printer can only move
         // an origin — so a centre/right block is printed by starting it further

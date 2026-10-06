@@ -24,7 +24,7 @@
 
 import type { Design, Field, TextField, BarcodeField } from '../../types';
 import { DPI_MAP } from '../../constants';
-import { getObjectBoundingBox, shiftForTextAlign, printableFields } from '../geometry';
+import { getObjectBoundingBox, shiftForTextAlign, unsuppressedFields } from '../geometry';
 import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
 import { parseMaxiCodeScm } from '../ipl/maxiCodeScm';
@@ -218,7 +218,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
     lines.push('GAP 3 mm,0');
     lines.push('CLS');
 
-    for (const field of printableFields(design)) {
+    for (const field of unsuppressedFields(design)) {
         const box = getObjectBoundingBox(field, design);
         const placed = placeField(field, box, dpi);
         // A text block's `align` has no TSPL parameter for ordinary text, so a
