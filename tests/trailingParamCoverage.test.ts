@@ -65,7 +65,12 @@ describe('the trailing-parameter rule covers every parameter the parser reads', 
         // did: any letter the parser consumes for a field that also takes d3
         // must be accepted here.
         const dir = join(process.cwd(), 'services');
-        const viewer = readFileSync(join(dir, 'ipl', 'viewerParser.ts'), 'utf8');
+        // The viewer half of the rule moved to viewerFrames.ts in the prologue
+        // split (behaviour identical); the importer half never moved. The
+        // consumption check below still reads the class file, where
+        // parseTextField lives.
+        const viewer = readFileSync(join(dir, 'ipl', 'viewerFrames.ts'), 'utf8');
+        const viewerClass = readFileSync(join(dir, 'ipl', 'viewerParser.ts'), 'utf8');
         const importer = readFileSync(join(dir, 'iplParser.ts'), 'utf8');
 
         const parseSet = (src: string): Set<string> => {
@@ -82,7 +87,7 @@ describe('the trailing-parameter rule covers every parameter the parser reads', 
         // 'g' is the parameter this sweep added; it is what parseTextField reads
         // for pitch, so it must be admitted.
         expect(viewerSet.has('g')).toBe(true);
-        expect(/params\.find\(p => p\.key === 'g'\)/.test(viewer)).toBe(true);
+        expect(/params\.find\(p => p\.key === 'g'\)/.test(viewerClass)).toBe(true);
 
         // 'd' must stay out: a second d segment is malformed, and reading it as
         // a param would be a guess.
@@ -98,7 +103,7 @@ describe('the trailing-parameter rule covers every parameter the parser reads', 
         // Admitting it would also cost correctness on real text:
         // "d3,REF;o9" is a part number, and splitting there truncates it.
         // Both halves are pinned here so the class is not "completed" later.
-        const src = readFileSync(join(process.cwd(), 'services', 'ipl', 'viewerParser.ts'), 'utf8');
+        const src = readFileSync(join(process.cwd(), 'services', 'ipl', 'viewerFrames.ts'), 'utf8');
         const m = /const FIELD_PARAM_AFTER_DATA = \/\^\[([a-z]+)\]/.exec(src);
         expect(m).not.toBeNull();
         expect(m![1]).not.toContain('o');
