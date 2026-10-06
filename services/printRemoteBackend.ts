@@ -20,6 +20,7 @@
 // the drift this codebase keeps writing comments to prevent.
 
 import type { BridgeResult } from './bridgeSend';
+import { authHeader, isAuthFailure } from './serverTokens';
 import {
     MAX_LOG_ENTRIES, indexedDbQueueBackend, memoryQueueBackend, setPrintQueueBackend,
 } from './printQueue';
@@ -71,8 +72,12 @@ export const setPrintServerUrl = (url: string, storage: Storage = localStorage):
     return clean;
 };
 
+const AUTH_HINT = 'print server refused the token (HTTP 401). Enter the same token the server was started with (--token), or restart it without one.';
+
 const failFromResponse = (res: Response, body: { ok?: boolean; error?: unknown } | null): Error =>
-    new Error(body?.error ? String(body.error) : `print server returned HTTP ${res.status}`);
+    new Error(isAuthFailure(res.status)
+        ? AUTH_HINT
+        : body?.error ? String(body.error) : `print server returned HTTP ${res.status}`);
 
 const unreachable = (base: string, e: unknown): Error =>
     (e as { name?: string } | undefined)?.name === 'AbortError'
@@ -101,7 +106,7 @@ const request = async (
     try {
         const res = await fetch(`${base}${path}`, {
             method: init?.method ?? 'GET',
-            headers: payload !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+            headers: { ...authHeader('print'), ...(payload !== undefined ? { 'Content-Type': 'application/json' } : undefined) },
             body: payload,
             signal: ctl.signal,
         });
@@ -161,7 +166,7 @@ export const sendChunkViaPrintServer = async (
                 method: 'POST',
                 // UTF-8, exactly what the bridge path posts: the chunk is a
                 // string but it carries IPL control bytes.
-                headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+                headers: { 'Content-Type': 'text/plain; charset=utf-8', ...authHeader('print') },
                 body: stream,
                 signal: ctl.signal,
             },
@@ -169,6 +174,7 @@ export const sendChunkViaPrintServer = async (
         const body = await res.json().catch(() => null);
         const accepted = typeof body?.accepted === 'number' ? body.accepted : undefined;
         if (res.ok && body?.ok === true) return { ok: true, written: body.written, accepted };
+        if (isAuthFailure(res.status)) return { ok: false, accepted, error: AUTH_HINT };
         return {
             ok: false,
             accepted,

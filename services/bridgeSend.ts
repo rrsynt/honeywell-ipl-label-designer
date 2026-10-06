@@ -9,8 +9,11 @@
 //   POST /send?host=H&port=P         body = raw IPL bytes -> {ok, written} | {ok:false, error}
 
 import { getPrinterTarget, isValidPrinterPort, normalizeHost } from './printerTarget';
+import { authHeader, isAuthFailure } from './serverTokens';
 
 export const DEFAULT_BRIDGE_URL = 'http://localhost:9181';
+// A 401 is a wrong/missing token, not a dead bridge — say which fix applies.
+export const BRIDGE_AUTH_HINT = 'Bridge refused the token (HTTP 401). Enter the same token the bridge was started with (--token), or restart it without one.';
 // Batch K moved the host/port defaults to printerTarget.DEFAULT_TARGET (the
 // single persisted source of truth); the old DEFAULT_PRINTER_* exports
 // became dead code and were removed.
@@ -63,10 +66,11 @@ export const sendIplViaBridge = async (
     try {
         const r = await fetch(
             `${base}/send?host=${encodeURIComponent(host)}&port=${encodeURIComponent(String(portNum))}`,
-            { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: ipl, signal: ctl.signal },
+            { method: 'POST', headers: { 'Content-Type': 'text/plain', ...authHeader('bridge') }, body: ipl, signal: ctl.signal },
         );
         const j = await r.json().catch(() => null);
         if (j && j.ok) return { ok: true, written: j.written };
+        if (isAuthFailure(r.status)) return { ok: false, error: BRIDGE_AUTH_HINT };
         return { ok: false, error: j?.error ? `Bridge error: ${j.error}` : `Bridge returned HTTP ${r.status}` };
     } catch (e) {
         // Review LOW: name-check without instanceof — cross-realm aborts

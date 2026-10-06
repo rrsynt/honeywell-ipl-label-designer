@@ -7,6 +7,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { indexedDbBackend, listLibrary, memoryBackend, setLibraryBackend, type LibraryMeta } from '../services/libraryStore';
 import { getLibraryServerUrl, pingLibraryServer, remoteBackend, setLibraryServerUrl } from '../services/libraryRemoteBackend';
+import { ServerTokenInput } from './ServerTokenInput';
 
 const formatSize = (m: LibraryMeta): string => {
     const mm = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
@@ -130,6 +131,7 @@ export const StartScreen: React.FC<{
                         className="px-3 py-1.5 text-sm rounded-md bg-gray-700 hover:bg-gray-600 text-white">
                         {serverDraft.trim() === '' ? 'Keep local' : 'Use server'}
                     </button>
+                    <ServerTokenInput kind="library" />
                     {serverUrl !== '' && (
                         <span className="text-[11px] text-blue-300 whitespace-nowrap">shared</span>
                     )}

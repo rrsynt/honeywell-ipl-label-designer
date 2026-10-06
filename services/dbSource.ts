@@ -21,6 +21,9 @@
 // later does not need the database at all.
 
 import type { DataTable } from './tableSource';
+import { authHeader, isAuthFailure } from './serverTokens';
+
+const AUTH_HINT = 'database server refused the token (HTTP 401). Enter the same token the server was started with (--token), or restart it without one.';
 
 export const DEFAULT_DB_SERVER_URL = 'http://localhost:9184';
 
@@ -73,12 +76,13 @@ const request = async (
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeoutMs);
     try {
-        const res = await fetch(`${base}${path}`, { method: init?.method ?? 'GET', signal: ctl.signal });
+        const res = await fetch(`${base}${path}`, { method: init?.method ?? 'GET', headers: { ...authHeader('db') }, signal: ctl.signal });
         const body = await res.json().catch(() => null);
         if (!res.ok || body?.ok === false) {
             // The reason the query was refused, or which table is missing, is
-            // far more useful than "unreachable" — quote the server.
-            throw new ServerSaidNo(body?.error ? String(body.error) : `database server returned HTTP ${res.status}`);
+            // far more useful than "unreachable" — quote the server. A 401 is
+            // neither: it names the token fix instead.
+            throw new ServerSaidNo(isAuthFailure(res.status) ? AUTH_HINT : body?.error ? String(body.error) : `database server returned HTTP ${res.status}`);
         }
         return { status: res.status, body };
     } catch (e) {

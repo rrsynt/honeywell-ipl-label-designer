@@ -12,6 +12,9 @@
 // station's half-finished work onto every other station's screen.
 
 import type { LibraryBackend, LibraryMeta, LibraryRecord, RecoveryRecord, SourceRecord } from './libraryStore';
+import { authHeader, isAuthFailure } from './serverTokens';
+
+const AUTH_HINT = 'library server refused the token (HTTP 401). Enter the same token the server was started with (--token), or restart it without one.';
 
 export const DEFAULT_LIBRARY_SERVER_URL = 'http://localhost:9182';
 
@@ -77,7 +80,9 @@ const DEFAULT_REMOTE = { designs: true, sources: true, recovery: false };
  *  Anything else — DNS failure, connection refused, an abort — means the
  *  server could not be reached at all, which is a different message. */
 const failFromResponse = (res: Response, body: { ok?: boolean; error?: unknown } | null): Error =>
-    new Error(body?.error ? String(body.error) : `library server returned HTTP ${res.status}`);
+    new Error(isAuthFailure(res.status)
+        ? AUTH_HINT
+        : body?.error ? String(body.error) : `library server returned HTTP ${res.status}`);
 
 const unreachable = (base: string, e: unknown): Error =>
     (e as { name?: string } | undefined)?.name === 'AbortError'
@@ -95,7 +100,7 @@ const request = async (
     try {
         const res = await fetch(`${base}${path}`, {
             method: init?.method ?? 'GET',
-            headers: init?.body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+            headers: { ...authHeader('library'), ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : undefined) },
             body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
             signal: ctl.signal,
         });
@@ -148,7 +153,7 @@ export const remoteBackend = (opts: RemoteBackendOptions = {}): LibraryBackend =
         const ctl = new AbortController();
         const timer = setTimeout(() => ctl.abort(), timeoutMs);
         try {
-            const res = await fetch(`${base}/${collection}/${encodeURIComponent(key)}`, { signal: ctl.signal });
+            const res = await fetch(`${base}/${collection}/${encodeURIComponent(key)}`, { headers: { ...authHeader('library') }, signal: ctl.signal });
             if (res.status === 404) return null;
             const body = await res.json().catch(() => null);
             if (!res.ok || body?.ok === false) throw failFromResponse(res, body);

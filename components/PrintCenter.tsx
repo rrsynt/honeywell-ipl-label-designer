@@ -29,6 +29,7 @@ import {
 } from '../services/printTargets';
 import { pingBridge } from '../services/bridgeSend';
 import { applyPrintServerUrl, getPrintServerUrl, pingPrintServer } from '../services/printRemoteBackend';
+import { ServerTokenInput } from './ServerTokenInput';
 import { notify, requestConfirm } from '../services/uiDialogs';
 import { PRINTER_MODELS } from '../constants';
 
@@ -282,6 +283,7 @@ export const PrintCenter: React.FC<{ design: Design; onClose: () => void }> = ({
                     <button onClick={() => void applyServer()} className="px-3 py-1.5 text-xs rounded-md bg-gray-700 hover:bg-gray-600 text-white">
                         {serverDraft.trim() === '' ? 'Keep local' : 'Use server'}
                     </button>
+                    <ServerTokenInput kind="print" compact />
                     {sharing && <span className="text-[11px] text-blue-300 whitespace-nowrap">shared</span>}
                 </div>
                 {sharing && serverState && (
