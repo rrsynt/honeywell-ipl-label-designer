@@ -46,4 +46,14 @@ print-data/
 # connection strings, so this MUST never be committed.
 db-data/
 
+# Vendor printer manuals (PDF/CHM) and locally built Windows helpers.
+# Copyrighted by their vendors (Honeywell/Datamax-O'Neil/TSC/Zebra/Seagull),
+# so they are NOT redistributed: keep your own copies here to reproduce the
+# manual-vs-code audits. The extracted .txt/.htm notes that the code and tests
+# actually read ARE committed; see docs/manuals/README.md for sources.
+docs/manuals/*.pdf
+docs/manuals/*.chm
+docs/manuals/7zr.exe
+tools/bartender/*.exe
+
 .vercel
