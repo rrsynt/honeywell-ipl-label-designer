@@ -192,12 +192,83 @@ export const DPL_W_BARCODES: Record<string, DplBarcodeType> = {
 };
 
 /**
+ * A parsed W1D (manual-format) QR data prefix: `[q,] [e [m] i,] cdata...`
+ * (Fiji Command Reference pp. 220-221). q = model 1|2, e = H|Q|M|L
+ * error-correction, m = 0-8|none mask, i = A|a|M|m input mode, then the data
+ * starting with its mode letter N|A|B|K. Every group is optional; a record
+ * carrying none of them is bare data, not a broken prefix.
+ */
+export interface DplQrManual {
+    qrModel?: string;
+    qrEcl?: string;
+    qrMask?: string;
+    /** Input mode letter as written (A|a|M|m). Hex modes (a|m) are NAMED by
+     *  the caller: the bytes are left undecoded. */
+    inputMode?: string;
+    /** The data with the prefix (and the mode letter) stripped. */
+    data: string;
+    /** Set when the record LOOKS prefixed but no group parses — the caller
+     *  keeps the data whole and warns instead of guessing. */
+    unparsed?: boolean;
+}
+
+export const parseQrManualPrefix = (data: string): DplQrManual | null => {
+    // No comma before the first mode letter means no prefix at all: plain
+    // data, including data that merely starts with a digit or a mode letter.
+    // A Bnnnn byte-count without a preceding format group is the same case —
+    // B is also a data-mode letter, and splitting it would eat real data.
+    const comma = data.indexOf(',');
+    if (comma < 0) return null;
+    const head = data.slice(0, comma);
+    const rest = data.slice(comma + 1);
+    // q alone: "2,..." — but a bare number is also plausible data, so only
+    // treat it as a model when what follows parses as the rest of a prefix.
+    const qMatch = /^([12])$/.exec(head.trim());
+    let qrModel: string | undefined;
+    let afterQ = data;
+    if (qMatch) {
+        qrModel = qMatch[1];
+        afterQ = rest;
+    }
+    // e[m]i group, two spellings: solid ("M2A," — the manual's spaces are
+    // readability fiction) or comma-separated ("M,2,A," / "M,A,"), because
+    // `[e [m] i,]` does not say where the commas fall and both read
+    // naturally. ECL, optional mask, input mode.
+    const tail = qrModel !== undefined ? afterQ : data;
+    const group = /^([HQML])(\d)?([AaMm]),(.*)$/s.exec(tail)
+        ?? /^([HQML]),(?:(\d),)?([AaMm]),(.*)$/s.exec(tail);
+    if (!group) {
+        // A leading "q," with nothing after it is still a claim of manual
+        // format — keep the data whole and say the prefix did not parse. So
+        // is any short head before the first comma (1-2 alphanumerics): a
+        // real attempt at q/e that matches neither spelling. Longer heads are
+        // ordinary data that happens to contain a comma ("HELLO, WORLD") and
+        // stay silent — warning there would cry wolf on every such label.
+        if (qrModel !== undefined || /^[A-Za-z0-9]{1,2}$/.test(head.trim())) {
+            return { ...(qrModel !== undefined ? { qrModel } : {}), data, unparsed: true };
+        }
+        return null;
+    }
+    const [, ecl, mask, inputMode, payload] = group;
+    // The data starts with its mode letter N|A|B|K; strip exactly one.
+    const modeMatch = /^([NABK])(.*)$/s.exec(payload);
+    const cleanData = modeMatch ? modeMatch[2] : payload;
+    return {
+        ...(qrModel !== undefined ? { qrModel } : {}),
+        qrEcl: ecl,
+        ...(mask !== undefined ? { qrMask: mask } : {}),
+        inputMode,
+        data: cleanData,
+    };
+};
+
+/**
  * Resolves a DPL `b` field into its symbology, its human-readable flag, and
  * the letters consumed — two for the `Wxx` form, one otherwise.
  */
 export const dplBarcodeFor = (
     b: string,
-): { type: DplBarcodeType; hri: 0 | 1; consumed: number } | null => {
+): { type: DplBarcodeType; hri: 0 | 1; consumed: number; manual: boolean } | null => {
     if (b.length === 0) return null;
     if (b[0].toUpperCase() === 'W') {
         const key = b.slice(0, 3).toUpperCase();
@@ -207,14 +278,16 @@ export const dplBarcodeFor = (
         // a FORMAT VARIANT (Table 8-4): W1d QR = Auto format, W1D QR = Manual
         // format; W1c DataMatrix plain, W1C "w/ Byte Count"; W1f Aztec plain,
         // W1F with a byte count. None of these 2D symbols prints a human-
-        // readable line at all, so no `Wxx` form carries HRI.
-        return { type, hri: 0, consumed: 3 };
+        // readable line at all, so no `Wxx` form carries HRI. The manual flag
+        // matters only for QR: a W1D import used to normalise silently to auto.
+        const manual = b.slice(0, 3) === 'W1D';
+        return { type, hri: 0, consumed: 3, manual };
     }
     const letter = b[0];
     const type = DPL_BARCODES[letter.toUpperCase()];
     if (!type) return null;
     const isUpper = letter === letter.toUpperCase() && letter !== letter.toLowerCase();
-    return { type, hri: isUpper && !type.noHumanReadable ? 1 : 0, consumed: 1 };
+    return { type, hri: isUpper && !type.noHumanReadable ? 1 : 0, consumed: 1, manual: false };
 };
 
 export interface DplMicroPdfEntry {

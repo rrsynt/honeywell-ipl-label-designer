@@ -28,7 +28,7 @@ import type {
 } from '../ipl/types';
 import { estimateElementSize } from '../ipl/renderer';
 import { DPL_FONTS, DPL_SMOOTH_FONT, dplMultiplierValue, dplDefaultHeightDots, DPL_SPEED_IPS } from './dplFonts';
-import { dplBarcodeFor, DPL_CODE_PAGE_IDS, DPL_CHAR_MAP_IDS, DPL_MICRO_PDF_TABLE } from './dplBarcodes';
+import { dplBarcodeFor, parseQrManualPrefix, DPL_CODE_PAGE_IDS, DPL_CHAR_MAP_IDS, DPL_MICRO_PDF_TABLE } from './dplBarcodes';
 import { substituteDplDateTime } from './dplDateTime';
 import { FONT_MAP } from '../../constants';
 
@@ -1433,6 +1433,9 @@ export const parseDPL = (
             }
             let microColumns: string | undefined;
             let microRows: string | undefined;
+            let qrModel: string | undefined;
+            let qrEcl: string | undefined;
+            let qrMask: string | undefined;
             if (bc.type.symbology === '19') {
                 // Table G-6: MicroPDF417 prefix is h i j k 0
                 // h = columns (1-4), i = row/EC index (0-9, A), j=0, k=0, 0=0
@@ -1448,6 +1451,27 @@ export const parseDPL = (
                         microColumns = hChar;
                     }
                     barcodeData = barcodeData.slice(5);
+                }
+            }
+            if (bc.type.symbology === '18' && bc.manual) {
+                // W1D manual format (Fiji pp. 220-221): `[q,] [e [m] i,]
+                // cdata...` — the model/ECL/mask live in the prefix, and the
+                // data starts with its mode letter N|A|B|K. Before this the
+                // prefix stayed in the data and the parameters vanished, so an
+                // import normalised manual to auto in silence.
+                const parsed = parseQrManualPrefix(barcodeData);
+                if (parsed && !parsed.unparsed) {
+                    qrModel = parsed.qrModel;
+                    qrEcl = parsed.qrEcl;
+                    qrMask = parsed.qrMask;
+                    barcodeData = parsed.data;
+                    if (parsed.inputMode === 'a' || parsed.inputMode === 'm') {
+                        issue('warning', 'dpl-qr-hex-input',
+                            `This QR record uses manual hex-ASCII input mode ("${parsed.inputMode}"), so its bytes are pairs of hex characters. The preview shows them as written rather than decoded — the printer converts each pair into one byte.`, bChar);
+                    }
+                } else if (parsed?.unparsed) {
+                    issue('warning', 'dpl-qr-manual-prefix',
+                        `This QR record is manual format (W1D) but its "${barcodeData.split(',')[0]}," prefix did not parse as model/error-correction/mask, so the data is kept whole and the parameters unread.`, bChar);
                 }
             }
             // Appendix P: "For the printer to generate this checksum, a `V' must
@@ -1491,6 +1515,9 @@ export const parseDPL = (
                 ...(bc.type.eanVariant !== undefined ? { eanUpcVersion: bc.type.eanVariant } : {}),
                 ...(microColumns !== undefined ? { microColumns } : {}),
                 ...(microRows !== undefined ? { microRows } : {}),
+                ...(qrModel !== undefined ? { qrModel } : {}),
+                ...(qrEcl !== undefined ? { qrEcl } : {}),
+                ...(qrMask !== undefined ? { qrMask } : {}),
                 // Appendix G: Q, R, S, M and N print their human-readable line
                 // ABOVE the bars, and the manual's own figures show it (M's
                 // "42" and N's "01234" sit over the symbol, while L's control
