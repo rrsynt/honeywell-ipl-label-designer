@@ -235,17 +235,14 @@ export const Workspace: React.FC<{
         const stockPos = stockPointPx(canvasPos);
         const { zoom, pan } = workspaceState;
         const scale = PREVIEW_SCALE * zoom;
-        const { width, height, orientation } = design.labelSettings;
-        const isLandscape = orientation === 'landscape';
-        const displayWidth = isLandscape ? height : width;
-        const displayHeight = isLandscape ? width : height;
-
-        // The whole stock is the label: the printer gets one label of this size
-        // (`<SI>W` sets the LABEL width, PRM p.131) and IPL has no ganging
-        // command, so the canvas must not divide by Grid Columns/Rows — doing so
-        // made the hit-test and the edge-snap targets a fraction of what prints.
-        const templateWidth = displayWidth;
-        const templateHeight = displayHeight;
+        // Landscape is DESCRIPTIVE (see stockFrame.ts): the stock is drawn
+        // exactly as its settings declare it, width by height, with no quarter
+        // turn anywhere — the generator sends <SI>W=width, <SI>L=height. The
+        // `displayWidth` swap that used to sit here disagreed with the canvas
+        // painter (canvasDrawer.ts draws width x height) and with the pointer
+        // math above (stockSizePx), so the mouse read-out and snap targets on a
+        // landscape stock measured a different label than the one on screen.
+        const { width: templateWidth, height: templateHeight } = design.labelSettings;
 
         // Read through the stock frame, so the read-out matches the field
         // coordinates shown in the property panel rather than the turned pixels.

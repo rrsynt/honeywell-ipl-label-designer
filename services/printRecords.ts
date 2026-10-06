@@ -77,12 +77,13 @@ export const labelAtRecord = async (
  */
 export const sheetCellDots = (design: Design): { widthDots: number; heightDots: number } => {
     const { dpi } = design.printerSettings;
-    // The PRINTED label's size, which swaps for landscape: the generator sends
-    // <SI>W/<SI>L and every origin in the turned frame, so a landscape design
-    // prints 65x100 where its settings say 100x65. Sizing the cell from the raw
-    // settings made it the wrong way round, and since the cell extent is also
-    // what renderLabel draws the label into, the preview stretched a tall label
-    // across a wide cell. See services/stockFrame.ts.
+    // The PRINTED label's size, read straight from the settings: orientation is
+    // DESCRIPTIVE (see services/stockFrame.ts — a landscape stock is simply one
+    // whose width exceeds its length, and the generator sends <SI>W=width,
+    // <SI>L=height with no transpose), so no swap belongs here. The old comment
+    // claimed the opposite ("swaps for landscape ... in the turned frame") —
+    // audit QW-DOC 2026-10-06 — and the matching swap in Workspace was removed
+    // with it; the semantics were already correct, only the words lied.
     const { widthMm, heightMm } = printedLabelMm(design.labelSettings);
     return {
         widthDots: Math.max(1, Math.round(widthMm * DPI_MAP[dpi])),

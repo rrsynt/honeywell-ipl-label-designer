@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { Design, Field, DataSource, PrinterLanguage } from '../types';
 import { FieldEditor } from './FieldEditor';
 import { CodePanel } from './CodePanel';
+import { ServerTokenInput } from './ServerTokenInput';
 import { PRINTER_MODELS, UNPRINTABLE_MARGIN_MM } from '../constants';
 import { generateIPL, fontSubstitutions, suppressionWarnings, type FontSubstitution } from '../services/iplGenerator';
 import { designerOnlyWarnings } from '../services/designerOnly';
@@ -239,6 +240,7 @@ const PrinterSettingsEditor: React.FC<{ settings: Design['printerSettings']; dis
                     <option value="zpl">ZPL (Zebra)</option>
                     <option value="epl">EPL (Eltron/Zebra desktop)</option>
                     <option value="tspl">TSPL (TSC)</option>
+                    <option value="dpl">DPL (Datamax/Honeywell)</option>
                 </select>
             </PropInput>
             <PropInput label="Printer Model" fullWidth>
@@ -873,6 +875,7 @@ const DatabaseServerRow: React.FC<{ value: string; onApplied: (clean: string) =>
                     className="flex-1 text-xs p-1.5 bg-gray-900 border border-gray-600 rounded-md outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 />
                 <button onClick={() => void apply()} className="px-2 py-1.5 text-xs rounded-md bg-gray-700 hover:bg-gray-600 text-white">Use</button>
+                <ServerTokenInput kind="db" compact />
             </div>
             {state && <p className={`mt-1 text-[10px] ${state.ok ? 'text-emerald-400' : 'text-amber-400'}`}>{state.text}</p>}
         </div>

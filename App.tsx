@@ -6,6 +6,8 @@ import { Workspace } from './components/Workspace';
 import { HelpModal } from './components/HelpModal';
 import { IPLViewerModal } from './components/IPLViewerModal';
 import { TemplateGallery } from './components/TemplateGallery';
+import { NewLabelDialog } from './components/NewLabelDialog';
+import { StatusBar } from './components/StatusBar';
 import { StartScreen } from './components/StartScreen';
 import { PrintCenter } from './components/PrintCenter';
 import { createDefaultDesign, type LabelTemplate } from './services/templates';
@@ -663,6 +665,7 @@ export default function App() {
     const { history, selectedFieldIds, savedDesigns, clipboard, contextMenu } = state;
     const activeDesign = history.intermediate ?? history.present;
     const [showHelp, setShowHelp] = useState(false);
+    const [showNewLabel, setShowNewLabel] = useState(false);
     const [showTemplates, setShowTemplates] = useState(false);
     const [showIplViewer, setShowIplViewer] = useState(false);
     const [showLibrary, setShowLibrary] = useState(false);
@@ -951,7 +954,19 @@ export default function App() {
     };
 
     const appActions = {
-        onNew: async () => { if(await confirmDiscard('New design', 'Start a new design?')) dispatch({ type: 'SET_DESIGN', payload: { design: defaultDesign, originalDesignName: null } })},
+        // NOW-1: New opens the stock dialog, not a fixed 100x65 canvas. The
+        // dialog hands back a real Design on the chosen stock; the guarded
+        // canvas-replace path (confirm + SET_DESIGN) is shared with templates.
+        onNew: () => setShowNewLabel(true),
+        onNewDesign: async (design: Design) => {
+            if (await confirmDiscard('New design', `Start "${design.name}"?`)) {
+                dispatch({ type: 'SET_DESIGN', payload: { design, originalDesignName: null } });
+                setShowNewLabel(false);
+            }
+            // A cancelled confirm keeps the dialog open: the user said "don't
+            // discard", so returning them to the canvas would strand the stock
+            // they just picked.
+        },
         onTemplates: () => setShowTemplates(true),
         onPickTemplate: async (template: LabelTemplate) => {
             const proceed = await confirmDiscard('Apply template', 'Replace the current canvas with "' + template.name + '"?');
@@ -1195,15 +1210,17 @@ export default function App() {
                 </div>
                 <RightPanel activeDesign={activeDesign} selectedFieldIds={selectedFieldIds} dispatch={dispatch} />
             </main>
+            <StatusBar design={activeDesign} zoom={workspaceState.zoom} mouseCoords={mouseCoords} dirty={dirty} />
             {contextMenu && <ContextMenu {...contextMenu} onClose={() => dispatch({ type: 'SET_CONTEXT_MENU', payload: null })} />}
             <DialogHost />
+            {showNewLabel && <NewLabelDialog onClose={() => setShowNewLabel(false)} onCreate={d => void appActions.onNewDesign(d)} />}
             {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
             {showTemplates && <TemplateGallery onClose={() => setShowTemplates(false)} onPick={t => void appActions.onPickTemplate(t)} />}
             {showLibrary && <StartScreen
                 revision={libraryRevision}
                 onRevision={() => setLibraryRevision(r => r + 1)}
                 onClose={() => setShowLibrary(false)}
-                onNew={() => { setShowLibrary(false); void appActions.onNew(); }}
+                onNew={() => { setShowLibrary(false); appActions.onNew(); }}
                 onTemplates={() => { setShowLibrary(false); setShowTemplates(true); }}
                 onOpen={name => void appActions.onLoad(name)}
             />}
