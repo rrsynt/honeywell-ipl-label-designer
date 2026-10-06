@@ -1288,6 +1288,12 @@ export class IPLViewerParser {
         // in-block path does for the same character. Reported for the same
         // reason: the preview shows labels the printer would not produce.
         if (this.reportImmediateCommand(frame)) return;
+        // Lowercase resource heads (t/j/a/n/v/x/y) never reach parseFieldFrame:
+        // the /^[A-Z]/ catch-all above only routes capitals there, and a frame
+        // without ';' never reaches parseChained either. Without this call they
+        // would all fall to the generic warning below even though they are
+        // named commands with known (non-)effects.
+        if (this.reportResourceCommand(frame)) return;
         this.printer.issue('warning', 'unknown-frame', `Unrecognized command frame ignored.`, frame.slice(0, 24));
     }
 
@@ -2093,6 +2099,7 @@ export class IPLViewerParser {
                 this.printer.deleteField(parseInt(del[1], 10));
                 return;
             }
+            if (this.reportResourceCommand(frame)) return;
             this.printer.issue('warning', 'unknown-frame', `Unrecognized command frame ignored.`, frame.slice(0, 24));
             return;
         }
@@ -2117,6 +2124,185 @@ export class IPLViewerParser {
             case 'U': this.parseGraphicField(id, params); break;
             case 'G': this.parseGraphicDefinition(id ?? 0, params); break;
         }
+    }
+
+    /**
+     * Printer-resource and job-level commands that reached the generic
+     * "Unrecognized command frame ignored" because no field-dispatch letter
+     * knows them. Found by sweeping the manual's syntax index (PRM 2.70 pp.92-95
+     * task tables + Chapter 7 bodies) against parseFieldFrame's dispatch —
+     * every head below is a REAL command, so the generic warning was the same
+     * defect the bare `C` and `Qn` had: the picture is right (none of these
+     * draws label content) but the report hides that the command is known.
+     *
+     * Returns true when the frame was consumed.
+     *
+     * What each head is, and why it lands where it does:
+     *   Tn  Bitmap User-Defined Font, Clear or Define (p.175) — printer
+     *       resource, like G. The font it defines (n = 3-6, 8-19) is read by
+     *       text fields that select it; using one still warns unknown-font,
+     *       so the definition itself needs no warning.
+     *   Jn  Outline Font, Clear or Create (p.202) / j… Outline Font,
+     *       Download (p.204) / tn User-Defined Font Character, Create
+     *       (p.215) — printer resources, same family as T.
+     *   N   Current Edit Session, Save (p.182) — "The printer remains in
+     *       Program mode." A save, not a drawing.
+     *   an  RFID Tag Field Setup (p.208) / nn RFID Tag Protect (p.213) —
+     *       tag-write setup, not label content (the Q-field analogue: the
+     *       field writes to a tag and draws nothing).
+     *   vn  Print Line Dot Count Limit, Set (p.208) — "This is a null
+     *       command and the printer ignores it." Silent, by the manual's
+     *       own word.
+     *   On  Format Offset Within a Page (p.193) / Mp,n Format Position in
+     *       a Page (p.194) — page composition WITHOUT a page frame. With no
+     *       S frame there is nothing to offset or assign to, so there is no
+     *       divergence to warn about; named so the command is recognized.
+     *   xn  Bitmap Cell Width for Graphic or UDF (p.174) / yn Bitmap Cell
+     *       Height for Graphic or UDF (p.172) — cell geometry for graphics
+     *       and user fonts. Warned when nonzero: the renderer draws U
+     *       graphics and UDF text from the stream's own rows and resident
+     *       metrics, so a redefined cell prints at a different size.
+     *
+     * Deliberately NOT consumed here (still unknown-frame, correctly):
+     *   Y   — no such command in the manual at all.
+     *   K/P/V standalone — Test and Service queries that exist ONLY after
+     *       <ESC>T (pp.218-221); outside that mode they are not commands.
+     *   X/Z/z — bitmap font metrics; see reportFontMetrics, decided below.
+     *
+     * X/Z/z arrive here too (reportResourceCommand is called from parseFrame
+     * for lowercase heads that never reach parseFieldFrame), but they are
+     * handed off rather than decided: their warning rules live in one place.
+     */
+    private reportResourceCommand(frame: string): boolean {
+        const info = (code: string, message: string, raw: string): void => {
+            this.printer.issue('info', code, message, raw.slice(0, 24));
+        };
+        // X/Z are capitals, z is lowercase; lowercase x/y are the CELL
+        // commands decided below, not metrics — keep them out of the handoff.
+        if (/^[XZ]\d+$/.test(frame) || /^z\d+$/.test(frame)) {
+            return this.reportFontMetrics(frame);
+        }
+        let m: RegExpExecArray | null;
+        if ((m = /^T(\d+)(?:,([^;]*))?$/.exec(frame))) {
+            info('udf-font-define',
+                `Bitmap user-defined font set ${m[1]}${m[2] ? ` ("${m[2]}")` : ''} is cleared or defined in the printer; it draws nothing itself.`,
+                frame);
+            return true;
+        }
+        if ((m = /^J(\d+)(?:,([^;]*))?$/.exec(frame))) {
+            info('outline-font-define',
+                `Outline font ${m[1]}${m[2] ? ` ("${m[2]}")` : ''} is cleared or created in the printer; it draws nothing itself.`,
+                frame);
+            return true;
+        }
+        if (/^j[0-9A-Fa-f]+$/.test(frame)) {
+            info('outline-font-download',
+                'Outline font data is downloaded into the printer; it draws nothing itself.',
+                frame);
+            return true;
+        }
+        if ((m = /^t(\d+)$/.exec(frame))) {
+            info('udf-char-create',
+                `User-defined font character ${m[1]} selects which character is defined next in the printer; it draws nothing itself.`,
+                frame);
+            return true;
+        }
+        if (/^N$/.test(frame)) {
+            info('edit-session-save',
+                'Current edit session (N) saves the page, format, UDC or UDF being edited; the printer stays in Program mode and nothing is drawn.',
+                frame);
+            return true;
+        }
+        if ((m = /^a(\d+,\d+,\d+,\d+)$/.exec(frame))) {
+            info('rfid-tag-setup',
+                `RFID tag field setup (a${m[1]}) defines how data is stored on the tag for write commands; it draws no label content.`,
+                frame);
+            return true;
+        }
+        if ((m = /^n([01])$/.exec(frame))) {
+            info('rfid-tag-protect',
+                `RFID tag protect (n${m[1]}) marks tag data as ${m[1] === '1' ? '' : 'not '}write-protected; it draws no label content.`,
+                frame);
+            return true;
+        }
+        if (/^v\d+$/.test(frame)) {
+            // Null command per the manual — the printer ignores it, so do we.
+            return true;
+        }
+        if ((m = /^O(-?\d+),(-?\d+)$/.exec(frame))) {
+            if (parseInt(m[1], 10) === 0 && parseInt(m[2], 10) === 0) return true;
+            info('page-offset-standalone',
+                `Format offset O${m[1]},${m[2]} applies within a page, but no page is defined here, so it changes nothing.`,
+                frame);
+            return true;
+        }
+        if ((m = /^M([a-z]),(\d+)$/.exec(frame))) {
+            info('page-assign-standalone',
+                `Format ${m[2]} assigned to page position ${m[1]} applies within a page definition, but no page is defined here, so it changes nothing.`,
+                frame);
+            return true;
+        }
+        if ((m = /^[xy](\d+)$/.exec(frame))) {
+            const which = frame.charAt(0) === 'x' ? 'width' : 'height';
+            if (parseInt(m[1], 10) === 0) return true;
+            this.printer.issue('warning', 'udf-cell-size',
+                `Bitmap cell ${which} (${frame}) redefines the cell for graphics and user-defined fonts, which this preview draws at resident size: UDF text and graphics print at a different size.`,
+                frame.slice(0, 24));
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Bitmap font metrics: Xn (Character Bitmap Origin Offset, p.177), Zn
+     * (Font Character Width, p.187), zn (Intercharacter Space for UDF, p.199).
+     *
+     * All three are bitmap-only ("Use this command only with bitmap fonts" /
+     * "For bitmap characters only"), and the renderer draws bitmap text from
+     * the resident FONT_MAP metrics — none of these values is read. So any
+     * non-default value changes the printed advance or offset silently:
+     *
+     *   Xn  shifts every glyph's origin right by n columns. Default 0, so
+     *       X0 is silent and any other X warns (the <SI>o0/o1 pattern: the
+     *       value that describes what we draw stays silent).
+     *   Zn  sets origin-to-origin advance outright. There is no recognizable
+     *       "default" spelling — the printer's default is bitmap width minus
+     *       Xn plus zn, computed per font — so any Zn warns, with a message
+     *       that says what the preview uses instead.
+     *   zn  adds n dots to the default gap (default n=2), ignored when Zn is
+     *       set. z2 is silent; anything else warns, and the message names the
+     *       Zn interaction so sending both does not read as a contradiction.
+     *
+     * Returns true when the frame was consumed. A frame that merely STARTS
+     * with one of these letters (x122 graphic cell param, xc/xp/xu setup
+     * commands) is not one, and falls through to false.
+     */
+    private reportFontMetrics(frame: string): boolean {
+        const m = /^([XZxz])(\d+)$/.exec(frame);
+        if (!m) return false;
+        const [, letter, digits] = m;
+        const n = parseInt(digits, 10);
+        const warn = (what: string, detail: string): void => {
+            this.printer.issue('warning', 'font-metrics-not-modelled',
+                `${what} changes bitmap text geometry, which this preview does not reproduce: ${detail}`,
+                frame.slice(0, 24));
+        };
+        if (letter === 'X') {
+            if (n === 0) return true;
+            warn(`Character bitmap origin offset (X${n})`,
+                `every bitmap glyph prints shifted ${n} column(s) right, but this preview draws the resident origin.`);
+            return true;
+        }
+        if (letter === 'Z') {
+            warn(`Font character width (Z${n})`,
+                `bitmap advances print ${n} dots origin-to-origin, but this preview draws the resident advance (bitmap width minus origin offset plus intercharacter space).`);
+            return true;
+        }
+        // letter === 'z'
+        if (n === 2) return true;
+        warn(`Intercharacter space (z${n})`,
+            `${n} dots are added to the bitmap gap (default 2), but this preview draws the resident gap. The printer ignores this command when a font character width (Z) is set.`);
+        return true;
     }
 
     private resolveSource(params: FieldParam[]): FieldSource {

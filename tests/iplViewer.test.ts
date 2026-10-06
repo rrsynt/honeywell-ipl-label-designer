@@ -93,18 +93,21 @@ describe('parseViewerIPL', () => {
     });
 
     it('warns on unsupported commands inside the format', () => {
+        // Y9, not X9: X9 is now a named font-metrics command
+        // (font-metrics-not-modelled), so a genuinely unrecognized head pins
+        // the generic path.
         const code = [
             '<STX><ESC>P<ETX>',
             '<STX>E1;F1<ETX>',
             '<STX>H0;o10,10;c25;d3,A<ETX>',
-            '<STX>X9;weird<ETX>',
+            '<STX>Y9;weird<ETX>',
             '<STX>R<ETX>',
         ].join('\n');
         const label = parseViewerIPL(code);
         expect(label.elements).toHaveLength(1);
         const warn = label.issues.find(i => i.code === 'unknown-frame');
         expect(warn).toBeDefined();
-        expect(warn!.command).toContain('X9');
+        expect(warn!.command).toContain('Y9');
     });
 
     it('flags missing origin but keeps parsing', () => {

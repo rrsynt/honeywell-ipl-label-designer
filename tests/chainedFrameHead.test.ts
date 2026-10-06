@@ -15,14 +15,16 @@ const stream = (frame: string) => [
  * upper-case head reached `parseFieldFrame` — which fails to match a field
  * header and returns. Everything behind it went with it:
  *
- *   <STX>Z40;H1;o10,10;c0;h2;w2;d3,ABC<ETX>   produced ZERO elements
+ *   <STX>Y9;H1;o10,10;c0;h2;w2;d3,ABC<ETX>   produced ZERO elements
  *
  * The valid text field inside was never parsed and only a generic
- * "unrecognized command frame" was reported, which points at Z40 but says
+ * "unrecognized command frame" was reported, which points at Y9 but says
  * nothing about the field that vanished. Twelve heads were measured behaving
  * this way (Z X Q J N T A Y K P J …), found by sweeping the manual's Bitmap
  * UDF and Programming task tables (PRM 2.70 pp.92-95) — the same tables that
- * produced the Code 39 prefix and page-command findings.
+ * produced the Code 39 prefix and page-command findings. (Z40 was the
+ * original example; Z is now a named font-metrics command, so the example
+ * uses Y9 — a letter with no command behind it.)
  *
  * The head is now tested before the catch-all, and a segment in command
  * position with no header is dispatched through the plain-frame path so it
@@ -49,9 +51,17 @@ describe('a chained frame survives an unrecognized head', () => {
     it('reports the head instead of staying silent', () => {
         // Silence was the older failure mode for a lowercase head: `z5;…`
         // produced the field and said NOTHING about the command it dropped.
-        for (const head of ['Z40', 'X2', 'z5', 't65']) {
+        // Z40/X2/z5/t65 are now NAMED commands (font metrics / UDF resource),
+        // so the still-unrecognized heads that pin this are Y9 (no such
+        // command) and K5 (a Test and Service query, not a standalone command).
+        for (const head of ['Y9', 'K5']) {
             expect(codes(`${head};${FIELD}`), `head "${head}" was silent`).toContain('unknown-frame');
         }
+        // And the named ones report by name, not as unknown frames.
+        expect(codes(`Z40;${FIELD}`)).toContain('font-metrics-not-modelled');
+        expect(codes(`X2;${FIELD}`)).toContain('font-metrics-not-modelled');
+        expect(codes(`z5;${FIELD}`)).toContain('font-metrics-not-modelled');
+        expect(codes(`t65;${FIELD}`)).toContain('udf-char-create');
     });
 
     it('treats Q1 as the RFID field it is, not as an unrecognized head', () => {
@@ -89,9 +99,11 @@ describe('a chained frame survives an unrecognized head', () => {
     it('still reports a bare unrecognized command sent as its own frame', () => {
         // The standalone path must keep working: this is the shape the older
         // test in iplViewer.test.ts pins, and the reason /^[A-Z]/ exists.
-        const r = parseViewerIPL(stream('X9;weird'));
+        // Y9, not X9: X9 is now a named font-metrics command, so a genuinely
+        // unrecognized head pins this.
+        const r = parseViewerIPL(stream('Y9;weird'));
         const warn = r.issues.find(i => i.code === 'unknown-frame');
         expect(warn).toBeDefined();
-        expect(warn!.command).toContain('X9');
+        expect(warn!.command).toContain('Y9');
     });
 });
