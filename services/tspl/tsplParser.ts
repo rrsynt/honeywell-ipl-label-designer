@@ -108,9 +108,11 @@ const TSPL_BARCODE_TYPES: Record<string, TsplBarcode> = {
     UPCA: { symbology: '7', eanUpcVersion: 3 },
     'UPCA+2': { symbology: '7', eanUpcVersion: 3 },
     'UPA+5': { symbology: '7', eanUpcVersion: 3 },   // the manual's own spelling
+    'UPCA+5': { symbology: '7', eanUpcVersion: 3 },
     UPCE: { symbology: '7', eanUpcVersion: 4 },
     'UPCE+2': { symbology: '7', eanUpcVersion: 4 },
     'UPE+5': { symbology: '7', eanUpcVersion: 4 },
+    'UPCE+5': { symbology: '7', eanUpcVersion: 4 },
     CODA: { symbology: '4' },
     '11': { symbology: '5' },
     POST: { symbology: '11' },
@@ -145,6 +147,49 @@ const TSPL_BARCODE_TYPES: Record<string, TsplBarcode> = {
  *  IR ids — see the additions in services/ipl/barcodes.ts. */
 const TSPL_KNOWN_UNENCODED: Record<string, string> = {
     CPOST: 'China Post',
+};
+
+/** Valid main-symbol digit counts for EAN/UPC add-on barcode types. */
+const TSPL_ADDON_MAIN_LENGTHS: Record<string, number[]> = {
+    'EAN13+2': [12, 13],
+    'EAN13+5': [12, 13],
+    'EAN8+2': [7, 8],
+    'EAN8+5': [7, 8],
+    'UPCA+2': [11, 12],
+    'UPA+5': [11, 12],
+    'UPCA+5': [11, 12],
+    'UPCE+2': [6, 7, 8],
+    'UPE+5': [6, 7, 8],
+    'UPCE+5': [6, 7, 8],
+};
+
+/**
+ * Splits concatenated TSPL add-on barcode digits (e.g. 14 digits for EAN13+2 ->
+ * 12 main + 2 supplement) into 'main.supplement' format so bwip-js can encode
+ * the add-on and produce ink.
+ */
+const splitTsplAddonContent = (type: string, content: string): { content: string; hasAddon: boolean } => {
+    const validMainLengths = TSPL_ADDON_MAIN_LENGTHS[type];
+    if (!validMainLengths) return { content, hasAddon: false };
+    const addonLen = type.endsWith('+2') ? 2 : 5;
+    const dot = content.indexOf('.');
+    if (dot >= 0) {
+        const mainPart = content.slice(0, dot);
+        const supPart = content.slice(dot + 1);
+        if (validMainLengths.includes(mainPart.length) && supPart.length === addonLen && /^\d+$/.test(supPart)) {
+            return { content, hasAddon: true };
+        }
+        return { content, hasAddon: false };
+    }
+    if (/^\d+$/.test(content)) {
+        const mainLen = content.length - addonLen;
+        if (validMainLengths.includes(mainLen)) {
+            const mainPart = content.slice(0, mainLen);
+            const supPart = content.slice(mainLen);
+            return { content: `${mainPart}.${supPart}`, hasAddon: true };
+        }
+    }
+    return { content, hasAddon: false };
 };
 
 /** TSPL's QR error-correction letters onto the IR's c18,m2 values. */
@@ -532,7 +577,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                 // Same indexing note as TEXT: read the positions off `p`, in
                 // which the quoted runs are already back in their places.
                 const type = (p[2] ?? '').trim().toUpperCase();
-                const content = p[p.length - 1] ?? '';
+                const rawContent = p[p.length - 1] ?? '';
                 if (type === '') {
                     issue('warning', 'tspl-barcode-params', 'BARCODE has no quoted code type. Skipped.', 'BARCODE');
                     break;
@@ -547,11 +592,12 @@ export const parseTSPL = (code: string): ViewerLabel => {
                         'BARCODE');
                     break;
                 }
-                if (content === '') {
+                if (rawContent === '') {
                     issue('warning', 'tspl-barcode-empty', 'A barcode with no data prints nothing.', 'BARCODE');
                     break;
                 }
-                if (type.includes('+')) {
+                const { content, hasAddon } = splitTsplAddonContent(type, rawContent);
+                if (type.includes('+') && !hasAddon) {
                     issue('info', 'tspl-addon-ignored',
                         `"${type}" carries a printed add-on, which this viewer draws as the main symbol only.`, 'BARCODE');
                 }

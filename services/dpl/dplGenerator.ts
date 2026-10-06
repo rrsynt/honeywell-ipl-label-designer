@@ -15,6 +15,7 @@ import { getFormattedDateTime } from '../dateTimeFormat';
 import { dplMultiplier, clampDplMultiplier, fitDplBitmapFont, DESIGN_OCR_FONT, DPL_FONTS, type DplBitmapFit } from './dplFonts';
 import { DPL_BARCODES, dplMicroPdfParams } from './dplBarcodes';
 import { charsetWarning } from '../charsetRisk';
+import { splitEanSupplement } from '../ipl/barcodes';
 
 export interface DplGenerateResult {
     dpl: string;
@@ -75,12 +76,14 @@ const DPL_LETTER_FOR: Record<string, { letter: string; wId?: string; name: strin
  * draws the symbol the LETTER names, so a 13-digit payload under `B` is a
  * wrong-symbol bar code, silently, exactly the class this project fights.
  */
-const dplEanLetter = (data: string): { letter: string; name: string } | null => {
-    switch (data.replace(/\D/g, '').length) {
-        case 13: return { letter: 'F', name: 'EAN-13' };
-        case 12: return { letter: 'B', name: 'UPC-A' };
-        case 8: return { letter: 'G', name: 'EAN-8' };
-        case 7: return { letter: 'C', name: 'UPC-E' };
+const dplEanLetter = (data: string): { letter: string; name: string; supplemental?: string } | null => {
+    const { main, supplemental } = splitEanSupplement(data);
+    if (supplemental && !/^\d+$/.test(supplemental)) return null;
+    switch (main.replace(/\D/g, '').length) {
+        case 13: return { letter: 'F', name: 'EAN-13', supplemental };
+        case 12: return { letter: 'B', name: 'UPC-A', supplemental };
+        case 8: return { letter: 'G', name: 'EAN-8', supplemental };
+        case 7: return { letter: 'C', name: 'UPC-E', supplemental };
         default: return null;
     }
 };
@@ -93,11 +96,15 @@ const dplEanLetter = (data: string): { letter: string; name: string } | null => 
  */
 const bFieldFor = (sym: string, hri: boolean, data = ''): { field: string; warning?: string } | null => {
     let entry = DPL_LETTER_FOR[sym];
+    let addonWarning: string | undefined;
     if (sym === '7') {
         // B/C/F/G are one symbology id in the IR; the length picks the letter.
         const ean = dplEanLetter(data);
         if (!ean) return null;
         entry = { letter: ean.letter, name: ean.name };
+        if (ean.supplemental) {
+            addonWarning = `DPL has no combined EAN/UPC add-on barcode type, so the main symbol is printed without the ${ean.supplemental.length}-digit add-on.`;
+        }
     }
     if (!entry) return null;
     if (entry.wId) {
@@ -123,11 +130,12 @@ const bFieldFor = (sym: string, hri: boolean, data = ''): { field: string; warni
     // as hri 0 (unlike PDF417/MaxiCode, whose W-forms are always lower-case).
     const noHri = entry.noHumanReadable === true || sym === '11';
     const letter = hri && !noHri ? entry.letter : entry.letter.toLowerCase();
+    const warning = addonWarning ?? (hri && noHri
+        ? `DPL's ${entry.name} has no human-readable form, so the line is not printed.`
+        : undefined);
     return {
         field: letter,
-        ...(hri && noHri
-            ? { warning: `DPL's ${entry.name} has no human-readable form, so the line is not printed.` }
-            : {}),
+        ...(warning ? { warning } : {}),
     };
 };
 
@@ -349,7 +357,11 @@ export const generateDPL = (design: Design): DplGenerateResult => {
                 if (field.symbology === '7') {
                     // B/C/F/G are told apart by the digit count; a length none of
                     // them takes cannot be written as any EAN/UPC member.
-                    warnings.push(`"${field.name}" is an EAN/UPC bar code whose data is ${data.replace(/\D/g, '').length} digits, which is not a length DPL recognizes (12 UPC-A, 7 UPC-E, 13 EAN-13 or 8 EAN-8). It was left off the label.`);
+                    const ean = splitEanSupplement(data);
+                    const invalidSup = ean.supplemental && !/^\d+$/.test(ean.supplemental);
+                    warnings.push(invalidSup
+                        ? `"${field.name}" is an EAN/UPC bar code with an invalid add-on "${ean.supplemental}". It was left off the label.`
+                        : `"${field.name}" is an EAN/UPC bar code whose data is ${ean.main.replace(/\D/g, '').length} digits, which is not a length DPL recognizes (12 UPC-A, 7 UPC-E, 13 EAN-13 or 8 EAN-8). It was left off the label.`);
                 } else {
                     warnings.push(`"${field.name}" is barcode type ${field.symbology}, which has no DPL equivalent. It was left off the label.`);
                 }
@@ -411,7 +423,8 @@ export const generateDPL = (design: Design): DplGenerateResult => {
             // c is the wide bar, d the narrow bar; for module-based codes the
             // manual requires them to match.
             const narrow = dplMultiplier(Math.max(1, field.w_mag));
-            lines.push(`${rot}${bf.field}${narrow}${narrow}${String(heightUnits).padStart(3, '0')}${rowStr}${colStr}${data}`);
+            const payload = field.symbology === '7' ? splitEanSupplement(data).main : data;
+            lines.push(`${rot}${bf.field}${narrow}${narrow}${String(heightUnits).padStart(3, '0')}${rowStr}${colStr}${payload}`);
             continue;
         }
 

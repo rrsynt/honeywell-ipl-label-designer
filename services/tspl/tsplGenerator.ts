@@ -29,6 +29,7 @@ import { resolveLinkedPreview, applyTransform } from '../tableSource';
 import { getFormattedDateTime } from '../dateTimeFormat';
 import { parseMaxiCodeScm } from '../ipl/maxiCodeScm';
 import { charsetWarning } from '../charsetRisk';
+import { splitEanSupplement } from '../ipl/barcodes';
 
 /**
  * Escape TSPL print data (manual p. 77).
@@ -134,9 +135,22 @@ const TSPL_2D_COMMAND: Record<string, string> = {
     '24': 'CODABLOCK',
 };
 
-/** EAN/UPC variants, by the DATA LENGTH â€” which is how TSPL's names map. */
+/** EAN/UPC variants, by the DATA LENGTH — which is how TSPL's names map. */
 const tsplEanType = (data: string): string | null => {
-    switch (data.replace(/\D/g, '').length) {
+    const { main, supplemental } = splitEanSupplement(data);
+    const digits = main.replace(/\D/g, '').length;
+    if (supplemental) {
+        if (!/^\d+$/.test(supplemental)) return null;
+        const supLen = supplemental.length;
+        if (supLen !== 2 && supLen !== 5) return null;
+        const tag = supLen === 2 ? '+2' : '+5';
+        if (digits === 13) return `EAN13${tag}`;
+        if (digits === 12 || digits === 11) return `UPCA${tag}`;
+        if (digits === 8) return `EAN8${tag}`;
+        if (digits === 7 || digits === 6) return `UPCE${tag}`;
+        return null;
+    }
+    switch (digits) {
         case 13: return 'EAN13';
         case 8: return 'EAN8';
         case 12: return 'UPCA';
@@ -413,6 +427,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
             // emitting plain '39' for it dropped the digit in one direction
             // while the parser reads '39C' back as code39Mode '2'.
             const code39HostChecked = sym === '0' && field.code39_checkDigit === 'host-verifies';
+            const ean = sym === '7' ? splitEanSupplement(data) : null;
             const type = sym === '7' ? tsplEanType(data) : (code39HostChecked ? '39C' : TSPL_BARCODE_FOR[sym]);
             if (field.code39_checkDigit === 'printer-generated' && sym === '0') {
                 // TSPL has no "printer adds the code" Code 39 type â€” '39C' is the
@@ -422,8 +437,11 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                 warnings.push(`"${field.name}" asks Code 39 to have the printer add its check digit. TSPL has no such type ('39C' verifies a digit the host supplied), so the bar code prints without it.`);
             }
             if (!type) {
+                const invalidSup = ean?.supplemental && !/^\d+$/.test(ean.supplemental);
                 warnings.push(sym === '7'
-                    ? `"${field.name}" is an EAN/UPC bar code whose data is ${data.replace(/\D/g, '').length} digits, which is not a length TSPL recognizes (7, 8, 12 or 13). It was left off the label.`
+                    ? (invalidSup
+                        ? `"${field.name}" is an EAN/UPC bar code with an invalid add-on "${ean.supplemental}". It was left off the label.`
+                        : `"${field.name}" is an EAN/UPC bar code whose data is ${(ean?.main ?? data).replace(/\D/g, '').length} digits, which is not a length TSPL recognizes (6, 7, 8, 11, 12 or 13). It was left off the label.`)
                     : `"${field.name}" is barcode type ${sym}, which this TSPL subset cannot draw. It was left off the label.`);
                 continue;
             }
@@ -432,7 +450,7 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
             // adds the interpretive row on top, so using it over-tallened the
             // symbol by one text row whenever the HRI was on.
             const heightDots = Math.max(1, field.h_mag || 50);
-            // TSPL's human readable is 0 none / 1 left / 2 center / 3 right â€”
+            // TSPL's human readable is 0 none / 1 left / 2 center / 3 right —
             // ALL below the bar, and there is no above at all. A design asking
             // for "above" gets it below WITH a warning: dropping it would lose
             // the digits, which is worse than moving them. TSPL is the ONE
@@ -446,7 +464,8 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                 warnings.push(`"${field.name}" asks for the human-readable line above the bar code. TSPL can only print it below, so it will print below.`);
             }
             const narrow = Math.max(1, Math.round(field.w_mag ?? 1));
-            lines.push(`BARCODE ${x},${y},"${type}",${heightDots},${hri},${rotation},${narrow},${narrow + 1},"${escapeTsplData(data)}"`);
+            const payload = ean?.supplemental ? `${ean.main}${ean.supplemental}` : data;
+            lines.push(`BARCODE ${x},${y},"${type}",${heightDots},${hri},${rotation},${narrow},${narrow + 1},"${escapeTsplData(payload)}"`);
             continue;
         }
 

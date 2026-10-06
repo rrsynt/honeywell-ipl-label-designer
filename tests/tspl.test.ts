@@ -357,10 +357,73 @@ describe('TSPL parser', () => {
         }
     });
 
-    it('notes that an add-on variant draws only the main symbol', () => {
+    it('notes that an add-on variant draws only the main symbol when only main digits provided', () => {
         const label = parseTSPL('CLS\nBARCODE 10,50,"EAN13+5",100,1,0,2,2,"1234567890128"');
         expect(label.elements).toHaveLength(1);
         expect(label.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(true);
+        expect((label.elements[0] as any).source.data).toBe('1234567890128');
+    });
+
+    it('splits concatenated add-on digits into main.supplement without issuing tspl-addon-ignored', () => {
+        const e13_2 = parseTSPL('CLS\nBARCODE 10,50,"EAN13+2",100,1,0,2,2,"123456789012842"');
+        expect(e13_2.elements).toHaveLength(1);
+        const el13_2 = e13_2.elements[0] as any;
+        expect(el13_2.source.data).toBe('1234567890128.42');
+        expect(el13_2.eanUpcVersion).toBe(2);
+        expect(e13_2.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(false);
+        expect(measureBarcode('7', el13_2.source.data, { eanUpcVersion: el13_2.eanUpcVersion })).not.toBeNull();
+
+        const e13_5 = parseTSPL('CLS\nBARCODE 10,50,"EAN13+5",100,1,0,2,2,"123456789012812345"');
+        const el13_5 = e13_5.elements[0] as any;
+        expect(el13_5.source.data).toBe('1234567890128.12345');
+        expect(e13_5.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(false);
+        expect(measureBarcode('7', el13_5.source.data, { eanUpcVersion: el13_5.eanUpcVersion })).not.toBeNull();
+
+        // UPCA+5 and UPCE+5 support
+        const upca5 = parseTSPL('CLS\nBARCODE 10,50,"UPCA+5",100,1,0,2,2,"01234567890512345"');
+        const elUpca5 = upca5.elements[0] as any;
+        expect(elUpca5.source.data).toBe('012345678905.12345');
+        expect(elUpca5.eanUpcVersion).toBe(3);
+        expect(upca5.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(false);
+        expect(measureBarcode('7', elUpca5.source.data, { eanUpcVersion: elUpca5.eanUpcVersion })).not.toBeNull();
+
+        const upce5 = parseTSPL('CLS\nBARCODE 10,50,"UPCE+5",100,1,0,2,2,"012345612345"');
+        const elUpce5 = upce5.elements[0] as any;
+        expect(elUpce5.source.data).toBe('0123456.12345');
+        expect(elUpce5.eanUpcVersion).toBe(4);
+        expect(upce5.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(false);
+        expect(measureBarcode('7', elUpce5.source.data, { eanUpcVersion: elUpce5.eanUpcVersion })).not.toBeNull();
+
+        // UPCE+2
+        const upce2 = parseTSPL('CLS\nBARCODE 10,50,"UPCE+2",100,1,0,2,2,"012345642"');
+        const elUpce2 = upce2.elements[0] as any;
+        expect(elUpce2.source.data).toBe('0123456.42');
+        expect(elUpce2.eanUpcVersion).toBe(4);
+        expect(upce2.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(false);
+        expect(measureBarcode('7', elUpce2.source.data, { eanUpcVersion: elUpce2.eanUpcVersion })).not.toBeNull();
+
+        // Manual's alternate spellings UPA+5 and UPE+5
+        const upa5 = parseTSPL('CLS\nBARCODE 10,50,"UPA+5",100,1,0,2,2,"01234567890512345"');
+        expect((upa5.elements[0] as any).source.data).toBe('012345678905.12345');
+        expect(upa5.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(false);
+
+        const upe5 = parseTSPL('CLS\nBARCODE 10,50,"UPE+5",100,1,0,2,2,"012345612345"');
+        expect((upe5.elements[0] as any).source.data).toBe('0123456.12345');
+        expect(upe5.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(false);
+
+        // 12-digit main EAN13+2 (14 total digits, printer calculates check digit)
+        const e12_2 = parseTSPL('CLS\nBARCODE 10,50,"EAN13+2",100,1,0,2,2,"12345678901242"');
+        expect((e12_2.elements[0] as any).source.data).toBe('123456789012.42');
+        expect(e12_2.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(false);
+
+        // Pre-delimited with dot
+        const dotEan = parseTSPL('CLS\nBARCODE 10,50,"EAN13+2",100,1,0,2,2,"1234567890128.42"');
+        expect((dotEan.elements[0] as any).source.data).toBe('1234567890128.42');
+        expect(dotEan.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(false);
+
+        // Dot with invalid main length should not be treated as valid add-on
+        const badDot = parseTSPL('CLS\nBARCODE 10,50,"EAN13+2",100,1,0,2,2,"123.42"');
+        expect(badDot.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(true);
     });
 
     it('draws the manual\'s 2D commands and reports the ones it still cannot', () => {
@@ -592,10 +655,69 @@ describe('TSPL generator', () => {
         expect(typeOf('1234567')).toBe('"UPCE"');
     });
 
+    it('emits EAN/UPC add-on variants with concatenated payload without dot', () => {
+        const barcodeLine = (data: string) => lines([barcodeField({ symbology: '7', dataSource: { type: 'fixed', data } })])
+            .find(l => l.startsWith('BARCODE'))!;
+        const typeOf = (data: string) => barcodeLine(data).split(',')[2];
+        const payloadOf = (data: string) => {
+            const parts = barcodeLine(data).split(',');
+            return parts[parts.length - 1];
+        };
+
+        expect(typeOf('1234567890128.42')).toBe('"EAN13+2"');
+        expect(payloadOf('1234567890128.42')).toBe('"123456789012842"');
+
+        expect(typeOf('1234567890128.12345')).toBe('"EAN13+5"');
+        expect(payloadOf('1234567890128.12345')).toBe('"123456789012812345"');
+
+        expect(typeOf('012345678905.42')).toBe('"UPCA+2"');
+        expect(payloadOf('012345678905.42')).toBe('"01234567890542"');
+
+        expect(typeOf('012345678905.12345')).toBe('"UPCA+5"');
+        expect(payloadOf('012345678905.12345')).toBe('"01234567890512345"');
+
+        expect(typeOf('12345670.42')).toBe('"EAN8+2"');
+        expect(payloadOf('12345670.42')).toBe('"1234567042"');
+
+        expect(typeOf('12345670.12345')).toBe('"EAN8+5"');
+        expect(payloadOf('12345670.12345')).toBe('"1234567012345"');
+
+        expect(typeOf('1234567.42')).toBe('"UPCE+2"');
+        expect(payloadOf('1234567.42')).toBe('"123456742"');
+    });
+
+    it('round-trips an EAN-13 add-on barcode through TSPL with full ink', () => {
+        const { tspl, warnings } = generateTSPL(design([barcodeField({
+            symbology: '7',
+            dataSource: { type: 'fixed', data: '1234567890128.42' },
+        })]));
+        expect(warnings).toHaveLength(0);
+        expect(tspl).toContain('"EAN13+2"');
+        expect(tspl).toContain('"123456789012842"');
+
+        const parsed = parseTSPL(tspl);
+        expect(parsed.elements).toHaveLength(1);
+        const el = parsed.elements[0] as any;
+        expect(el.symbology).toBe('7');
+        expect(el.source.data).toBe('1234567890128.42');
+        expect(parsed.issues.some(i => i.code === 'tspl-addon-ignored')).toBe(false);
+        expect(measureBarcode('7', el.source.data, { eanUpcVersion: el.eanUpcVersion })).not.toBeNull();
+    });
+
     it('skips an EAN/UPC of a length TSPL does not know, and says which', () => {
         const { tspl, warnings } = generateTSPL(design([barcodeField({ symbology: '7', dataSource: { type: 'fixed', data: '123' } })]));
         expect(tspl.split('\n').some(l => l.startsWith('BARCODE'))).toBe(false);
         expect(warnings.some(w => /digits/.test(w))).toBe(true);
+
+        // With add-on format but invalid main length
+        const { tspl: tspl2, warnings: warn2 } = generateTSPL(design([barcodeField({ symbology: '7', dataSource: { type: 'fixed', data: '123.42' } })]));
+        expect(tspl2.split('\n').some(l => l.startsWith('BARCODE'))).toBe(false);
+        expect(warn2.some(w => /3 digits/.test(w))).toBe(true);
+
+        // With non-numeric supplement
+        const { tspl: tspl3, warnings: warn3 } = generateTSPL(design([barcodeField({ symbology: '7', dataSource: { type: 'fixed', data: '1234567890128.ab' } })]));
+        expect(tspl3.split('\n').some(l => l.startsWith('BARCODE'))).toBe(false);
+        expect(warn3.some(w => w.includes('invalid add-on "ab"'))).toBe(true);
     });
 
     it('NEGATES the rotation on the way out, the inverse of the parser', () => {

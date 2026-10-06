@@ -1187,6 +1187,35 @@ describe('DPL EAN/UPC variants and the price checksum (Appendix F/G/P)', () => {
         const r = generateDPL(design([{ id: 1, type: 'barcode', name: 'BC', x: 5, y: 5, rotation: 0, symbology: '7', humanReadable: 'none', h_mag: 60, w_mag: 2, dataSource: { type: 'fixed', data: '123456' } }]));
         expect(r.warnings.some(w => /BC/.test(w) && /not a length DPL recognizes/.test(w))).toBe(true);
         expect(r.dpl).not.toMatch(/^1[A-Za-z]/m);
+
+        // With add-on suffix but invalid main length
+        const r2 = generateDPL(design([{ id: 1, type: 'barcode', name: 'BC', x: 5, y: 5, rotation: 0, symbology: '7', humanReadable: 'none', h_mag: 60, w_mag: 2, dataSource: { type: 'fixed', data: '123456.42' } }]));
+        expect(r2.warnings.some(w => /BC/.test(w) && /6 digits/.test(w))).toBe(true);
+    });
+
+    it('prints main EAN/UPC symbol without add-on in DPL and warns', () => {
+        const eanField = (data: string) => ({ id: 1, type: 'barcode', name: 'BC', x: 5, y: 5, rotation: 0, symbology: '7', humanReadable: 'none', h_mag: 60, w_mag: 2, dataSource: { type: 'fixed', data } });
+
+        const r2 = generateDPL(design([eanField('1234567890123.42')]));
+        expect(r2.warnings.some(w => w.includes('DPL has no combined EAN/UPC add-on barcode type, so the main symbol is printed without the 2-digit add-on.'))).toBe(true);
+        const rec2 = r2.dpl.split('\r').find(l => /^1[A-Za-z]/.test(l))!;
+        expect(rec2[1]).toBe('f');
+        expect(rec2.endsWith('1234567890123')).toBe(true);
+        expect(rec2).not.toContain('.');
+        expect(rec2).not.toContain('42');
+
+        const r5 = generateDPL(design([eanField('123456789012.99999')]));
+        expect(r5.warnings.some(w => w.includes('DPL has no combined EAN/UPC add-on barcode type, so the main symbol is printed without the 5-digit add-on.'))).toBe(true);
+        const rec5 = r5.dpl.split('\r').find(l => /^1[A-Za-z]/.test(l))!;
+        expect(rec5[1]).toBe('b');
+        expect(rec5.endsWith('123456789012')).toBe(true);
+        expect(rec5).not.toContain('.');
+        expect(rec5).not.toContain('99999');
+
+        // Non-numeric suffix should leave field off the label with an invalid add-on warning
+        const rNonNum = generateDPL(design([eanField('1234567890123.ab')]));
+        expect(rNonNum.dpl).not.toMatch(/^1[A-Za-z]/m);
+        expect(rNonNum.warnings.some(w => w.includes('invalid add-on "ab"'))).toBe(true);
     });
 
     it('draws the M/N UPC addenda, which used to resolve to no spec at all', () => {
