@@ -120,7 +120,7 @@ export const isAuthorized = (req) => {
 };
 
 const unauthorized = (req, res) =>
-    sendJson(req, res, 401, { ok: false, error: 'print server token required (start the UI with the same token, or restart the server without --token)' });
+    sendJsonLogged(req, res, 401, { ok: false, error: 'print server token required (start the UI with the same token, or restart the server without --token)' });
 
 // One subdirectory per collection. Ids are never used as filenames: a job id
 // with a slash or a Windows-illegal name must store and round-trip, so the
@@ -274,6 +274,45 @@ const logId = () => `l${Date.now().toString(36)}${Math.floor(Math.random() * 0xf
  *
  * Returns nothing; the response is always ended here.
  */
+/** Process start, for /health uptime. */
+const startedAt = Date.now();
+
+/**
+ * One line per state-changing request (PUT/POST/DELETE) — who did what, from
+ * where. Reads (GET) stay quiet: the UI polls them and the log would drown.
+ * Errors log at every sendJson with code >= 400 instead; see logStatus below.
+ */
+const accessLog = (req, url) => {
+    if (req.method === 'GET' || req.method === 'OPTIONS' || req.method === 'HEAD') return;
+    const peer = req.socket?.remoteAddress ?? '?';
+    console.log(`[print] ${peer} ${req.method} ${url.pathname}${url.search}`);
+};
+
+/** Error visibility: every 4xx/5xx answer is one line, so a wrong token, a
+ *  stale seq or a dead printer leaves a trace without a debugger attached.
+ *  Takes the request path as a STRING — several callers (unauthorized,
+ *  acceptChunk) have no URL object in scope, and threading one through them
+ *  caused a ReferenceError once already. */
+const logStatus = (req, path, code) => {
+    if (code < 400) return;
+    const peer = req.socket?.remoteAddress ?? '?';
+    console.log(`[print] ${peer} ${req.method} ${path} -> ${code}`);
+};
+
+const pathOf = (req) => {
+    try {
+        const url = new URL(req.url, 'http://localhost');
+        return url.pathname + url.search;
+    } catch {
+        return String(req.url);
+    }
+};
+
+const sendJsonLogged = (req, res, code, obj) => {
+    logStatus(req, pathOf(req), code);
+    sendJson(req, res, code, obj);
+};
+
 export const handlePrintRequest = (req, res) => {
     if (req.method === 'OPTIONS') {
         res.writeHead(204, corsHeaders(req));
@@ -284,22 +323,40 @@ export const handlePrintRequest = (req, res) => {
     try {
         url = new URL(req.url, 'http://localhost');
     } catch {
-        sendJson(req, res, 400, { ok: false, error: 'bad request URL' });
+        sendJsonLogged(req, res, 400, { ok: false, error: 'bad request URL' });
         return;
     }
 
     if (url.pathname === '/ping' && req.method === 'GET') {
-        sendJson(req, res, 200, { ok: true, service: 'print' });
+        sendJsonLogged(req, res, 200, { ok: true, service: 'print' });
         return;
     }
 
-    // /ping is the only public route: liveness must work before the UI knows
-    // any token. Everything else — queue, targets, log, chunks — is LAN-powerful.
+    if (url.pathname === '/health' && req.method === 'GET') {
+        // Liveness plus the two numbers a shop monitor actually wants: how
+        // many jobs exist and how many chunks are still unprinted. Token-free
+        // like /ping — counts, not content — so monitoring works before auth.
+        let jobs = [];
+        try { jobs = listRecords(COLLECTIONS.jobs); } catch { jobs = []; }
+        const pending = jobs.filter(j => j.status === 'queued' || j.status === 'sending').length;
+        sendJsonLogged(req, res, 200, {
+            ok: true, service: 'print',
+            uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+            jobs: jobs.length, pending,
+        });
+        return;
+    }
+
+    // /ping and /health are the only public routes: liveness must work before
+    // the UI knows any token. Everything else — queue, targets, log, chunks —
+    // is LAN-powerful.
     if (!isAuthorized(req)) { unauthorized(req, res); return; }
+
+    accessLog(req, url);
 
     const fail = (err) => {
         const status = err.status || 500;
-        sendJson(req, res, status, { ok: false, error: err.message || String(err) });
+        sendJsonLogged(req, res, status, { ok: false, error: err.message || String(err) });
     };
 
     const parts = url.pathname.split('/').filter(Boolean);
@@ -307,7 +364,7 @@ export const handlePrintRequest = (req, res) => {
     // POST /jobs/:id/chunk?seq=N — the whole reason this server exists.
     if (parts[0] === 'jobs' && parts[2] === 'chunk') {
         if (req.method !== 'POST') {
-            sendJson(req, res, 405, { ok: false, error: `${req.method} not allowed on a chunk` });
+            sendJsonLogged(req, res, 405, { ok: false, error: `${req.method} not allowed on a chunk` });
             return;
         }
         handleChunk(req, res, decodeURIComponent(parts[1] ?? ''), url.searchParams.get('seq'), fail);
@@ -316,7 +373,7 @@ export const handlePrintRequest = (req, res) => {
 
     const collection = COLLECTIONS[parts[0]];
     if (!collection || parts.length > 2) {
-        sendJson(req, res, 404, { ok: false, error: 'unknown endpoint' });
+        sendJsonLogged(req, res, 404, { ok: false, error: 'unknown endpoint' });
         return;
     }
     const key = parts.length === 2 ? decodeURIComponent(parts[1]) : null;
@@ -329,17 +386,17 @@ export const handlePrintRequest = (req, res) => {
         readBody(req, MAX_BODY).then((bytes) => {
             let body;
             try { body = JSON.parse(bytes.toString('utf8')); } catch {
-                sendJson(req, res, 400, { ok: false, error: 'body is not JSON' });
+                sendJsonLogged(req, res, 400, { ok: false, error: 'body is not JSON' });
                 return;
             }
             if (!body || typeof body !== 'object' || Array.isArray(body)) {
-                sendJson(req, res, 400, { ok: false, error: 'body must be a record' });
+                sendJsonLogged(req, res, 400, { ok: false, error: 'body must be a record' });
                 return;
             }
             try {
                 const record = { ...body, id: logId() };
                 writeRecord(collection, record.id, record);
-                sendJson(req, res, 200, { ok: true, id: record.id });
+                sendJsonLogged(req, res, 200, { ok: true, id: record.id });
             } catch (err) { fail(err); }
         }).catch(fail);
         return;
@@ -347,21 +404,21 @@ export const handlePrintRequest = (req, res) => {
 
     if (req.method === 'GET' && key === null) {
         try {
-            sendJson(req, res, 200, { ok: true, records: listRecords(collection) });
+            sendJsonLogged(req, res, 200, { ok: true, records: listRecords(collection) });
         } catch (err) { fail(err); }
         return;
     }
 
     if (key === null) {
-        sendJson(req, res, 405, { ok: false, error: `${req.method} needs an id` });
+        sendJsonLogged(req, res, 405, { ok: false, error: `${req.method} needs an id` });
         return;
     }
 
     if (req.method === 'GET') {
         try {
             const record = readRecord(collection, key);
-            if (!record) { sendJson(req, res, 404, { ok: false, error: 'not found' }); return; }
-            sendJson(req, res, 200, { ok: true, record });
+            if (!record) { sendJsonLogged(req, res, 404, { ok: false, error: 'not found' }); return; }
+            sendJsonLogged(req, res, 200, { ok: true, record });
         } catch (err) { fail(err); }
         return;
     }
@@ -369,7 +426,7 @@ export const handlePrintRequest = (req, res) => {
     if (req.method === 'DELETE') {
         try {
             deleteRecord(collection, key);
-            sendJson(req, res, 200, { ok: true });
+            sendJsonLogged(req, res, 200, { ok: true });
         } catch (err) { fail(err); }
         return;
     }
@@ -378,27 +435,27 @@ export const handlePrintRequest = (req, res) => {
         readBody(req, MAX_BODY).then((bytes) => {
             let body;
             try { body = JSON.parse(bytes.toString('utf8')); } catch {
-                sendJson(req, res, 400, { ok: false, error: 'body is not JSON' });
+                sendJsonLogged(req, res, 400, { ok: false, error: 'body is not JSON' });
                 return;
             }
             if (!body || typeof body !== 'object' || Array.isArray(body)) {
-                sendJson(req, res, 400, { ok: false, error: 'body must be a record' });
+                sendJsonLogged(req, res, 400, { ok: false, error: 'body must be a record' });
                 return;
             }
             const bodyKey = collection.keyOf(body);
             if (typeof bodyKey !== 'string' || bodyKey !== key) {
-                sendJson(req, res, 400, { ok: false, error: `record id "${bodyKey}" does not match the URL` });
+                sendJsonLogged(req, res, 400, { ok: false, error: `record id "${bodyKey}" does not match the URL` });
                 return;
             }
             try {
                 writeWithFloor(collection, key, body);
-                sendJson(req, res, 200, { ok: true });
+                sendJsonLogged(req, res, 200, { ok: true });
             } catch (err) { fail(err); }
         }).catch(fail);
         return;
     }
 
-    sendJson(req, res, 405, { ok: false, error: `unsupported method ${req.method}` });
+    sendJsonLogged(req, res, 405, { ok: false, error: `unsupported method ${req.method}` });
 };
 
 /**
@@ -457,14 +514,14 @@ const acceptChunk = async (req, res, jobId, seq, payload, fail) => {
         job = readRecord(COLLECTIONS.jobs, jobId);
     } catch (err) { fail(err); return; }
     if (!job) {
-        sendJson(req, res, 404, { ok: false, accepted: 0, error: `no job "${jobId}"` });
+        sendJsonLogged(req, res, 404, { ok: false, accepted: 0, error: `no job "${jobId}"` });
         return;
     }
     const accepted = Number.isFinite(Number(job.sentChunks)) ? Number(job.sentChunks) : 0;
 
     if (seq !== accepted) {
         const behind = seq < accepted;
-        sendJson(req, res, 409, {
+        sendJsonLogged(req, res, 409, {
             ok: false, accepted,
             error: behind
                 ? `chunk ${seq} was already accepted — this server has flushed ${accepted} chunk(s)`
@@ -473,7 +530,7 @@ const acceptChunk = async (req, res, jobId, seq, payload, fail) => {
         return;
     }
     if (payload.length === 0) {
-        sendJson(req, res, 400, { ok: false, accepted, error: 'empty chunk body' });
+        sendJsonLogged(req, res, 400, { ok: false, accepted, error: 'empty chunk body' });
         return;
     }
 
@@ -483,7 +540,7 @@ const acceptChunk = async (req, res, jobId, seq, payload, fail) => {
     const host = job.target?.host;
     const port = parseInt(String(job.target?.port ?? ''), 10);
     if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
-        sendJson(req, res, 502, {
+        sendJsonLogged(req, res, 502, {
             ok: false, accepted,
             error: `job "${jobId}" has no usable printer target (${job.target?.host}:${job.target?.port})`,
         });
@@ -495,7 +552,7 @@ const acceptChunk = async (req, res, jobId, seq, payload, fail) => {
         // `accepted` is untouched, and that is a fact rather than a guess: the
         // bytes did not flush, so the chunk did not print. Saying otherwise
         // would make the queue skip it forever.
-        sendJson(req, res, 502, { ok: false, accepted, error: result.error });
+        sendJsonLogged(req, res, 502, { ok: false, accepted, error: result.error });
         return;
     }
 
@@ -510,7 +567,7 @@ const acceptChunk = async (req, res, jobId, seq, payload, fail) => {
         fail(err);
         return;
     }
-    sendJson(req, res, 200, { ok: true, accepted: next, written: result.written, bytes: payload.length });
+    sendJsonLogged(req, res, 200, { ok: true, accepted: next, written: result.written, bytes: payload.length });
 };
 
 const handleChunk = (req, res, jobId, rawSeq, fail) => {
@@ -520,7 +577,7 @@ const handleChunk = (req, res, jobId, rawSeq, fail) => {
     const missing = rawSeq === null || rawSeq === undefined || String(rawSeq).trim() === '';
     const seq = missing ? NaN : Number(rawSeq);
     if (!Number.isInteger(seq) || seq < 0) {
-        sendJson(req, res, 400, { ok: false, accepted: 0, error: `invalid seq "${rawSeq}" — must be a non-negative integer` });
+        sendJsonLogged(req, res, 400, { ok: false, accepted: 0, error: `invalid seq "${rawSeq}" — must be a non-negative integer` });
         return;
     }
     readBody(req, MAX_BODY)

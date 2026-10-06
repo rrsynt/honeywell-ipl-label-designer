@@ -170,6 +170,17 @@ function forwardToTcp(host, port, body, ms) {
 // NOW-5: exported (like handlePrintRequest/handleLibraryRequest/handleDbRequest)
 // so tests can drive the real HTTP contract on a random port without spawning
 // a process. Importing this module never listens — only the isMain block below.
+
+/** Process start, for /health uptime. */
+const startedAt = Date.now();
+
+/** One line per forward (/send): who printed what, where, and whether the
+ *  bytes flushed. Reads stay quiet. */
+const accessLog = (req, path, note) => {
+    const peer = req.socket?.remoteAddress ?? '?';
+    console.log(`[bridge] ${peer} ${req.method} ${path}${note ? ` ${note}` : ''}`);
+};
+
 export const handleBridgeRequest = (req, res) => {
     if (req.method === 'OPTIONS') {
         res.writeHead(204, corsHeaders(req));
@@ -179,6 +190,13 @@ export const handleBridgeRequest = (req, res) => {
 
     if (url.pathname === '/ping' && req.method === 'GET') {
         return json(req, res, 200, { ok: true, mode: listenPort ? 'capture' : 'forward' });
+    }
+
+    if (url.pathname === '/health' && req.method === 'GET') {
+        return json(req, res, 200, {
+            ok: true, service: 'bridge', mode: listenPort ? 'capture' : 'forward',
+            uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+        });
     }
 
     if (listenPort && url.pathname === '/capture') {
@@ -227,7 +245,10 @@ export const handleBridgeRequest = (req, res) => {
         });
         req.on('end', async () => {
             if (rejected) return;
-            const result = await forwardToTcp(host, port, Buffer.concat(chunks), ms);
+            const body = Buffer.concat(chunks);
+            const result = await forwardToTcp(host, port, body, ms);
+            accessLog(req, `/send?host=${host}&port=${port}`,
+                result.ok ? `-> ${host}:${port} ${body.length}B flushed` : `-> ${host}:${port} FAILED ${result.error}`);
             json(req, res, result.ok ? 200 : 502, result);
         });
         return;

@@ -252,3 +252,69 @@ describe('db server PUT without a token: loopback decides (SEC-03)', () => {
         expect(isLoopback({ socket: { remoteAddress: '192.168.1.5' }, headers: { 'x-forwarded-for': '127.0.0.1' } })).toBe(false);
     });
 });
+
+describe('/health on all four servers', () => {
+    it('bridge reports mode + uptime', async () => {
+        const { handleBridgeRequest } = await import('../tools/ipl-bridge.mjs');
+        const http = await import('node:http');
+        const server = http.createServer(handleBridgeRequest);
+        await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+        try {
+            const port = (server.address() as any).port;
+            const h = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.json() as any);
+            expect(h).toMatchObject({ ok: true, service: 'bridge' });
+            expect(typeof h.uptimeSec).toBe('number');
+        } finally {
+            await new Promise<void>((r) => server.close(() => r()));
+        }
+    });
+
+    it('print reports job counts', async () => {
+        const { handlePrintRequest } = await import('../tools/print-server.mjs');
+        const http = await import('node:http');
+        const fs = await import('node:fs');
+        const os = await import('node:os');
+        const path = await import('node:path');
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipl-health-'));
+        const prev = process.env.IPL_PRINT_DIR;
+        process.env.IPL_PRINT_DIR = dir;
+        const server = http.createServer(handlePrintRequest);
+        await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+        try {
+            const port = (server.address() as any).port;
+            const h = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.json() as any);
+            expect(h).toMatchObject({ ok: true, service: 'print', jobs: 0, pending: 0 });
+            await fetch(`http://127.0.0.1:${port}/jobs/a`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: 'a', createdAt: 1, sentChunks: 0, status: 'queued' }),
+            });
+            const h2 = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.json() as any);
+            expect(h2.jobs).toBe(1);
+            expect(h2.pending).toBe(1);
+        } finally {
+            await new Promise<void>((r) => server.close(() => r()));
+            if (prev === undefined) delete process.env.IPL_PRINT_DIR;
+            else process.env.IPL_PRINT_DIR = prev;
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it('library reports design count, db reports query count', async () => {
+        const { handleLibraryRequest } = await import('../tools/library-server.mjs');
+        const { handleDbRequest } = await import('../tools/db-server.mjs');
+        const http = await import('node:http');
+        const lib = http.createServer(handleLibraryRequest);
+        const db = http.createServer(handleDbRequest);
+        await new Promise<void>((r) => lib.listen(0, '127.0.0.1', r));
+        await new Promise<void>((r) => db.listen(0, '127.0.0.1', r));
+        try {
+            const lp = (lib.address() as any).port;
+            const dp = (db.address() as any).port;
+            expect(await fetch(`http://127.0.0.1:${lp}/health`).then((r) => r.json())).toMatchObject({ ok: true, service: 'library' });
+            expect(await fetch(`http://127.0.0.1:${dp}/health`).then((r) => r.json())).toMatchObject({ ok: true, service: 'db' });
+        } finally {
+            await new Promise<void>((r) => lib.close(() => r()));
+            await new Promise<void>((r) => db.close(() => r()));
+        }
+    });
+});

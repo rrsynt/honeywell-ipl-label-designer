@@ -191,6 +191,16 @@ export const isAuthorized = (req) => {
     return (req.headers?.authorization ?? '') === `Bearer ${token}`;
 };
 
+/** Process start, for /health uptime. */
+const startedAt = Date.now();
+
+/** One line per state-changing request. Reads stay quiet (the UI polls them). */
+const accessLog = (req, path) => {
+    if (req.method === 'GET' || req.method === 'OPTIONS' || req.method === 'HEAD') return;
+    const peer = req.socket?.remoteAddress ?? '?';
+    console.log(`[library] ${peer} ${req.method} ${path}`);
+};
+
 export const handleLibraryRequest = (req, res) => {
     if (req.method === 'OPTIONS') {
         res.writeHead(204, corsHeaders(req));
@@ -210,12 +220,26 @@ export const handleLibraryRequest = (req, res) => {
         return;
     }
 
-    // /ping is the only public route: liveness must work before the UI knows
-    // any token. Designs, sources and drafts are shop data — token-gated.
+    if (url.pathname === '/health' && req.method === 'GET') {
+        let designs = 0;
+        try { designs = listRecords(COLLECTIONS.designs).length; } catch { designs = 0; }
+        sendJson(req, res, 200, {
+            ok: true, service: 'library',
+            uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+            designs,
+        });
+        return;
+    }
+
+    // /ping and /health are the only public routes: liveness must work before
+    // the UI knows any token. Designs, sources and drafts are shop data —
+    // token-gated.
     if (!isAuthorized(req)) {
         sendJson(req, res, 401, { ok: false, error: 'library token required (start the UI with the same token, or restart the server without --token)' });
         return;
     }
+
+    accessLog(req, url.pathname);
 
     const parts = url.pathname.split('/').filter(Boolean);
     const collection = COLLECTIONS[parts[0]];

@@ -402,6 +402,17 @@ export const parseRowsXml = (xml) => {
  *  listed, opened and corrected after someone wrote a bad one. */
 const storedQuery = (id) => readQuery(id);
 
+/** Process start, for /health uptime. */
+const startedAt = Date.now();
+
+/** One line per query run or store — who asked for what. Reads stay quiet.
+ *  Row COUNTS are logged, never row contents or connection strings. */
+const accessLog = (req, path, note) => {
+    if (req.method === 'GET' || req.method === 'OPTIONS' || req.method === 'HEAD') return;
+    const peer = req.socket?.remoteAddress ?? '?';
+    console.log(`[db] ${peer} ${req.method} ${path}${note ? ` ${note}` : ''}`);
+};
+
 export const handleDbRequest = (req, res) => {
     if (req.method === 'OPTIONS') {
         res.writeHead(204, corsHeaders(req));
@@ -424,9 +435,21 @@ export const handleDbRequest = (req, res) => {
         return;
     }
 
-    // /ping is the only public route. Everything else needs the token when one
-    // is set — and PUT additionally needs a loopback caller even without one,
-    // because writing a query writes credentials + SQL (audit SEC-03).
+    if (url.pathname === '/health' && req.method === 'GET') {
+        let queries = 0;
+        try { queries = listQueries().length; } catch { queries = 0; }
+        sendJson(req, res, 200, {
+            ok: true, service: 'db',
+            uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+            queries,
+        });
+        return;
+    }
+
+    // /ping and /health are the only public routes. Everything else needs the
+    // token when one is set — and PUT additionally needs a loopback caller
+    // even without one, because writing a query writes credentials + SQL
+    // (audit SEC-03).
     if (!isAuthorized(req)) {
         sendJson(req, res, 401, { ok: false, error: 'database token required (start the UI with the same token, or restart the server without --token)' });
         return;
@@ -460,9 +483,11 @@ export const handleDbRequest = (req, res) => {
                 // A refused query is the operator's mistake and the caller's
                 // to fix, so it is a 400; anything else is the database or the
                 // helper failing, which is a 502.
+                accessLog(req, `/queries/${id}/run`, `FAILED ${result.error ?? 'unknown'}`);
                 sendJson(req, res, result.refusal ? 400 : 502, result);
                 return;
             }
+            accessLog(req, `/queries/${id}/run`, `${result.rowCount ?? 0} rows${result.truncated ? ' (truncated)' : ''}`);
             sendJson(req, res, 200, result);
         }).catch(fail);
         return;
@@ -532,6 +557,7 @@ export const handleDbRequest = (req, res) => {
             }
             try {
                 writeQuery(id, body);
+                accessLog(req, `/queries/${id}`, 'stored');
                 sendJson(req, res, 200, { ok: true, query: publicQuery(body) });
             } catch (err) { fail(err); }
         }).catch(fail);
