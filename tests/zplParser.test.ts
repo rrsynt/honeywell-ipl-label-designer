@@ -665,3 +665,28 @@ describe('a QR ^FD error-correction prefix is read as a level, not as data', () 
         expect(el.source.type === 'fixed' && el.source.data).toBe('9876543210');
     });
 });
+
+describe('ZPL source font identity (audit FUN-07)', () => {
+    const textOf = (zpl: string): TextElement =>
+        parseZPL(zpl, 203).elements.find(e => e.kind === 'text') as TextElement;
+
+    it('carries the ^A name on the element instead of flattening to 25', () => {
+        expect(textOf('^XA^FO10,10^A0N,40,40^FDHi^FS^XZ').sourceFont).toBe('A0');
+        expect(textOf('^XA^FO10,10^ABN,40,40^FDHi^FS^XZ').sourceFont).toBe('AB');
+        expect(textOf('^XA^FO10,10^A@N,40,40^FDHi^FS^XZ').sourceFont).toBe('A@');
+    });
+
+    it('still draws the bitmap font at the same height (identity, not metrics)', () => {
+        // Without a ZPL manual in the repo no resident-cell mapping is claimed:
+        // both draw at the requested dot height. The identity is what survived.
+        const a0 = textOf('^XA^FO10,10^A0N,40,40^FDHi^FS^XZ');
+        const ab = textOf('^XA^FO10,10^ABN,40,40^FDHi^FS^XZ');
+        expect(a0.pointSize).toBe(ab.pointSize);
+        expect(ab.font).toBe('25');
+    });
+
+    it('still infos the bitmap substitution', () => {
+        const label = parseZPL('^XA^FO10,10^ABN,40,40^FDHi^FS^XZ', 203);
+        expect(label.issues.some(i => i.code === 'zpl-bitmap-font')).toBe(true);
+    });
+});

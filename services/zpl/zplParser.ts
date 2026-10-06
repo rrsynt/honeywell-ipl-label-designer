@@ -70,8 +70,11 @@ const tokenize = (src: string): ZplCommand[] => {
         // digit-named turned them into a bare ^A and dropped the font.
         // ^A0 is a font and ^B3 a barcode: the digit names the variant. ^AB and
         // ^BE have no digit, so the rule only fires when one is actually there.
-        const digitName = /^[AB]\d/.test(head);
-        const nm = (digitName ? /^[A-Za-z]\d/ : /^[A-Za-z]{2}/).exec(head);
+        // ^A@ (downloaded font) is a two-character name too — without it the
+        // tokenizer skipped the @ and the field lost its font entirely (the
+        // `zpl-font-name` info below was unreachable). Audit FUN-07 follow-up.
+        const digitName = /^[AB]\d/.test(head) || /^A@/.test(head);
+        const nm = (digitName ? /^[A-Za-z][\d@]/ : /^[A-Za-z]{2}/).exec(head);
         if (!nm) { i++; continue; }
         const name = nm[0].toUpperCase();
         const start = i + 1 + nm[0].length;
@@ -156,7 +159,7 @@ export const parseZPL = (code: string, dpi = 203): ViewerLabel => {
     let origin: { x: number; y: number } | null = null;
     let rotation = 0;          // ^FW, in IPL quadrants
     let fieldRotation: number | null = null; // a per-command orientation overrides ^FW
-    let font: { h: number; w: number } | null = null;
+    let font: { h: number; w: number; name: string } | null = null;
     let pendingBarcode: { symbology: string; heightDots: number; moduleDots: number; hri: 0 | 1; code39Mode?: string; qrModel?: string } | null = null;
     let byModule = 2;
     let byRatio = 3;           // ^BY wide:narrow, default 3.0
@@ -293,6 +296,10 @@ export const parseZPL = (code: string, dpi = 203): ViewerLabel => {
                 // how a ZPL scalable font works. '0' is not in the IR's font map,
                 // so it would fall back to a bitmap cell and ignore the size.
                 font: '25', hMag: 1, wMag: 1, pointSize,
+                // The ZPL name that drew this (^A0/^AB/^A@...): the identity used
+                // to flatten to '25' for every field, so a bitmap ^AB and a
+                // scalable ^A0 were indistinguishable downstream (audit FUN-07).
+                sourceFont: font.name,
                 source: { type: 'fixed', data },
                 // ^FB made this field a PARAGRAPH: it wraps at the box width and
                 // is cut off after the line cap, and this is what keeps it from
@@ -514,12 +521,12 @@ export const parseZPL = (code: string, dpi = 203): ViewerLabel => {
             case 'A0': case 'AA': case 'AB': case 'AD': case 'AE': case 'AF': case 'AG': case 'AH': {
                 const r = ROT[(p[0] ?? '').trim().toUpperCase()];
                 fieldRotation = r === undefined ? null : r;
-                font = { h: num(p[1], 9), w: num(p[2], num(p[1], 5)) };
+                font = { h: num(p[1], 9), w: num(p[2], num(p[1], 5)), name: cmd.name };
                 if (cmd.name !== 'A0') issue('info', 'zpl-bitmap-font', `^${cmd.name} is a bitmap font. It is drawn with the scalable font at the same height.`, `^${cmd.name}`);
                 break;
             }
             case 'A@':
-                font = { h: num(p[1], 15), w: num(p[2], 15) };
+                font = { h: num(p[1], 15), w: num(p[2], 15), name: cmd.name };
                 issue('info', 'zpl-font-name', '^A@ names a downloaded font, which is not available here. Drawn with the scalable font at the requested size.', '^A@');
                 break;
             case 'BC': case 'B3': case 'B2': case 'BQ': case 'BX': {

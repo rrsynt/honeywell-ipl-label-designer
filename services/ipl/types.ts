@@ -52,6 +52,16 @@ export interface TextElement extends ElementBase {
     wMag: number;
     /** Outline font size in points (k parameter). */
     pointSize?: number;
+    /**
+     * The source language's own font name when it is not an IR id — ZPL's
+     * ^A0/^AA..^AH/^A@. The element still draws through `font` (c25 at
+     * pointSize, the setara-tinggi reading), but the identity is no longer
+     * flattened away: a future estimator or a re-export can tell a bitmap
+     * ^AB from a scalable ^A0. Absent for IPL-sourced elements, whose font
+     * IS the IR id. There is no ZPL manual in this repo (all ZPL behaviour
+     * is probed against Labelary), so no resident-cell mapping is claimed.
+     */
+    sourceFont?: string;
     /** Border thickness in dots (b parameter). >0 renders white letters on a
      * black n-dot surround (PRM p.167). */
     borderDots?: number;
