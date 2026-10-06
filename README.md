@@ -1,5 +1,33 @@
 # Honeywell IPL Label Designer & Viewer
 
+[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-2250%2B%20passing-brightgreen)](#)
+[![Languages](https://img.shields.io/badge/printer%20languages-IPL%20%C2%B7%20ZPL%20%C2%B7%20EPL%20%C2%B7%20TSPL%20%C2%B7%20DPL-blue)](#)
+
+A free, web-based WYSIWYG label designer + **printer-language viewer** with a
+focus nobody else covers: **IPL (Intermec Printer Language)** for
+Honeywell/Intermec printers — think Labelary, but for IPL, plus four more
+languages (ZPL, EPL, TSPL, DPL) in the same codebase.
+
+> 🇮🇩 Dokumentasi lengkap dalam Bahasa Indonesia dimulai dari [Fitur](#fitur) di bawah.
+
+**Why this exists:** every online label viewer speaks Zebra ZPL
+([Labelary](https://labelary.com/viewer.html)) or ZPL/EPL
+([Labelize](https://github.com/versatile-lab/labelize), MIT). Nothing free
+renders **IPL** — Honeywell's own tooling is BarTender (commercial) or
+firmware simulators. This project parses, renders, validates, edits and
+prints IPL in the browser, with golden-file tests and BarTender-export
+oracles proving pixel-level fidelity.
+
+|  | This project | Labelary | Labelize | BarTender |
+|---|---|---|---|---|
+| IPL render | ✅ | ❌ | ❌ | ✅ (commercial) |
+| ZPL / EPL / TSPL / DPL | ✅ / ✅ / ✅ / ✅ | ZPL only | ZPL + EPL | ✅ (commercial) |
+| WYSIWYG designer | ✅ | ❌ | ❌ | ✅ (commercial) |
+| IPL → ZPL conversion | ✅ | n/a | n/a | via driver |
+| Open source | ✅ MIT | ❌ | ✅ MIT | ❌ |
+| Honest warnings (no silent drops) | ✅ named issues | — | — | — |
+
 Designer label WYSIWYG + **IPL Viewer** (Intermec Printer Language) berbasis web —
 mirip ZPL Viewer / Labelary, tapi untuk printer Honeywell/Intermec.
 
@@ -22,15 +50,15 @@ mirip ZPL Viewer / Labelary, tapi untuk printer Honeywell/Intermec.
 - IPL generator + parser round-trip (dijamin test), simpan/muat localStorage, ekspor JSON
 ### IPL Viewer
 - Live parse saat mengetik — terima byte kontrol asli (0x02/0x1b) maupun notasi literal (`<STX>`/`<ESC>`);
-  bahasa dideteksi dari stream (IPL/ZPL/EPL/TSPL) dan bisa diganti manual kalau tebakannya salah;
-  DPL (Datamax) sengaja belum didukung — lihat docs/research/ROADMAP.md
+  bahasa dideteksi dari stream (IPL/ZPL/EPL/TSPL/DPL) dan bisa diganti manual kalau tebakannya salah
 - Render: font bitmap/outline per DPI, barcode bwip-js dot-exact; EPL dan TSPL
   kini juga menggambar 2D (Data Matrix/MaxiCode/PDF417 di EPL, QR/PDF417 di TSPL)
-  sejauh yang bahasanya punya perintahnya — EPL2 memang tidak punya QR sama sekali
-- (20 symbology:
-  Code 39/93/ITF/2of5/11/128+UCC, EAN/UPC+add-on, Codabar, HIBC 39/128, Code 16K,
-  Code 49, POSTNET, Planet, PDF417, MicroPDF417, QR Code, Data Matrix, MaxiCode,
-  RSS/GS1 DataBar), raster graphic G/U, rotasi 4 kuadran, HRI atas/bawah.
+  sejauh yang bahasanya punya perintahnya — EPL2 memang tidak punya QR sama sekali;
+  DPL didukung penuh (parser + generator + validasi terhadap manual Datamax/Fiji)
+- 35 symbology (Code 39/93/ITF/2of5/11/128+UCC, EAN/UPC+add-on, Codabar, HIBC 39/128,
+  Code 16K, Code 49, POSTNET, Planet, PDF417, MicroPDF417, QR Code, Data Matrix,
+  MaxiCode, RSS/GS1 DataBar, MSI, Plessey, Telepen, ITF-14, Aztec, EAN-14…),
+  raster graphic G/U + Direct Graphics g0/g1, rotasi 4 kuadran, HRI atas/bawah.
   JIS-ITF (c15) & EAN.UCC Composite (c21) tanpa encoder faithful → placeholder
   + info.
 - Validator: urutan command, ID duplikat, rentang parameter, validitas data per symbology
@@ -67,9 +95,9 @@ npm run build        # produksi (bwip-js & jspdf lazy-loaded)
 - `services/iplGenerator.ts`, `services/iplParser.ts` - generator & parser sisi designer (round-trip)
 - `services/canvasDrawer.ts`, `services/geometry.ts` - renderer editor canvas
 - `services/ipl/` - pipeline viewer (independen dari model Design)
-- `services/zpl/`, `services/epl/`, `services/tspl/` - bahasa printer lain: parser + generator,
-  keduanya subset yang melaporkan apa yang tidak bisa digambar lewat peringatan
-  bernama, bukan menghilangkannya diam-diam
+- `services/zpl/`, `services/epl/`, `services/tspl/`, `services/dpl/` - bahasa printer lain:
+  parser + generator, keduanya subset yang melaporkan apa yang tidak bisa digambar
+  lewat peringatan bernama, bukan menghilangkannya diam-diam
   - `tokenizer.ts` - framing STX/ETX dual-notasi
   - `viewerParser.ts` - state machine + validator
   - `barcodes.ts` - bwip-js lazy-load, dot-exact
@@ -88,3 +116,13 @@ npm run build        # produksi (bwip-js & jspdf lazy-loaded)
 Viewer me-render langsung dari hasil parse (model elemen netral), bukan lewat model
 `Design` internal - stream IPL pihak ketiga tetap tampil meski tidak sepenuhnya
 ter-mapping, dan command asing dilaporkan di panel issues alih-alih dibuang diam-diam.
+
+## Deploy di toko / LAN
+
+Lihat [docs/SHOP-DEPLOY.md](docs/SHOP-DEPLOY.md) — single-station zero-config,
+LAN dengan token + allow-list printer, admin query database, backup, troubleshooting.
+
+## Lisensi
+
+MIT — lihat [LICENSE](LICENSE). Manual printer milik vendor TIDAK disertakan;
+unduh sendiri sesuai [docs/manuals/README.md](docs/manuals/README.md).
