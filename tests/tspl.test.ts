@@ -28,7 +28,7 @@ import { estimateElementSize, elementVisualBox, renderLabel, computeLabelExtent 
 import { newRealCanvas } from './golden/setup';
 import { jobSendabilityError, renderJobChunk, type PrintJob } from '../services/printQueue';
 import { validateTarget } from '../services/printTargets';
-import type { Design } from '../types';
+import type { BarcodeField, Design } from '../types';
 
 /** A single backslash. Writing these in a TS literal is how three attempts at
  *  the escape tests got the runtime string wrong, so they are built explicitly. */
@@ -1702,5 +1702,70 @@ describe('BLOCK is drawn, and no dead branch may claim otherwise', () => {
         // is read as documentation.
         const src = readFileSync(join(__dirname, '..', 'services', 'tspl', 'tsplParser.ts'), 'utf8');
         expect(src, 'the dead BLOCK claim must be gone').not.toContain('tspl-block-unsupported');
+    });
+});
+
+describe('TSPL carries a forced Code 128 start subset (audit FUN-08)', () => {
+    const design = (subset?: 'a' | 'b' | 'c'): Design => ({
+        name: 't',
+        labelSettings: { width: 60, height: 40, columns: 1, rows: 1, unit: 'mm', orientation: 'portrait' },
+        printerSettings: { model: 'PD43', dpi: 203, quantity: 1, mediaType: 'direct-thermal', mediaSenseMode: 'gap', printSpeed: 6, darkness: 10, language: 'tspl' },
+        fields: [{
+            id: 1, type: 'barcode', name: 'C', x: 10, y: 10, rotation: 0,
+            dataSource: { type: 'fixed', data: 'ABC123' }, symbology: '6',
+            humanReadable: 'none', h_mag: 60, w_mag: 2,
+            ...(subset !== undefined ? { code128_subset: subset } : {}),
+        } as BarcodeField],
+        dataSources: [], nextId: 9, guides: { horizontal: [], vertical: [] },
+    });
+
+    it('emits 128M with the Start-B/C/A prefix from the TSC manual (p. 43)', () => {
+        // The manual's own example: `!104` is "encoded with CODE B start".
+        expect(generateTSPL(design('b')).tspl).toContain('"128M"');
+        expect(generateTSPL(design('b')).tspl).toContain('"!104ABC123"');
+        expect(generateTSPL(design('a')).tspl).toContain('"!103ABC123"');
+        expect(generateTSPL(design('c')).tspl).toContain('"!105ABC123"');
+    });
+
+    it('plain 128 without a subset is untouched', () => {
+        const { tspl, warnings } = generateTSPL(design());
+        expect(tspl).toContain('"128"');
+        expect(tspl).not.toContain('128M');
+        expect(tspl).toContain('"ABC123"');
+        expect(warnings.join(' ')).not.toMatch(/subset/i);
+    });
+
+    it('the parser reads the prefix back into code128StartSubset with clean data', async () => {
+        const { parseTSPL } = await import('../services/tspl/tsplParser');
+        for (const [prefix, subset] of [['!103', '1'], ['!104', '2'], ['!105', '3']] as const) {
+            const el = parseTSPL(`SIZE 60,40\nBARCODE 80,80,"128M",60,0,0,2,3,"${prefix}ABC123"\nPRINT 1\n`).elements[0] as any;
+            expect(el.symbology).toBe('6');
+            expect(el.code128StartSubset, prefix).toBe(subset);
+            expect(el.source.data, prefix).toBe('ABC123');
+        }
+    });
+
+    it('a ! prefix that is not a start code stays data', async () => {
+        const { parseTSPL } = await import('../services/tspl/tsplParser');
+        const el = parseTSPL('SIZE 60,40\nBARCODE 80,80,"128M",60,0,0,2,3,"!101ABC"\nPRINT 1\n').elements[0] as any;
+        expect(el.code128StartSubset).toBeUndefined();
+        expect(el.source.data).toBe('!101ABC');
+    });
+
+    it('ROUND TRIP: subset survives generate -> parse -> generate', async () => {
+        const { parseTSPL } = await import('../services/tspl/tsplParser');
+        const once = generateTSPL(design('c')).tspl;
+        const el = parseTSPL(once).elements[0] as { code128StartSubset?: string; source: { data?: string } };
+        expect(el.code128StartSubset).toBe('3');
+        const first = design('c').fields[0] as unknown as Record<string, unknown>;
+        const twice = generateTSPL({
+            ...design('c'),
+            fields: [{
+                ...first,
+                dataSource: { type: 'fixed', data: (el.source.data ?? '') as string },
+                code128_subset: ({ '1': 'a', '2': 'b', '3': 'c' } as Record<string, 'a' | 'b' | 'c'>)[el.code128StartSubset ?? ''],
+            }],
+        } as never).tspl;
+        expect(twice).toContain('"!105ABC123"');
     });
 });

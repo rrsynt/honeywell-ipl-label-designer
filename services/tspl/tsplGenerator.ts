@@ -428,7 +428,16 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
             // while the parser reads '39C' back as code39Mode '2'.
             const code39HostChecked = sym === '0' && field.code39_checkDigit === 'host-verifies';
             const ean = sym === '7' ? splitEanSupplement(data) : null;
-            const type = sym === '7' ? tsplEanType(data) : (code39HostChecked ? '39C' : TSPL_BARCODE_FOR[sym]);
+            // A forced Code 128 start subset has no EPL-style 1A/1B/1C type in
+            // TSPL — the manual (p. 43) switches subsets INSIDE the data with
+            // `128M`: `!103`/`!104`/`!105` = Start A/B/C (the example's `!104`
+            // is "encoded with CODE B start character"). So the subset rides
+            // as a data prefix on the manual type, not as a dropped control.
+            const c128Start = sym === '6' && (field.code128_subset === 'a' || field.code128_subset === 'b' || field.code128_subset === 'c')
+                ? { a: '!103', b: '!104', c: '!105' }[field.code128_subset]
+                : undefined;
+            const baseType = sym === '7' ? tsplEanType(data) : (code39HostChecked ? '39C' : TSPL_BARCODE_FOR[sym]);
+            const type = c128Start !== undefined && baseType === '128' ? '128M' : baseType;
             if (field.code39_checkDigit === 'printer-generated' && sym === '0') {
                 // TSPL has no "printer adds the code" Code 39 type â€” '39C' is the
                 // host-supplied+verified one. Plain '39' prints the data as given,
@@ -464,8 +473,12 @@ export const generateTSPL = (design: Design): TsplGenerateResult => {
                 warnings.push(`"${field.name}" asks for the human-readable line above the bar code. TSPL can only print it below, so it will print below.`);
             }
             const narrow = Math.max(1, Math.round(field.w_mag ?? 1));
-            const payload = ean?.supplemental ? `${ean.main}${ean.supplemental}` : data;
-            lines.push(`BARCODE ${x},${y},"${type}",${heightDots},${hri},${rotation},${narrow},${narrow + 1},"${escapeTsplData(payload)}"`);
+            const rawPayload = ean?.supplemental ? `${ean.main}${ean.supplemental}` : data;
+            // The forced-subset prefix is a command to the printer, not data:
+            // prepend it AFTER escaping, so a `!` in the user's own data stays
+            // exactly as written instead of merging with the prefix.
+            const payload = `${c128Start ?? ''}${escapeTsplData(rawPayload)}`;
+            lines.push(`BARCODE ${x},${y},"${type}",${heightDots},${hri},${rotation},${narrow},${narrow + 1},"${payload}"`);
             continue;
         }
 

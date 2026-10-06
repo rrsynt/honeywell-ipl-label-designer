@@ -596,7 +596,21 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     issue('warning', 'tspl-barcode-empty', 'A barcode with no data prints nothing.', 'BARCODE');
                     break;
                 }
-                const { content, hasAddon } = splitTsplAddonContent(type, rawContent);
+                const { content: addonContent, hasAddon } = splitTsplAddonContent(type, rawContent);
+                // A forced Code 128 start subset rides as a `!10x` prefix on
+                // `128M` data (TSC manual p. 43: `!104` = Start B). Strip it
+                // into the IR's code128StartSubset ('1'/'2'/'3' = A/B/C, the
+                // encoder's own domain) so the data is clean and the subset
+                // round-trips — the generator writes exactly this shape.
+                let content = addonContent;
+                let code128StartSubset: string | undefined;
+                if ((type === '128M' || type === '128') && !hasAddon) {
+                    const m = /^!10([345])/.exec(content);
+                    if (m) {
+                        code128StartSubset = { '3': '1', '4': '2', '5': '3' }[m[1]];
+                        content = content.slice(m[0].length);
+                    }
+                }
                 if (type.includes('+') && !hasAddon) {
                     issue('info', 'tspl-addon-ignored',
                         `"${type}" carries a printed add-on, which this viewer draws as the main symbol only.`, 'BARCODE');
@@ -645,6 +659,7 @@ export const parseTSPL = (code: string): ViewerLabel => {
                     source: { type: 'fixed', data: content },
                     ...(mapped.eanUpcVersion !== undefined ? { eanUpcVersion: mapped.eanUpcVersion } : {}),
                     ...(mapped.code39Mode !== undefined ? { code39Mode: mapped.code39Mode } : {}),
+                    ...(code128StartSubset !== undefined ? { code128StartSubset } : {}),
                 };
                 elements.push(place(el));
                 break;
