@@ -9,8 +9,6 @@ focus nobody else covers: **IPL (Intermec Printer Language)** for
 Honeywell/Intermec printers — think Labelary, but for IPL, plus four more
 languages (ZPL, EPL, TSPL, DPL) in the same codebase.
 
-> 🇮🇩 Dokumentasi lengkap dalam Bahasa Indonesia dimulai dari [Fitur](#fitur) di bawah.
-
 **Why this exists:** every online label viewer speaks Zebra ZPL
 ([Labelary](https://labelary.com/viewer.html)) or ZPL/EPL
 ([Labelize](https://github.com/versatile-lab/labelize), MIT). Nothing free
@@ -28,101 +26,86 @@ oracles proving pixel-level fidelity.
 | Open source | ✅ MIT | ❌ | ✅ MIT | ❌ |
 | Honest warnings (no silent drops) | ✅ named issues | — | — | — |
 
-Designer label WYSIWYG + **IPL Viewer** (Intermec Printer Language) berbasis web —
-mirip ZPL Viewer / Labelary, tapi untuk printer Honeywell/Intermec.
-
-## Fitur
+## Features
 
 ### Designer
-- Galeri **template siap pakai** (tombol Templates): blank, shipping 4×6", price tag, asset QR, lot sticker
-- Canvas editor: drag/resize/rotate, snap + alignment guides, layer lock/hide, undo/redo
-- Field: teks (font bitmap & outline IPL), barcode (20 symbology — encoder yang
-  sama dengan Viewer, bukan lagi 6 format JsBarcode), garis, box (termasuk sudut
-  bulat via raster graphic IPL); parameter symbology (QR EC/mask, MicroPDF rows,
-  RSS version, MaxiCode mode, HIBC format) dapat diedit & bertahan round-trip
-- Data source: fixed / variable / date / time / linked (variable & counter)
-- Ekspor **job CSV**: tempel tabel CSV, load file `.csv`, atau drag & drop di
-  tab Data → kolom terpetakan otomatis ke nama field/sumber data → unduh satu
-  .ipl berisi satu print-block per baris (file Excel ANSI/windows-1252 terbaca benar);
-  termasuk **pratinjau per-baris** yang merender lewat pipeline viewer sungguhan
-  dan **Send Job** (kirim langsung ke printer via bridge lokal, dengan konfirmasi;
-  target host:port disimpan bersama dengan Viewer — printer jaringan didukung)
-- IPL generator + parser round-trip (dijamin test), simpan/muat localStorage, ekspor JSON
-### IPL Viewer
-- Live parse saat mengetik — terima byte kontrol asli (0x02/0x1b) maupun notasi literal (`<STX>`/`<ESC>`);
-  bahasa dideteksi dari stream (IPL/ZPL/EPL/TSPL/DPL) dan bisa diganti manual kalau tebakannya salah
-- Render: font bitmap/outline per DPI, barcode bwip-js dot-exact; EPL dan TSPL
-  kini juga menggambar 2D (Data Matrix/MaxiCode/PDF417 di EPL, QR/PDF417 di TSPL)
-  sejauh yang bahasanya punya perintahnya — EPL2 memang tidak punya QR sama sekali;
-  DPL didukung penuh (parser + generator + validasi terhadap manual Datamax/Fiji)
-- 35 symbology (Code 39/93/ITF/2of5/11/128+UCC, EAN/UPC+add-on, Codabar, HIBC 39/128,
-  Code 16K, Code 49, POSTNET, Planet, PDF417, MicroPDF417, QR Code, Data Matrix,
-  MaxiCode, RSS/GS1 DataBar, MSI, Plessey, Telepen, ITF-14, Aztec, EAN-14…),
-  raster graphic G/U + Direct Graphics g0/g1, rotasi 4 kuadran, HRI atas/bawah.
-  JIS-ITF (c15) & EAN.UCC Composite (c21) tanpa encoder faithful → placeholder
-  + info.
-- Validator: urutan command, ID duplikat, rentang parameter, validitas data per symbology
-- Zoom/fit, ukuran dots ≈ mm, ekspor PNG/PDF, ekspor **job multi-label**
-  (satu PDF multi-halaman ATAU ZIP berisi PNG bernomor untuk semua label
-  `<RS>×<US>` dengan odometer, kap 300 dengan konfirmasi awal),
-  share via URL (`#ipl=...`)
-- Send ke printer/simulator via bridge lokal, atau download .ipl
+- Ready-made **template gallery** (Templates button): blank, shipping 4×6", price tag, asset QR, lot sticker
+- **New-label dialog** with 13 roll/sheet/receipt stock presets (metric + imperial) or fully custom size, DPI, orientation and grid — the choice flows into all five generators
+- Canvas editor: drag/resize/rotate, snap + alignment guides, layer lock/hide, undo/redo, menu bar + toolbar + status bar
+- Fields: text (IPL bitmap & outline fonts), barcodes (same encoder as the Viewer), lines, boxes (rounded corners via IPL raster graphics), ellipses, polygons, images; symbology parameters (QR EC/mask, MicroPDF rows, RSS version, MaxiCode mode, HIBC format) editable & round-trip safe
+- Data sources: fixed / variable / date / time / linked (variable & counter, incl. printer-side serial odometer)
+- **CSV job export**: paste CSV, load `.csv`, or drag & drop on the Data tab → columns auto-map to fields → one `.ipl` with one print block per row (ANSI/windows-1252 Excel files read correctly); per-row preview rendered through the real viewer pipeline, plus **Send Job** straight to the printer via the local bridge (host:port stored, network printers supported)
+- IPL generator + parser round-trip (pinned by tests), localStorage save/load, JSON export
 
-## Menjalankan
+### Viewer (IPL + ZPL + EPL + TSPL + DPL)
+- Live parse as you type — accepts raw control bytes (0x02/0x1b) as well as literal notation (`<STX>`/`<ESC>`); language auto-detected from the stream, manually overridable
+- Rendering: bitmap/outline fonts per DPI, dot-exact bwip-js barcodes; EPL and TSPL also draw 2D (Data Matrix/MaxiCode/PDF417 in EPL, QR/PDF417 in TSPL) as far as each language's commands go — EPL2 genuinely has no QR; DPL fully supported (parser + generator validated against the Datamax/Fiji manuals)
+- 35 symbologies (Code 39/93/ITF/2of5/11/128+UCC, EAN/UPC + add-ons, Codabar, HIBC 39/128, Code 16K, Code 49, POSTNET, Planet, PDF417, MicroPDF417, QR Code, Data Matrix, MaxiCode, RSS/GS1 DataBar, MSI, Plessey, Telepen, ITF-14, Aztec, EAN-14…), G/U raster graphics + Direct Graphics g0/g1, 4-quadrant rotation, HRI above/below. JIS-ITF (c15) & EAN.UCC Composite (c21) have no faithful encoder → placeholder + info.
+- Validator: command order, duplicate IDs, parameter ranges, per-symbology data validity
+- Zoom/fit, dots ≈ mm sizing, PNG/PDF export, **multi-label job** export (one multi-page PDF OR a ZIP of numbered PNGs for every `<RS>×<US>` label with odometer, capped at 300 with upfront confirmation), share via URL (`#ipl=...`)
+- Send to printer/simulator via the local bridge, or download the `.ipl`
+
+## Running
 
 ```bash
 npm install
 npm run dev          # http://localhost:3000
-npm test             # vitest
-npm run build        # produksi (bwip-js & jspdf lazy-loaded)
+npm test             # vitest (2250+ tests)
+npm run build        # production (heavy deps code-split: modals, bwip-js, jspdf, ExcelJS load on demand)
 ```
 
-## Verifikasi tanpa printer fisik
+## Verifying without a physical printer
 
-| Cara | Perintah | Keterangan |
+| Method | Command | Notes |
 |---|---|---|
-| Honeywell Simulator (firmware asli) | `npm run bridge` lalu Send di viewer | Panduan: docs/HONEYWELL-SIMULATOR.md |
-| Capture stream | `npm run bridge -- --listen=9100` | Bridge jadi fake printer; buka http://localhost:9181/capture |
-| Crosscheck Labelary | `npm run crosscheck -- samples/product.ipl` | IPL ke ZPL ke PNG render Zebra untuk perbandingan visual |
-| Konversi ZPL | `npm run zpl -- samples/product.ipl` | Tulis samples/product.zpl |
-| Crosscheck TSPL | `npm run crosscheck:tspl -- samples/product.tspl` | **Tidak ada oracle independen untuk TSPL** — Labelary hanya menerima ZPL sebagai input, dan engine Labelize mem-parse ZPL/EPL saja. Perintah ini melaporkan pembacaan parser kita per elemen, untuk dicek manusia terhadap manual TSC dan printer sungguhan. Lebih lemah daripada crosscheck EPL, dan disebut apa adanya. |
-| Crosscheck EPL | `npm run crosscheck:epl -- samples/product.epl` | Render EPL lewat engine **Labelize** (independen, MIT) dan tulis PNG di sebelahnya. Gunanya bukan identitas pixel, tapi **kesesuaian layout**: parser dan generator kita bisa sepakat satu sama lain tapi sama-sama salah membaca spec — hanya implementasi lain yang bisa menangkap itu. |
-| Print server bersama | `npm run print-server` | Satu proses LAN memegang antrean, daftar printer dan log untuk semua stasiun. Alamatnya diisi di Print Center (mis. `http://192.168.1.10:9183`); kosong berarti antrean tetap di komputer ini. Karena server ini yang menulis ke soket printer, ia tahu pasti chunk mana yang sudah tercetak — peringatan "retry bisa cetak dua kali" hilang untuk antrean yang lewat sini. |
-| Database langsung | `npm run db-server` | Ambil baris dari SQL Server sebagai sumber data tabel. Alamatnya diisi di tab Data (mis. `http://192.168.1.10:9184`), lalu tombol **From database…** menjalankan query tersimpan. Connection string tinggal di berkas query di server dan tidak pernah dikirim ke browser; klien hanya memilih nama query, tidak pernah mengirim SQL. Barisnya disimpan di dalam design, jadi membuka design lama tidak butuh database. |
+| Honeywell Simulator (real firmware) | `npm run bridge`, then Send in the viewer | Guide: docs/HONEYWELL-SIMULATOR.md |
+| Stream capture | `npm run bridge -- --listen=9100` | Bridge becomes a fake printer; open http://localhost:9181/capture |
+| Labelary crosscheck | `npm run crosscheck -- samples/product.ipl` | IPL → ZPL → Zebra-rendered PNG for visual comparison |
+| ZPL conversion | `npm run zpl -- samples/product.ipl` | Writes samples/product.zpl |
+| TSPL crosscheck | `npm run crosscheck:tspl -- samples/product.tspl` | **No independent oracle for TSPL** — Labelary only accepts ZPL input, and the Labelize engine only parses ZPL/EPL. This command reports our parser's reading per element, for a human to check against the TSC manual and a real printer. Weaker than the EPL crosscheck, and stated as such. |
+| EPL crosscheck | `npm run crosscheck:epl -- samples/product.epl` | Renders EPL through the **Labelize** engine (independent, MIT) and writes a PNG next to it. The point is layout agreement, not pixel identity: our parser and generator could agree with each other yet both misread the spec — only another implementation catches that. |
+| Shared print server | `npm run print-server` | One LAN process holds the queue, printer list and log for all stations. Enter its address in Print Center (e.g. `http://192.168.1.10:9183`); empty means the queue stays on this machine. Because this server writes to the printer socket, it knows exactly which chunks printed — the "retry may print twice" warning disappears for queues going through it. |
+| Direct database | `npm run db-server` | Pull rows from SQL Server as a table source. Enter its address in the Data tab (e.g. `http://192.168.1.10:9184`), then **From database…** runs a stored query. The connection string stays in the query file on the server and never reaches the browser; the client only picks a query name, never sends SQL. Rows are stored inside the design, so reopening an old design needs no database. |
 
-## Struktur
+## Project structure
 
-- `services/iplGenerator.ts`, `services/iplParser.ts` - generator & parser sisi designer (round-trip)
-- `services/canvasDrawer.ts`, `services/geometry.ts` - renderer editor canvas
-- `services/ipl/` - pipeline viewer (independen dari model Design)
-- `services/zpl/`, `services/epl/`, `services/tspl/`, `services/dpl/` - bahasa printer lain:
-  parser + generator, keduanya subset yang melaporkan apa yang tidak bisa digambar
-  lewat peringatan bernama, bukan menghilangkannya diam-diam
-  - `tokenizer.ts` - framing STX/ETX dual-notasi
-  - `viewerParser.ts` - state machine + validator
-  - `barcodes.ts` - bwip-js lazy-load, dot-exact
-  - `graphics.ts` - codec raster graphic IPL (6-bit packing)
-  - `renderer.ts` - painter canvas (rotasi anchor, font, HRI)
-- `components/IPLViewerModal.tsx` - UI viewer (live parse, issues, export, send)
-- `tools/` - ipl-bridge.mjs (HTTP ke TCP), library-server.mjs & print-server.mjs
-  (berbagi perpustakaan desain dan antrean cetak antar PC), db-server.mjs
-  (+ query-sqlserver.ps1 — baris dari SQL Server), ipl2zpl.mjs,
-  labelary-crosscheck.mjs
-- `samples/` - contoh stream IPL; `docs/` - panduan simulator
-- `tests/` - vitest: round-trip, viewer, fidelity, validator, sampel
+- `App.tsx` + `components/MenuBar.tsx` - shell, menu bar, keyboard shortcuts, guarded canvas-replace actions
+- `components/TopBar.tsx` + `components/toolbar/` - toolbar groups (edit/view/document)
+- `components/panels/` + `components/RightPanel.tsx` - right-panel tab shell and editors (label stock, printer, data, code)
+- `services/iplGenerator.ts`, `services/iplParser.ts` - designer-side generator & parser (round-trip)
+- `services/canvasDrawer.ts`, `services/geometry.ts` - editor canvas renderer
+- `services/ipl/` - viewer pipeline (independent of the Design model)
+  - `tokenizer.ts` - STX/ETX framing, dual notation
+  - `viewerParser.ts` + `viewerFrames.ts` - state machine + validator + frame primitives
+  - `barcodes.ts` - lazy-loaded bwip-js, dot-exact
+  - `graphics.ts` - IPL raster graphic codec (6-bit packing)
+  - `renderer.ts` - canvas painter (rotation anchor, font, HRI)
+- `services/zpl/`, `services/epl/`, `services/tspl/`, `services/dpl/` - other printer languages:
+  parser + generator, both subsets that report what they cannot draw as named
+  warnings instead of dropping it silently
+- `components/IPLViewerModal.tsx` - viewer UI (live parse, issues, export, send)
+- `tools/` - `ipl-bridge.mjs` (HTTP-to-TCP, token + printer allow-list),
+  `library-server.mjs` & `print-server.mjs` (shared design library and print
+  queue across PCs), `db-server.mjs` (+ `query-sqlserver.ps1` — rows from SQL
+  Server), `ipl2zpl.mjs`, `labelary-crosscheck.mjs`; every server binds
+  localhost by default with optional `--token`, and answers `/health`
+- `samples/` - sample IPL streams; `docs/` - simulator guide, shop deploy guide
+- `tests/` - vitest: round-trip, viewer, fidelity, golden files, validator,
+  critical-path E2E (no Playwright needed), samples
 
-## Catatan desain
+## Design notes
 
-Viewer me-render langsung dari hasil parse (model elemen netral), bukan lewat model
-`Design` internal - stream IPL pihak ketiga tetap tampil meski tidak sepenuhnya
-ter-mapping, dan command asing dilaporkan di panel issues alih-alih dibuang diam-diam.
+The viewer renders straight from the parse result (a neutral element model),
+not through the internal `Design` model — third-party IPL streams still display
+even when they don't fully map, and foreign commands are reported in the issues
+panel instead of being silently discarded.
 
-## Deploy di toko / LAN
+## Shop / LAN deployment
 
-Lihat [docs/SHOP-DEPLOY.md](docs/SHOP-DEPLOY.md) — single-station zero-config,
-LAN dengan token + allow-list printer, admin query database, backup, troubleshooting.
+See [docs/SHOP-DEPLOY.md](docs/SHOP-DEPLOY.md) — zero-config single station,
+LAN with tokens + printer allow-list, database query admin, backup, troubleshooting.
 
-## Lisensi
+## License
 
-MIT — lihat [LICENSE](LICENSE). Manual printer milik vendor TIDAK disertakan;
-unduh sendiri sesuai [docs/manuals/README.md](docs/manuals/README.md).
+MIT — see [LICENSE](LICENSE). Vendor printer manuals are NOT included;
+download your own copies per [docs/manuals/README.md](docs/manuals/README.md).
